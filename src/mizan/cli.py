@@ -104,10 +104,12 @@ def attack(
 @main.command()
 @click.option("--command", "command", required=True, help="How to start the application, e.g. 'python -m app --port {port}'.")
 @click.option("--data", "data_paths", multiple=True, type=click.Path(), help="File or directory holding the state (repeatable).")
-@click.option("--spec", "spec_path", required=True, type=click.Path(exists=True), help="OpenAPI document.")
+@click.option("--spec", "spec_path", default=None, type=click.Path(exists=True), help="OpenAPI document (optional if the traffic log is already filled).")
 @click.option("--token", "tokens", multiple=True, help="Bearer token of an identity, in the form name=token (repeatable).")
 @click.option("--workdir", default=".", type=click.Path(), help="Where the application runs.")
 @click.option("--out", "out_path", default="mizan-proofs", type=click.Path(), help="Directory for proof bundles.")
+@click.option("--traffic", "traffic_path", default=None, type=click.Path(), help="Traffic log to write (default: next to the proof bundles).")
+@click.option("--workers", default=1, show_default=True, help="How many isolated copies to attack in parallel.")
 @click.option("--keep", is_flag=True, help="Keep the twin workspace.")
 def twin(
     command: str,
@@ -116,6 +118,8 @@ def twin(
     tokens: tuple[str, ...],
     workdir: str,
     out_path: str,
+    traffic_path: str | None,
+    workers: int,
     keep: bool,
 ) -> None:
     """Run the whole thing against a local copy of an application.
@@ -142,9 +146,14 @@ def twin(
         command=_split_command(command),
         workdir=Path(workdir),
         data_paths=resolved_data,
+        data_dir=Path(workdir),
         health_path="/",
     )
-    traffic_path = Path(out_path).parent / "mizan-traffic.jsonl"
+    log_path = Path(traffic_path) if traffic_path else Path(out_path).parent / "mizan-traffic.jsonl"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if traffic_path is None:
+        # A run starts with an empty traffic log.
+        log_path.write_text("", encoding="utf-8")
     engine_instance = Twin(spec, workspace=workspace)
     try:
         engine_instance.start()
@@ -153,28 +162,42 @@ def twin(
         # starts from the same place - including the ones that need an object
         # in a state that only exists before the first request.
         engine_instance.snapshot()
-        proxy = RecordingProxy(engine_instance.base_url, traffic_path)
+        proxy = RecordingProxy(engine_instance.base_url, log_path)
         proxy.start()
         try:
-            learn_from_spec(spec_path, proxy.base_url, tokens=token_values or None)
-            click.echo(f"recorded {len(list(traffic_path.read_text(encoding='utf-8').splitlines()))} requests")
+            if spec_path:
+                learn_from_spec(spec_path, proxy.base_url, tokens=token_values or None)
+            recorded = len(list(log_path.read_text(encoding="utf-8").splitlines())) if log_path.exists() else 0
+            click.echo(f"recorded {recorded} requests")
+            if not recorded:
+                click.echo("no traffic was recorded - use --spec, or browse the application through the proxy first")
+                raise SystemExit(2)
 
-            attributor = None
-            for path in resolved_data:
-                if str(path).lower().endswith((".sqlite", ".sqlite3", ".db")):
-                    attributor = SqliteAttributor(path)
-                    break
+            def build_engine(base_url: str, data: list[Path], worker_twin: Any = None) -> Mizan:
+                attributor = None
+                for path in data:
+                    if str(path).lower().endswith((".sqlite", ".sqlite3", ".db")):
+                        attributor = SqliteAttributor(path)
+                        break
+                return Mizan(
+                    Target(base_url=base_url, principals=identities),
+                    traffic_path=log_path,
+                    spec_path=spec_path,
+                    twin=worker_twin,
+                    attributor=attributor,
+                )
 
-            engine = Mizan(
-                Target(base_url=proxy.base_url, principals=identities),
-                traffic_path=traffic_path,
-                spec_path=spec_path,
-                twin=engine_instance,
-                attributor=attributor,
-            )
+            engine = build_engine(proxy.base_url, resolved_data)
             policy = engine.learn()
             click.echo(f"learned {len(policy.resources)} resources and {len(policy.rules)} rules")
-            violations = engine.attack()
+
+            if workers > 1:
+                # The workers start from the pristine snapshot, not from the
+                # state the learning phase left behind.
+                pristine = engine_instance.snapshot_files() or resolved_data
+                violations = _attack_parallel(spec, workers, workspace, pristine, build_engine, out_path)
+            else:
+                violations = engine.attack()
             directories = engine.write_bundles(violations, out_path)
             _print_report(engine, violations, directories)
         finally:
@@ -183,6 +206,80 @@ def twin(
         engine_instance.stop()
         if not keep:
             shutil.rmtree(workspace, ignore_errors=True)
+
+
+def _attack_parallel(
+    spec: Any,
+    workers: int,
+    workspace: Path,
+    data_paths: list[Path],
+    build_engine: Any,
+    out_path: str,
+) -> list[Any]:
+    """Attack several isolated copies of the application at the same time."""
+    from mizan.parallel import run_parallel
+
+    findings, executed = run_parallel(
+        spec,
+        workers=workers,
+        workspace=workspace.parent / f"{workspace.name}-pool",
+        data_paths=data_paths,
+        build_engine=build_engine,
+    )
+    click.echo(f"attacked with {workers} isolated copies: {', '.join(executed)}")
+    return findings
+
+
+@main.command()
+@click.argument("bundles", type=click.Path(exists=True))
+@click.option("--target", default="http://127.0.0.1:8000", help="Base URL of the API.")
+@click.option("--token", "token", default=None, help="Bearer token of the attacker.")
+def replay(bundles: str, target: str, token: str | None) -> None:
+    """Replay a directory of proof bundles - the CI gate.
+
+    Exits with a non-zero status when an attack still works, so a pull request
+    that reintroduces a fixed vulnerability fails the build.
+    """
+    import os
+    from urllib.parse import urlsplit
+
+    from mizan.regression import Attack, attack_succeeds
+
+    directories = sorted(path for path in Path(bundles).iterdir() if path.is_dir())
+    if not directories:
+        click.echo("no proof bundles found")
+        return
+    reproduced = 0
+    for directory in directories:
+        payload = json.loads((directory / "replay.json").read_text(encoding="utf-8"))
+        steps = payload.get("steps") or []
+        if not steps:
+            continue
+        step = steps[0]
+        principal = payload.get("principal") or "attacker"
+        bearer = token or os.environ.get(f"MIZAN_TOKEN_{principal.upper()}", "")
+        if not bearer:
+            click.echo(f"  ? {directory.name}: no token for {principal}")
+            continue
+        attack = Attack(
+            law=payload["law"],
+            title=payload["title"],
+            method=step["method"],
+            path=urlsplit(step["url"]).path or "/",
+            token_var=f"MIZAN_TOKEN_{principal.upper()}",
+            headers=step.get("headers") or {},
+            body=step.get("body"),
+            expectation="the request is rejected",
+            principal=principal,
+        )
+        if attack_succeeds(attack, bearer, target):
+            reproduced += 1
+            click.echo(f"  ✗ {payload['law']} {payload['title']} - STILL REPRODUCIBLE")
+        else:
+            click.echo(f"  ✓ {payload['law']} {payload['title']} - fixed")
+    if reproduced:
+        raise SystemExit(1)
+    click.echo(f"all {len(directories)} attacks are blocked")
 
 
 def _split_command(command: str) -> list[str]:
