@@ -34,11 +34,21 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install -e .
-      - name: Replay every proof bundle
+      - name: Replay every proven attack
+        env:
+          MIZAN_TARGET: ${{ vars.MIZAN_TARGET }}
         run: |
           set -e
           for bundle in mizan-proofs/*/; do
+            principal=$(python -c "import json,sys;print(json.load(open('$bundle/replay.json')).get('principal','').upper())")
+            if [ -n "$principal" ] && [ -z "${!principal:-}" ]; then
+              echo "no token for $principal, skipping $bundle"
+              continue
+            fi
             echo "::group::$bundle"
-            mizan verify "$bundle" --target "$MIZAN_TARGET" --expect-fixed
+            token_var="MIZAN_TOKEN_$principal"
+            MIZAN_TOKEN="$token_var" mizan verify "$bundle" --target "$MIZAN_TARGET" --expect-fixed
             echo "::endgroup::"
           done
+      - name: The CI gate
+        run: mizan replay mizan-proofs --target "$MIZAN_TARGET"
