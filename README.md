@@ -131,6 +131,27 @@ That is the gate for a pull request: a fixed vulnerability cannot come back.
 > the resource. Run the gate against a twin (`mizan twin --keep`) or a fresh
 > staging deployment, not against a long-lived environment.
 
+## Two ways to attack
+
+| | fixed probes | guided search |
+|---|---|---|
+| what it does | runs the hypotheses a human wrote down | searches for the request that breaks a law |
+| how | one probe per law, over every candidate | UCT over executed actions, a bandit over the templates, and a prior taken from the learned policy |
+| on AuthzBugs-50 | 10/10 breaches, 49.4 requests per app | **10/10 breaches, 20.6 requests per app** |
+| finds a race | yes | yes (two identical requests at the same time, on the caller's own resource) |
+| chains requests | no | yes - identifiers found in a response are offered back to the templates |
+
+```bash
+mizan compare --size 10
+# | mode | average requests | breaches found |
+# | probes | 49.4 | 10 |
+# | guided | 20.6 | 10 |
+```
+
+The search is not a replacement for the probes: the probes are predictable, the
+search explores. Run both - `mizan twin --guided` runs the search, and the
+probes are one command away.
+
 ## The laws
 
 | ID | Law | Severity | Breaks |
