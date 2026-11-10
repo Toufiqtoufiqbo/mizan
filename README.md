@@ -55,13 +55,59 @@ residual norm {'bob': 1.41, 'alice': 1.41}
 
 | ID | Law | Severity | Breaks |
 |---|---|---|---|
-| L1 | Authentication coherence | high | token subject != session user, `alg: none`, wrong audience |
+| L1 | Authentication coherence | critical | the server acts as a different identity than the token claims |
 | L2 | Read authorization (read-taint) | high | IDOR / BOLA on reads |
 | L3 | Write authorization (write-taint) | high | IDOR on writes, writes to somebody else's row |
 | L4 | No authority creation | critical | mass assignment of `role`, `tenant_id`, `owner_id`, `permissions` |
 | L5 | Atomicity (TOCTOU) | high | check-then-act without an atomic guard |
 | L6 | Cardinality and bounds | medium | single-use resources consumed twice |
 | L7 | Path confidentiality | medium | data leaving the system outside the caller's authority |
+
+## AuthzBugs-50 - the benchmark
+
+Nobody publishes a measurement for this class of bugs, so Mizan ships its own.
+**AuthzBugs-50** is 50 applications with exactly one labelled vulnerability each
+(10 per law), plus a *patched twin* of every application.
+
+```bash
+mizan benchmark --size 50 --controls 5 --out authzbugs-report
+```
+
+| metric | value |
+|---|---|
+| detection rate | **100%** (50/50) |
+| false positives on patched twins | **0** / 55 apps |
+| unexpected findings on buggy apps | 0 |
+| regression tests valid | **100%** (290 attacks reproduce before the fix, 290 are blocked after it) |
+
+The third metric is the one that matters for trust: an attack that reproduces on
+the vulnerable application and is rejected by the patched one proves that both
+the finding *and* the fix are real.
+
+## Proof bundles and regression tests
+
+Every finding is a directory:
+
+```
+mizan-proofs/L4-alice-created-authority-by-writing-role/
+    replay.json        # the exact requests, in order
+    violation.md       # which law broke, and why
+    evidence.json      # machine-readable evidence
+    matrix.json        # observed vs permitted access matrix
+    patch.diff         # the shape of the fix (a template, adapted to your code)
+    regression.test    # a pytest that fails today and passes after the fix
+```
+
+The regression test is standard pytest and talks to the target through the
+environment, so it drops into any CI:
+
+```bash
+mizan regress mizan-proofs/L4-alice-created-authority-by-writing-role --out tests/
+
+MIZAN_TARGET=https://staging.example.com \
+MIZAN_TOKEN_ALICE=... \
+pytest tests/test_mizan_l4.py
+```
 
 ## Workflow
 
@@ -98,6 +144,19 @@ Ways to produce it:
 * **The demo app** - `mizan.demo.app.DemoApp` shows the smallest possible
   implementation.
 
+## Recording the traffic
+
+`mizan.recorder.Recorder` is a WSGI middleware that writes the traffic log:
+
+```python
+from mizan.recorder import Recorder
+
+application = Recorder(app, "traffic.jsonl")
+```
+
+For applications you cannot wrap, `mizan/recorder.py` also ships a mitmproxy
+addon (`MITM_ADDON`) with the same output format.
+
 ## Using the law checks inside Schemathesis
 
 ```bash
@@ -128,8 +187,9 @@ no mocks, and the vulnerabilities are genuine.
 
 ## Status
 
-Early, but the vertical slice works end to end: learn -> attack -> prove ->
-replay. See `ROADMAP.md` for what comes next.
+The vertical slice works end to end: learn -> attack -> prove -> regress. Five of
+the seven laws are implemented and measured; L6 is partially covered and L7 is
+not yet. See `ROADMAP.md` for what comes next.
 
 ## License
 
