@@ -188,22 +188,43 @@ class Mizan:
 
     # -- attacking --------------------------------------------------------- #
 
-    def attack(self) -> list[Violation]:
+    def attack(self, *, groups: list[str] | None = None) -> list[Violation]:
         """Probe the learned policy and return the proven violations."""
         violations: list[Violation] = []
-        # Races run first: every other probe mutates state, and a probe that
-        # changes the state of a resource would hide a race on it. (With a local
-        # twin each probe would get a fresh snapshot instead.)
-        violations.extend(self._probe_races())
-        violations.extend(self._probe_identity_coherence())
-        violations.extend(self._probe_read_authorization())
-        violations.extend(self._probe_write_authorization())
-        violations.extend(self._probe_authority_creation())
-
-        # The data-level view of the same run.
-        analyzer = TaintAnalyzer(self.policy)
-        violations.extend(analyzer.analyze(self.ledger.events))
+        for name, probe in self.probe_groups():
+            if groups is not None and name not in groups:
+                continue
+            violations.extend(probe())
         return _dedupe(violations)
+
+    def probe_names(self) -> list[str]:
+        """The names of the probes, in the order they run."""
+        return [name for name, _probe in self.probe_groups()]
+
+    def attack_groups(self, groups: list[str]) -> list[Violation]:
+        """Run only the named probes."""
+        return self.attack(groups=groups)
+
+    def probe_groups(self) -> list[tuple[str, Any]]:
+        """The probes of the engine.
+
+        Races run first: every other probe mutates state, and a probe that
+        changes the state of a resource would hide a race on it. (With a local
+        twin each probe gets a fresh snapshot instead.)
+        """
+        return [
+            ("L5", self._probe_races),
+            ("L1", self._probe_identity_coherence),
+            ("L2", self._probe_read_authorization),
+            ("L3", self._probe_write_authorization),
+            ("L4", self._probe_authority_creation),
+            ("T", self._probe_data_view),
+        ]
+
+    def _probe_data_view(self) -> list[Violation]:
+        """The data-level view: what the ledger says about the writes."""
+        analyzer = TaintAnalyzer(self.policy)
+        return analyzer.analyze(self._ledger_events())
 
     def _is_testable(self, principal: Principal) -> bool:
         """Whether it makes sense to attack with this identity.
@@ -457,7 +478,7 @@ class Mizan:
                     sentinel = _sentinel(field_name)
                     body = dict(record.body)
                     body[field_name] = sentinel
-                    before = len(self.ledger.events)
+                    before = len(self._ledger_events())
                     url = self._url(record.path)
                     session = self.target.session_for(principal)
                     response = self._request(session, method, url, json=body, timeout=self.target.timeout)
