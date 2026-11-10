@@ -6,9 +6,22 @@
 - [x] Write taint: ledger, Postgres log parser, cross-identity write detection
 - [x] Authority creation (mass assignment) detection
 - [x] Deterministic race harness (L5/L6)
-- [x] Proof bundles with replayable steps
+- [x] Identity coherence (L1): the token claims one subject, the server acts as another
+- [x] Proof bundles with replayable steps, evidence and the access-matrix diff
+- [x] Patch suggestions: the shape of the fix per law, as a diff template
+- [x] Regression tests: a pytest per finding that fails before the fix and passes after it
 - [x] Schemathesis integration (`SCHEMATHESIS_HOOKS=mizan.schemathesis_hooks`)
-- [x] Vulnerable demo app + end-to-end tests (15 passing)
+- [x] **AuthzBugs-50**: 50 labelled applications, 5 laws x 10, with patched twins
+- [x] End-to-end tests (34 passing)
+
+### Measured on AuthzBugs-50
+
+| metric | value |
+|---|---|
+| detection rate | 100% (50/50) |
+| false positives on patched twins | 0 / 55 apps |
+| unexpected findings on buggy apps | 0 |
+| regression tests valid | 100% (reproduce before the fix, blocked after it) |
 
 ## Next (v0.2 - the twin)
 
@@ -16,21 +29,20 @@
       + lockfiles + seeds, with mocked third parties (IdP, payments, email)
 - [ ] **Snapshot & restore**: Postgres snapshot between probes so every probe
       starts from the same state (removes the ordering constraints in the engine)
-- [ ] **Patch engine**: propose a fix for each finding and validate it inside the
-      twin; ship it as `patch.diff` + a regression test
 - [ ] **Attack regression**: re-run every proven attack on each pull request
 
 ## Later (v0.3 - the rest of the laws)
 
-- [ ] **L1** - authentication coherence (token subject vs session vs database)
 - [ ] **L7** - path confidentiality (cache, queue, logs, metrics)
+- [ ] **L6** - full cardinality coverage (single-use tokens, bounded counters)
 - [ ] **Process mining** - derive the state machine from event logs and report
-      workflow violations (shipping before payment, etc.)
+      workflow violations (shipping before payment, approving twice, ...)
 - [ ] **Authorization matrix** - subject x resource x action, mined from traces
 - [ ] **Guided search** - MCTS over actions with the law residual as the fitness
       function, instead of the current template-driven probes
-- [ ] **The benchmark** - `AuthzBugs-100`: 100 labelled authorization bugs with
-      PoCs, patches and regression tests, published openly
+- [ ] **LLM planner** - suggest schema-valid actions that break a law
+- [ ] **Larger benchmark** - extend AuthzBugs-50 to 100+ applications in several
+      stacks (Node, Python, Java, Go) and publish the corpus openly
 
 ## Non-goals
 
