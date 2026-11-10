@@ -7,6 +7,7 @@ check-then-act and the race is now a deterministic artifact.
 
 from __future__ import annotations
 
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -73,9 +74,16 @@ def run_concurrently(calls: list[Callable[[], Any]], timeout: float = 15.0) -> l
 
 
 def looks_single_use(path: str) -> bool:
-    """Whether the operation's semantics are naturally one-shot."""
+    """Whether the operation's semantics are naturally one-shot.
+
+    The hints are matched on word boundaries: `/users/me` is not a single-use
+    operation, even though it contains the letters of `use`.
+    """
     lowered = path.lower()
-    return any(hint in lowered for hint in SINGLE_USE_HINTS)
+    for hint in SINGLE_USE_HINTS:
+        if re.search(rf"(^|[/_.\-]){re.escape(hint)}($|[/_.\-])", lowered):
+            return True
+    return False
 
 
 def detect_race(
