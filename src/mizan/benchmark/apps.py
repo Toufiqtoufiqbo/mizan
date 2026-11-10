@@ -20,6 +20,7 @@ from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
 import socketserver
 
 from mizan.taint import WriteEvent
+from mizan.tokens import make_token
 from mizan.traffic import TrafficRecord, infer_resource, to_template
 
 #: How long the vulnerable approve handler pauses between the check and the
@@ -52,14 +53,6 @@ DETECTABLE = tuple(BUGS)
 def _encode(data: dict[str, Any]) -> str:
     raw = json.dumps(data, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-
-def make_token(subject: str, role: str = "user") -> str:
-    """A JWT-shaped token. It is signed with a fake signature - Mizan only
-    reads the claims, it never needs the secret."""
-    header = _encode({"alg": "HS256", "typ": "JWT"})
-    payload = _encode({"sub": subject, "role": role})
-    return f"{header}.{payload}.mizan-signature"
 
 
 @dataclass
