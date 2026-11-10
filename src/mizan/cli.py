@@ -11,7 +11,7 @@ from typing import Any
 import click
 import requests
 
-from mizan.core import LAWS, Principal
+from mizan.core import LAWS, Principal, Step
 from mizan.engine import Mizan, Target
 from mizan.proof import ProofBundle
 
@@ -101,14 +101,108 @@ def attack(
 
 
 @main.command()
+@click.option("--size", default=50, show_default=True, help="Number of labelled applications.")
+@click.option("--controls", default=5, show_default=True, help="Number of patched control applications.")
+@click.option("--limit", default=None, type=int, help="Run only the first N applications (for a quick check).")
+@click.option("--out", "out_path", default="authzbugs-report", type=click.Path(), help="Where to write the report.")
+def benchmark(size: int, controls: int, limit: int | None, out_path: str) -> None:
+    """Run the AuthzBugs benchmark and report detection rate and false positives."""
+    from mizan.benchmark import build_suite, describe, run_suite
+
+    suite = build_suite(size, controls=controls)
+    click.echo(describe(suite))
+    click.echo("")
+    report = run_suite(suite, limit=limit)
+    report.write(out_path)
+    click.echo(
+        f"Detection rate: {report.detection_rate:.0%} "
+        f"({report.total_detected}/{report.total_expected}) | "
+        f"false positives on patched apps: {report.false_positives}/{report.control_count}"
+    )
+    click.echo(f"Report written to {out_path}")
+
+
+@main.command()
+@click.argument("bundle", type=click.Path(exists=True))
+@click.option("--out", "out_path", default="tests", type=click.Path(), help="Where to write the test.")
+def regress(bundle: str, out_path: str) -> None:
+    """Turn a proof bundle into a regression test."""
+    import json as json_module
+
+    from mizan.core import Violation
+    from mizan.regression import render_test
+
+    payload = json_module.loads((Path(bundle) / "replay.json").read_text(encoding="utf-8"))
+    violation = Violation(
+        law=payload["law"],
+        title=payload["title"],
+        detail=payload.get("detail", ""),
+        severity=payload.get("severity", "high"),
+        principal=payload.get("principal"),
+        resource=payload.get("resource"),
+        action=payload.get("action"),
+        steps=[
+            Step(**step) for step in payload.get("steps", [])
+        ],
+    )
+    directory = Path(out_path)
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"test_mizan_{violation.law.lower()}.py"
+    target.write_text(render_test(violation), encoding="utf-8")
+    click.echo(f"Regression test written to {target}")
+    click.echo("Run it with:")
+    click.echo(f"  MIZAN_TARGET=https://your-target MIZAN_TOKEN_{violation.principal.upper()}=... pytest {target}")
+
+
+@main.command()
 @click.argument("bundle", type=click.Path(exists=True))
 @click.option("--target", default="http://127.0.0.1:8000", help="Base URL of the API.")
-def verify(bundle: str, target: str) -> None:
+@click.option("--token", "token", default=None, help="Bearer token of the attacker.")
+@click.option("--expect-fixed", is_flag=True, help="Fail unless the attack is now rejected.")
+def verify(bundle: str, target: str, token: str | None, expect_fixed: bool) -> None:
     """Replay a proof bundle against a live target."""
     proof = ProofBundle.load(bundle)
+    if expect_fixed:
+        _verify_fixed(bundle, target, token)
+        return
     session = requests.Session()
     result = proof.verify(session)
     click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+
+
+def _verify_fixed(bundle: str, target: str, token: str | None) -> None:
+    """Check that the attack behind a bundle no longer works."""
+    import os
+    from urllib.parse import urlsplit
+
+    from mizan.regression import Attack, attack_succeeds
+
+    payload = json.loads((Path(bundle) / "replay.json").read_text(encoding="utf-8"))
+    steps = payload.get("steps") or []
+    if not steps:
+        click.echo("the bundle has no reproduction steps")
+        raise SystemExit(2)
+    step = steps[0]
+    principal = payload.get("principal") or "attacker"
+    token = token or os.environ.get(f"MIZAN_TOKEN_{principal.upper()}", "")
+    attack = Attack(
+        law=payload["law"],
+        title=payload["title"],
+        method=step["method"],
+        path=urlsplit(step["url"]).path or "/",
+        token_var=f"MIZAN_TOKEN_{principal.upper()}",
+        headers=step.get("headers") or {},
+        body=step.get("body"),
+        expectation="the request is rejected",
+        principal=principal,
+    )
+    if not token:
+        click.echo(f"no token given: set --token or MIZAN_TOKEN_{principal.upper()}")
+        raise SystemExit(2)
+    if attack_succeeds(attack, token, target):
+        click.echo(f"STILL VULNERABLE - {payload['law']} {payload['title']}")
+        raise SystemExit(1)
+    click.echo(f"fix confirmed - {payload['law']} {payload['title']} is no longer reproducible")
 
 
 # --------------------------------------------------------------------------- #
