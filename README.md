@@ -101,6 +101,36 @@ Two things make this possible without touching the application:
 * the **data-level attribution** - the difference between two snapshots of the
   database is the write, attributed to the identity that made the request.
 
+### Attacking in parallel
+
+`--workers N` starts N isolated copies of the application, each with its own
+copy of the data and its own port, and splits the probes between them:
+
+```bash
+mizan twin ... --workers 4
+# attacked with 4 isolated copies: L5, L2, L4, L1, L3, T
+```
+
+The result is the same as a serial run - the copies are isolated, so a probe
+cannot hide a finding from another one.
+
+### The CI gate
+
+Every proof bundle carries the attack that found it. `mizan replay` replays
+them all against a target and fails when an attack still works:
+
+```bash
+mizan replay mizan-proofs --target https://staging.example.com
+#   ✗ L4 alice created authority by writing `role` - STILL REPRODUCIBLE
+#   ✓ L2 bob read an object owned by alice - fixed
+```
+
+That is the gate for a pull request: a fixed vulnerability cannot come back.
+
+> A race (L5/L6) needs a fresh instance to reproduce - the first replay consumes
+> the resource. Run the gate against a twin (`mizan twin --keep`) or a fresh
+> staging deployment, not against a long-lived environment.
+
 ## The laws
 
 | ID | Law | Severity | Breaks |
@@ -176,8 +206,21 @@ mizan verify mizan-proofs/L3-bob-wrote-into-an-object-owned-by-alice
 
 ## Where the ledger comes from
 
-The write ledger is the one input Mizan cannot invent. It is a JSONL file of
-attributed writes:
+The write ledger is the one input Mizan cannot invent. There are three ways to
+get one, and none of them requires a container:
+
+**1. The data itself (no cooperation needed).** `mizan.attribution.SqliteAttributor`
+compares two snapshots of the database around a request; the difference is the
+write, attributed to the identity that made it. This is what the twin uses.
+
+**2. Postgres.** `mizan.postgres_audit.PostgresAuditor` installs an audit table
+and a trigger on every table. The identity travels in `application_name`:
+
+```sql
+SET application_name = 'mizan:' || current_user_id;
+```
+
+**3. The application itself.** A ledger is a JSONL file of attributed writes:
 
 ```json
 {"ts": 1794311241.68, "request_id": "req-8", "principal": "alice",
@@ -185,9 +228,7 @@ attributed writes:
  "columns": {"status": "paid"}, "source_fields": ["status"], "row_owner": "alice"}
 ```
 
-Ways to produce it:
-
-* **Postgres** - set `log_statement = 'all'` and tag connections with
+* **Postgres logs** - set `log_statement = 'all'` and tag connections with
   `SET application_name = 'mizan:<principal>'`. `mizan.taint.PostgresLogParser`
   turns the log into ledger events.
 * **An ORM hook / middleware** - write one line per transaction.
