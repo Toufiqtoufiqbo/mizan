@@ -12,7 +12,11 @@
 - [x] Regression tests: a pytest per finding that fails before the fix and passes after it
 - [x] Schemathesis integration (`SCHEMATHESIS_HOOKS=mizan.schemathesis_hooks`)
 - [x] **AuthzBugs-50**: 50 labelled applications, 5 laws x 10, with patched twins
-- [x] End-to-end tests (47 passing)
+- [x] **Guided search**: UCT over executed actions, a bandit over the templates,
+      a prior taken from the learned policy, concurrent pairs for races and
+      identifiers chained from responses - 10/10 breaches with 20.6 requests per
+      application, against 49.4 for the fixed probes
+- [x] End-to-end tests (57 passing)
 
 ### Measured on AuthzBugs-50
 
@@ -52,9 +56,11 @@
 - [ ] **Process mining** - derive the state machine from event logs and report
       workflow violations (shipping before payment, approving twice, ...)
 - [ ] **Authorization matrix** - subject x resource x action, mined from traces
-- [ ] **Guided search** - MCTS over actions with the law residual as the fitness
-      function, instead of the current template-driven probes
-- [ ] **LLM planner** - suggest schema-valid actions that break a law
+- [ ] **LLM planner** - suggest schema-valid actions that break a law, next to
+      the UCT search that explores blindly today
+- [ ] **Deeper search** - replay the path of a branch instead of evaluating
+      every action in the current state, so the search can rely on the effects
+      of the steps before it
 - [ ] **Larger benchmark** - extend AuthzBugs-50 to 100+ applications in several
       stacks (Node, Python, Java, Go) and publish the corpus openly
 
