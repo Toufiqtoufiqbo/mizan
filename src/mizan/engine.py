@@ -1,4 +1,4 @@
-"""The Mizan engine: learn the application's laws, then try to break them.
+﻿"""The Mizan engine: learn the application's laws, then try to break them.
 
 The flow is deliberately small:
 
@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlsplit
 
 import requests
 
@@ -81,17 +82,26 @@ class Mizan:
         traffic_path: str | Path | None = None,
         ledger_path: str | Path | None = None,
         spec_path: str | Path | None = None,
+        twin: Any | None = None,
+        attributor: Any | None = None,
     ) -> None:
         self.target = target
         self.policy = policy or Policy()
         self.traffic_path = Path(traffic_path) if traffic_path else None
         self.ledger_path = Path(ledger_path) if ledger_path else None
         self.spec_path = Path(spec_path) if spec_path else None
+        #: An optional twin: a disposable copy of the application with a
+        #: restorable state. Every probe starts from the same state.
+        self.twin = twin
+        #: An optional data-level attributor that derives writes from the
+        #: database itself, so the application needs no instrumentation.
+        self.attributor = attributor
         self.traffic: TrafficLog = TrafficLog(self.traffic_path)
         self.ledger: Ledger = Ledger(self.ledger_path)
         self.observed = AccessMatrix()
         self.permitted = AccessMatrix()
         self.observed_principals: set[str] = set()
+        self._attributed_events: list[WriteEvent] = []
 
     # -- learning ---------------------------------------------------------- #
 
@@ -220,6 +230,7 @@ class Mizan:
     def _probe_read_authorization(self) -> list[Violation]:
         """L2 - can one principal read another principal's object?"""
         violations: list[Violation] = []
+        self._restore()
         examples = self._examples()
         for (method, template), records in examples.items():
             if method not in {"GET", "HEAD"}:
@@ -236,7 +247,7 @@ class Mizan:
                         continue
                     url = self._url(record.path)
                     session = self.target.session_for(attacker)
-                    response = session.get(url, timeout=self.target.timeout)
+                    response = self._request(session, "GET", url, timeout=self.target.timeout)
                     if not (200 <= response.status_code < 300):
                         continue
                     body = _json(response)
@@ -284,6 +295,7 @@ class Mizan:
     def _probe_identity_coherence(self) -> list[Violation]:
         """L1 - does the server act as the identity the token claims?"""
         violations: list[Violation] = []
+        self._restore()
         endpoints = self._identity_endpoints()
         if not endpoints:
             return violations
@@ -295,7 +307,7 @@ class Mizan:
                 continue
             for method, template, url in endpoints:
                 session = self.target.session_for(principal)
-                response = session.request(method, url, timeout=self.target.timeout)
+                response = self._request(session, method, url, timeout=self.target.timeout)
                 if not (200 <= response.status_code < 300):
                     continue
                 body = _json(response)
@@ -351,6 +363,7 @@ class Mizan:
     def _probe_write_authorization(self) -> list[Violation]:
         """L3 - can one principal write into another principal's object?"""
         violations: list[Violation] = []
+        self._restore()
         seen: set[tuple[str, str]] = set()
         examples = self._examples()
         for (method, template), records in examples.items():
@@ -372,9 +385,15 @@ class Mizan:
                     if (attacker.id, resource.key) in seen:
                         continue
                     seen.add((attacker.id, resource.key))
+                    # The body is perturbed on purpose: replaying the recorded
+                    # values would change nothing, and a write that changes
+                    # nothing is invisible in the data.
+                    probe_body = _perturb(body)
                     before = len(self._ledger_events())
                     session = self.target.session_for(attacker)
-                    response = session.request(method, url, json=body, timeout=self.target.timeout)
+                    response = self._request(
+                        session, method, url, json=probe_body, timeout=self.target.timeout
+                    )
                     new_events = self._ledger_events()[before:]
                     tainted = [event for event in new_events if event.principal == attacker.id]
                     if not tainted:
@@ -424,6 +443,7 @@ class Mizan:
     def _probe_authority_creation(self) -> list[Violation]:
         """L4 - can a caller mint authority for itself?"""
         violations: list[Violation] = []
+        self._restore()
         for principal in self.target.principals:
             if principal.is_privileged() or not self._is_testable(principal):
                 continue
@@ -440,7 +460,7 @@ class Mizan:
                     before = len(self.ledger.events)
                     url = self._url(record.path)
                     session = self.target.session_for(principal)
-                    response = session.request(method, url, json=body, timeout=self.target.timeout)
+                    response = self._request(session, method, url, json=body, timeout=self.target.timeout)
                     new_events = self._ledger_events()[before:]
                     applied = [
                         event
@@ -488,6 +508,7 @@ class Mizan:
     def _probe_races(self) -> list[Violation]:
         """L5 / L6 - concurrent identical actions that must not both succeed."""
         violations: list[Violation] = []
+        self._restore()
         for (method, template), records in self._examples().items():
             if method != "POST":
                 continue
@@ -504,7 +525,7 @@ class Mizan:
                 before = list(self._ledger_events())
 
                 def call() -> requests.Response:
-                    return session.request(method, candidate_url, json=body, timeout=self.target.timeout)
+                    return self._request(session, method, candidate_url, json=body, timeout=self.target.timeout)
 
                 responses = run_concurrently([call, call])
                 after = self._ledger_events()
@@ -570,8 +591,50 @@ class Mizan:
             return path
         return self.target.base_url.rstrip("/") + "/" + path.lstrip("/")
 
+    def _restore(self) -> None:
+        """Bring the application back to the state it had before the probes."""
+        if self.twin is not None:
+            self.twin.restore()
+
+    def _principal_of(self, session: requests.Session) -> str:
+        header = session.headers.get("Authorization", "")
+        if header.startswith("Bearer "):
+            claims = decode_token(header[len("Bearer ") :].strip())
+            if claims and claims.subject:
+                return claims.subject
+        return "unknown"
+
+    def _request(self, session: requests.Session, method: str, url: str, **kwargs: Any) -> requests.Response:
+        """Send a request and attribute what it changed.
+
+        With an attributor attached, the database is compared before and after
+        the request, and the difference becomes a write event. The application
+        needs no instrumentation for this.
+        """
+        before = self.attributor.snapshot() if self.attributor is not None else None
+        response = session.request(method, url, **kwargs)
+        if before is not None:
+            payload = kwargs.get("json")
+            source_fields = set(payload) if isinstance(payload, dict) else set()
+            events = self.attributor.diff(
+                before,
+                principal=self._principal_of(session),
+                method=method,
+                path=urlsplit(url).path,
+                source_fields=source_fields,
+            )
+            self._attributed_events.extend(events)
+        return response
+
     def _ledger_events(self) -> list[WriteEvent]:
-        """Reload the ledger so probes see writes produced by the application."""
+        """The write events the engine knows about.
+
+        When an attributor is attached, the database is the source of truth and
+        the ledger file is ignored - otherwise every write would be counted
+        twice.
+        """
+        if self.attributor is not None:
+            return list(self._attributed_events)
         if self.ledger_path is not None and self.ledger_path.exists():
             self.ledger = Ledger.load(self.ledger_path)
             return self.ledger.events
@@ -654,6 +717,25 @@ class Mizan:
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
+
+
+def _perturb(body: Any) -> Any:
+    """Change the values of a request body, so the write becomes visible."""
+    if not isinstance(body, dict):
+        return body
+    perturbed: dict[str, Any] = {}
+    for key, value in body.items():
+        if isinstance(value, str):
+            perturbed[key] = f"mizan-probe-{key}"
+        elif isinstance(value, bool):
+            perturbed[key] = not value
+        elif isinstance(value, int):
+            perturbed[key] = value + 1
+        elif isinstance(value, float):
+            perturbed[key] = value + 1.0
+        else:
+            perturbed[key] = value
+    return perturbed
 
 
 def _json(response: Any) -> Any:
