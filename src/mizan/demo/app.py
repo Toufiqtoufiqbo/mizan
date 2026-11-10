@@ -23,6 +23,7 @@ from typing import Any
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
 
 from mizan.taint import WriteEvent
+from mizan.tokens import make_token
 from mizan.traffic import TrafficRecord, infer_resource, to_template
 
 SEED_USERS = [
@@ -36,9 +37,9 @@ SEED_ORDERS = [
     ("o3", "alice", "pending", 300),
 ]
 SEED_TOKENS = [
-    ("tok-alice", "alice"),
-    ("tok-bob", "bob"),
-    ("tok-admin", "root"),
+    (make_token("alice", "user"), "alice"),
+    (make_token("bob", "user"), "bob"),
+    (make_token("root", "admin"), "root"),
 ]
 
 #: How long the approve handler pauses between the check and the write. A real
@@ -211,6 +212,8 @@ class DemoApp:
             return 200, self._user_payload(principal)
         if method == "PATCH" and path == "/users/me":
             return self._patch_me(body, principal, request_id)
+        if method == "GET" and path == "/orders":
+            return self._list_orders()
         order_match = re.match(r"^/orders/([^/]+)$", path)
         if order_match and method == "GET":
             return self._get_order(order_match.group(1))
@@ -252,6 +255,21 @@ class DemoApp:
         if row is None:
             return {}
         return {"id": row["id"], "name": row["name"], "role": row["role"], "owner_id": row["id"]}
+
+    def _list_orders(self) -> tuple[int, Any]:
+        # A listing endpoint, so that a client (and Mizan) can discover the
+        # identifiers of the objects it is supposed to work with.
+        connection = self._connect()
+        try:
+            rows = connection.execute("SELECT * FROM orders ORDER BY id").fetchall()
+        finally:
+            connection.close()
+        return 200, {
+            "orders": [
+                {"id": row["id"], "owner_id": row["owner_id"], "status": row["status"], "amount": row["amount"]}
+                for row in rows
+            ]
+        }
 
     def _get_order(self, order_id: str) -> tuple[int, Any]:
         # BUG (L2): the owner is never checked.
