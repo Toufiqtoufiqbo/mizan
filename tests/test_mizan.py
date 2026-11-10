@@ -13,6 +13,7 @@ import pytest
 import requests
 
 from mizan import Mizan, Policy, Principal, Rule, Target, WriteEvent
+from mizan.tokens import make_token
 from mizan.core import AccessMatrix
 from mizan.demo.app import DemoApp, serve
 from mizan.proof import ProofBundle
@@ -38,7 +39,7 @@ def demo(tmp_path: Path):
     base_url = f"http://127.0.0.1:{port}"
 
     alice = requests.Session()
-    alice.headers["Authorization"] = "Bearer tok-alice"
+    alice.headers["Authorization"] = f"Bearer {make_token('alice')}"
     alice.get(f"{base_url}/me")
     alice.get(f"{base_url}/orders/o1")
     alice.post(f"{base_url}/orders/o1/approve")
@@ -46,7 +47,7 @@ def demo(tmp_path: Path):
     alice.patch(f"{base_url}/users/me", json={"name": "Alice Updated"})
 
     bob = requests.Session()
-    bob.headers["Authorization"] = "Bearer tok-bob"
+    bob.headers["Authorization"] = f"Bearer {make_token('bob')}"
     bob.get(f"{base_url}/me")
     bob.get(f"{base_url}/orders/o2")
 
@@ -56,9 +57,9 @@ def demo(tmp_path: Path):
             "traffic": traffic_path,
             "ledger": ledger_path,
             "principals": [
-                Principal(id="alice", roles=("user",), token="tok-alice"),
-                Principal(id="bob", roles=("user",), token="tok-bob"),
-                Principal(id="root", roles=("admin",), token="tok-admin"),
+                Principal(id="alice", roles=("user",), token=make_token("alice")),
+                Principal(id="bob", roles=("user",), token=make_token("bob")),
+                Principal(id="root", roles=("admin",), token=make_token("root", "admin")),
             ],
         }
     finally:
