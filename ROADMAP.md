@@ -12,7 +12,7 @@
 - [x] Regression tests: a pytest per finding that fails before the fix and passes after it
 - [x] Schemathesis integration (`SCHEMATHESIS_HOOKS=mizan.schemathesis_hooks`)
 - [x] **AuthzBugs-50**: 50 labelled applications, 5 laws x 10, with patched twins
-- [x] End-to-end tests (34 passing)
+- [x] End-to-end tests (47 passing)
 
 ### Measured on AuthzBugs-50
 
@@ -23,12 +23,20 @@
 | unexpected findings on buggy apps | 0 |
 | regression tests valid | 100% (reproduce before the fix, blocked after it) |
 
-## Next (v0.2 - the twin)
+## Next (v0.2 - the twin, without Docker)
 
-- [ ] **Local twin**: generate a runnable environment from `Dockerfile`/`compose`
-      + lockfiles + seeds, with mocked third parties (IdP, payments, email)
-- [ ] **Snapshot & restore**: Postgres snapshot between probes so every probe
-      starts from the same state (removes the ordering constraints in the engine)
+- [x] **Twin**: start the application as a local process on a free port, wait
+      until it answers, snapshot and restore its state
+- [x] **Recording proxy**: the traffic log without changing the application
+- [x] **Data-level attribution**: the write ledger from the difference between
+      two snapshots of the database - no instrumentation, no triggers
+- [x] **Restore between probes**: the findings no longer depend on the order
+      the probes ran in (proven by a test)
+- [x] **Active learning**: discover the endpoints and their identifiers from
+      the OpenAPI document, then exercise them
+- [ ] **Postgres attribution**: the same idea for Postgres - a temporary audit
+      table with a trigger, or `pg_dump` snapshots
+- [ ] **Parallel probes**: with a restorable state, probes can run at the same time
 - [ ] **Attack regression**: re-run every proven attack on each pull request
 
 ## Later (v0.3 - the rest of the laws)
