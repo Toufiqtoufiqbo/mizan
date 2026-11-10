@@ -1,2 +1,136 @@
-# mizan
-Law-driven API security testing: write-side taint, authority creation, TOCTOU races and reproducible proof bundles. Built on Schemathesis.
+# Mizan
+
+> **لا نبحث عن ثغرات… نكسر قوانين تطبيقك.**
+
+Mizan is a law-driven API security tool. It learns the security laws of an
+application from the application's own normal behaviour, then tries to break
+them, and reports only what it can prove.
+
+It is built **on top of [Schemathesis](https://github.com/schemathesis/schemathesis)**
+(MIT): Schemathesis already explores APIs with Hypothesis, performs stateful
+testing, and covers the *read* side of object-level authorization. Mizan adds
+the part that is still missing in the ecosystem:
+
+| Layer | What Mizan adds |
+|---|---|
+| **Write side** (L3) | Attributes every database write to the principal that caused it and checks it against the row's owner - cross-identity writes (IDOR on write) are invisible to HTTP-level scanners |
+| **Authority** (L4) | Detects mass assignment: a client that may set `role`, `tenant_id`, `owner_id`, `permissions`, ... |
+| **Concurrency** (L5, L6) | Releases two identical requests through a barrier and proves a check-then-act race |
+| **Proof** | Every finding ships as a replayable bundle: the exact requests, the evidence, the matrix diff, an optional patch and a regression test |
+| **Algebra** | Observed access matrix vs. permitted access matrix; the residual and its norm show how far each identity strayed |
+
+## Install
+
+```bash
+pip install -e .
+```
+
+## Try it in 30 seconds
+
+```bash
+mizan demo
+```
+
+This starts the bundled deliberately vulnerable API, produces normal traffic
+against it, learns its laws, attacks them and writes a proof bundle per
+finding:
+
+```
+Learned 3 resources, 6 rules from 7 traffic records and 3 writes
+
+Found 7 proven violation(s):
+  [high    ] L5 The same state transition was applied twice
+  [high    ] L2 bob read an object owned by alice
+  [high    ] L2 alice read an object owned by bob
+  [high    ] L3 bob wrote into an object owned by alice
+  [high    ] L3 alice wrote into an object owned by bob
+  [critical] L4 alice created authority by writing `role`
+  [critical] L4 bob created authority by writing `role`
+
+Access matrix: 8 observed cells, 4 outside the permitted space,
+residual norm {'bob': 1.41, 'alice': 1.41}
+```
+
+## The laws
+
+| ID | Law | Severity | Breaks |
+|---|---|---|---|
+| L1 | Authentication coherence | high | token subject != session user, `alg: none`, wrong audience |
+| L2 | Read authorization (read-taint) | high | IDOR / BOLA on reads |
+| L3 | Write authorization (write-taint) | high | IDOR on writes, writes to somebody else's row |
+| L4 | No authority creation | critical | mass assignment of `role`, `tenant_id`, `owner_id`, `permissions` |
+| L5 | Atomicity (TOCTOU) | high | check-then-act without an atomic guard |
+| L6 | Cardinality and bounds | medium | single-use resources consumed twice |
+| L7 | Path confidentiality | medium | data leaving the system outside the caller's authority |
+
+## Workflow
+
+```bash
+# 1. Learn the laws from normal traffic and a ledger of attributed writes
+mizan learn --traffic traffic.jsonl --ledger ledger.jsonl --out mizan-policy.json
+
+# 2. Attack them
+mizan attack --target http://127.0.0.1:8000 \
+             --traffic traffic.jsonl --ledger ledger.jsonl \
+             --spec openapi.json --out mizan-proofs
+
+# 3. Replay any finding against a live target
+mizan verify mizan-proofs/L3-bob-wrote-into-an-object-owned-by-alice
+```
+
+## Where the ledger comes from
+
+The write ledger is the one input Mizan cannot invent. It is a JSONL file of
+attributed writes:
+
+```json
+{"ts": 1794311241.68, "request_id": "req-8", "principal": "alice",
+ "method": "PUT", "path": "/orders/o1", "table": "orders", "row_id": "o1",
+ "columns": {"status": "paid"}, "source_fields": ["status"], "row_owner": "alice"}
+```
+
+Ways to produce it:
+
+* **Postgres** - set `log_statement = 'all'` and tag connections with
+  `SET application_name = 'mizan:<principal>'`. `mizan.taint.PostgresLogParser`
+  turns the log into ledger events.
+* **An ORM hook / middleware** - write one line per transaction.
+* **The demo app** - `mizan.demo.app.DemoApp` shows the smallest possible
+  implementation.
+
+## Using the law checks inside Schemathesis
+
+```bash
+export SCHEMATHESIS_HOOKS=mizan.schemathesis_hooks
+export MIZAN_POLICY=mizan-policy.json
+export MIZAN_LEDGER=ledger.jsonl
+schemathesis run http://127.0.0.1:8000/openapi.json --checks MizanLawCheck
+```
+
+## Proof bundle
+
+```
+mizan-proofs/L4-alice-created-authority-by-writing-role/
+    replay.json        # the exact requests, in order
+    violation.md       # which law broke, and why
+    evidence.json      # machine-readable evidence
+    matrix.json        # observed vs permitted access matrix
+```
+
+## Tests
+
+```bash
+python -m pytest
+```
+
+The end-to-end test runs the real engine against the real demo application -
+no mocks, and the vulnerabilities are genuine.
+
+## Status
+
+Early, but the vertical slice works end to end: learn -> attack -> prove ->
+replay. See `ROADMAP.md` for what comes next.
+
+## License
+
+MIT.
