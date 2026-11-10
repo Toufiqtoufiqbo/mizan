@@ -92,8 +92,24 @@ def detect_race(
 
     new_events = after[len(before) :]
     if not new_events:
-        # Both requests were accepted but nothing was written: still a smell,
-        # but without a data-level effect we do not report it.
+        # Both requests were accepted. Under concurrency the data-level
+        # attribution is not decisive - two writes can be attributed to one
+        # request - so for a single-use operation the two accepted responses
+        # are evidence enough.
+        if looks_single_use(outcome.url):
+            return Violation(
+                law="L6",
+                title="A single-use operation succeeded twice",
+                detail=(
+                    f"Two concurrent `{outcome.method} {outcome.url}` requests were both accepted, and the "
+                    f"operation looks single-use. The resource was consumed more than once."
+                ),
+                severity="high",
+                principal=principal,
+                resource=None,
+                action="write",
+                evidence={"race": outcome.to_dict(), "applied_changes": []},
+            )
         return None
 
     by_row: dict[str, list[Any]] = {}
