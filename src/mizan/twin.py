@@ -37,6 +37,13 @@ from typing import Any
 def free_port(host: str = "127.0.0.1") -> int:
     """A port nobody is using right now."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        # On Windows, without this, another socket may bind the same port and
+        # two applications would end up fighting over it.
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            except OSError:  # pragma: no cover - platform dependent
+                pass
         sock.bind((host, 0))
         return int(sock.getsockname()[1])
 
@@ -57,6 +64,8 @@ class TwinSpec:
     health_timeout: float = 30.0
     #: The environment variable that receives the chosen port.
     port_env: str = "PORT"
+    #: The directory the ``{data}`` placeholder points at.
+    data_dir: Path | None = None
     #: Extra placeholders replaced in the command: ``{port}``, ``{workspace}``.
     replace_in_command: bool = True
 
@@ -91,8 +100,11 @@ class Twin:
 
         command = list(self.spec.command)
         if self.spec.replace_in_command:
+            data_dir = str(self.spec.data_dir or self.workspace)
             command = [
-                part.replace("{port}", str(self._port)).replace("{workspace}", str(self.workspace))
+                part.replace("{port}", str(self._port))
+                .replace("{workspace}", str(self.workspace))
+                .replace("{data}", data_dir)
                 for part in command
             ]
         self.process = subprocess.Popen(
@@ -175,12 +187,29 @@ class Twin:
             source = Path(path)
             if not source.exists():
                 continue
-            destination = target / f"{index}-{source.name}"
+            destination = target / str(index) / source.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
             if source.is_dir():
                 shutil.copytree(source, destination, dirs_exist_ok=True)
             else:
                 shutil.copy2(source, destination)
         return target
+
+    def snapshot_files(self) -> list[Path]:
+        """The copies of the last snapshot, with their original names.
+
+        They can be handed to a pool of workers as their starting state.
+        """
+        snapshots = sorted(self.snapshot_dir.glob("snapshot-*"))
+        if not snapshots:
+            return []
+        latest = snapshots[-1]
+        result: list[Path] = []
+        for index, path in enumerate(self.spec.data_paths):
+            candidate = latest / str(index) / path.name
+            if candidate.exists():
+                result.append(candidate)
+        return result
 
     def restore(self) -> None:
         """Bring the state back to the last snapshot."""
@@ -190,7 +219,7 @@ class Twin:
         latest = snapshots[-1]
         for index, path in enumerate(self.spec.data_paths):
             source = Path(path)
-            candidate = latest / f"{index}-{source.name}"
+            candidate = latest / str(index) / source.name
             if not candidate.exists():
                 continue
             if source.is_dir():
