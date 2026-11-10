@@ -44,6 +44,8 @@ class AppResult:
     attacks_reproduced: int = 0
     #: Attacks that a fixed application is expected to block.
     attacks_blocked: int = 0
+    #: How many requests the run needed.
+    requests: int = 0
 
     @property
     def ok(self) -> bool:
@@ -59,6 +61,7 @@ class AppResult:
             "ok": self.ok,
             "attacks_reproduced": self.attacks_reproduced,
             "attacks_blocked": self.attacks_blocked,
+            "requests": self.requests,
             "findings": self.findings,
         }
 
@@ -239,6 +242,8 @@ def run_application(
     *,
     patched: bool = False,
     attacks: list[Any] | None = None,
+    mode: str = "probes",
+    budget: int = 30,
 ) -> AppResult:
     """Run Mizan against one application and return what it found.
 
@@ -248,7 +253,7 @@ def run_application(
     db_path = workspace / f"{spec.name}{'-patched' if patched else ''}.sqlite"
     traffic_path = workspace / f"{spec.name}{'-patched' if patched else ''}-traffic.jsonl"
     ledger_path = workspace / f"{spec.name}{'-patched' if patched else ''}-ledger.jsonl"
-    for path in (traffic_path, ledger_path):
+    for path in (traffic_path, ledger_path, db_path):
         path.unlink(missing_ok=True)
 
     app = BenchmarkApp(
@@ -277,7 +282,13 @@ def run_application(
             spec_path=SPEC_PATH,
         )
         engine.learn()
-        violations = engine.attack()
+        if mode == "guided":
+            from mizan.search import GuidedSearch
+
+            violations = GuidedSearch(engine, budget=budget, depth=2).run().violations
+        else:
+            violations = engine.attack()
+        requests = engine.requests
 
         if attacks:
             # The fixed application must block every attack.
@@ -311,6 +322,7 @@ def run_application(
         attacks=[attack.to_dict() for attack in built_attacks],
         attacks_reproduced=reproduced,
         attacks_blocked=blocked,
+        requests=requests,
     )
 
 
@@ -406,3 +418,41 @@ def main() -> None:  # pragma: no cover - CLI helper
 
 if __name__ == "__main__":  # pragma: no cover
     main()
+
+
+def compare_modes(size: int = 10, *, workspace: str | Path | None = None) -> dict[str, Any]:
+    """Compare the fixed probes with the guided search.
+
+    Both find the same breaches; the question is how many requests each of them
+    needs to get there.
+    """
+    suite = build_suite(size, controls=0)
+    root = Path(workspace) if workspace else Path(tempfile.mkdtemp(prefix="authzbugs-compare-"))
+    root.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, Any]] = []
+    for spec in suite.applications:
+        probes = run_application(spec, root)
+        guided = run_application(spec, root, mode="guided")
+        rows.append(
+            {
+                "application": spec.name,
+                "expected": list(spec.expected_laws),
+                "probes": {"laws": list(probes.detected), "requests": probes.requests},
+                "guided": {"laws": list(guided.detected), "requests": guided.requests},
+            }
+        )
+    if workspace is None:
+        shutil.rmtree(root, ignore_errors=True)
+
+    def average(key: str) -> float:
+        values = [row[key]["requests"] for row in rows]
+        return sum(values) / len(values) if values else 0.0
+
+    probes_laws = sum(len(set(row["probes"]["laws"]) & set(row["expected"])) for row in rows)
+    guided_laws = sum(len(set(row["guided"]["laws"]) & set(row["expected"])) for row in rows)
+    return {
+        "applications": len(rows),
+        "probes": {"average_requests": round(average("probes"), 1), "detected": probes_laws},
+        "guided": {"average_requests": round(average("guided"), 1), "detected": guided_laws},
+        "rows": rows,
+    }
