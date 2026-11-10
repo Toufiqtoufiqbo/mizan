@@ -34,10 +34,16 @@
       the probes ran in (proven by a test)
 - [x] **Active learning**: discover the endpoints and their identifiers from
       the OpenAPI document, then exercise them
-- [ ] **Postgres attribution**: the same idea for Postgres - a temporary audit
-      table with a trigger, or `pg_dump` snapshots
-- [ ] **Parallel probes**: with a restorable state, probes can run at the same time
+- [x] **Parallel probing**: N isolated copies of the application, each with its
+      own data and port, split the probes between them
+- [x] **CI gate**: `mizan replay` replays every proven attack against a target
+      and fails when one still works
+- [x] **Postgres auditor**: an audit table and a trigger, with the identity in
+      `application_name` (the round trip is covered by a test that runs when
+      `MIZAN_TEST_POSTGRES_DSN` is set)
+- [ ] **Parallel Postgres**: the same isolation for a Postgres data directory
 - [ ] **Attack regression**: re-run every proven attack on each pull request
+      (the pieces exist: `mizan replay` plus the GitHub Action)
 
 ## Later (v0.3 - the rest of the laws)
 
