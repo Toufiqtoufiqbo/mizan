@@ -29,19 +29,24 @@ from mizan.core import (
     is_authority_field,
 )
 from mizan.engine import Mizan, Target
+from mizan.identity import TokenClaims, decode_token, subject_of
+from mizan.patching import PatchSuggestion, suggest
 from mizan.proof import ProofBundle
 from mizan.races import RaceOutcome, detect_race, run_concurrently
+from mizan.regression import Attack, attack_succeeds, build_attack, render_test
 from mizan.taint import Ledger, PostgresLogParser, TaintAnalyzer, WriteEvent
 from mizan.traffic import TrafficLog, TrafficRecord
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "LAWS",
     "AccessMatrix",
+    "Attack",
     "Law",
     "Ledger",
     "Mizan",
+    "PatchSuggestion",
     "Policy",
     "PostgresLogParser",
     "Principal",
@@ -52,14 +57,21 @@ __all__ = [
     "Step",
     "TaintAnalyzer",
     "Target",
+    "TokenClaims",
     "TrafficLog",
     "TrafficRecord",
     "Violation",
     "WriteEvent",
     "actions_for",
+    "attack_succeeds",
+    "build_attack",
+    "decode_token",
     "detect_race",
     "is_authority_field",
+    "render_test",
     "run_concurrently",
+    "subject_of",
+    "suggest",
     "register",
     "__version__",
 ]
