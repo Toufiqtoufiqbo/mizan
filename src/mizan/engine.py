@@ -102,6 +102,8 @@ class Mizan:
         self.permitted = AccessMatrix()
         self.observed_principals: set[str] = set()
         self._attributed_events: list[WriteEvent] = []
+        #: How many requests the engine sent - the cost of a finding.
+        self.requests = 0
 
     # -- learning ---------------------------------------------------------- #
 
@@ -183,8 +185,22 @@ class Mizan:
             f"learned from {len(self.traffic)} traffic records, {len(self.ledger.events)} write events, "
             f"{len(policy.resources)} resources, {len(policy.rules)} rules"
         )
+        self._normalize_templates()
         self.policy = policy
         return policy
+
+    def _normalize_templates(self) -> None:
+        """Collapse the paths that only differ by an identifier.
+
+        A traffic log records concrete paths, so `/orders/o1` and `/orders/o2`
+        look like two different operations. Once the resources are known, the
+        identifiers can be put back, and the engine works with one template per
+        operation instead of one per object.
+        """
+        identifiers = {resource.id for resource in self.policy.resources.values() if resource.id}
+        identifiers |= {pid for pid in self.policy.principals}
+        for record in self.traffic.records:
+            record.template = _normalize_path(record.path, identifiers)
 
     # -- attacking --------------------------------------------------------- #
 
@@ -367,6 +383,32 @@ class Mizan:
                     )
                 )
         return violations
+
+    def _identity_paths(self) -> set[str]:
+        """The paths that answer "who am I?", learned from the traffic."""
+        paths: set[str] = set()
+        for (method, template), records in self._examples().items():
+            if method != "GET":
+                continue
+            for record in records:
+                body = record.response
+                if isinstance(body, dict) and str(body.get("id", "")) == str(record.principal):
+                    paths.add(record.path)
+        return paths
+
+    def _is_identity_path(self, path: str) -> bool:
+        """Whether this request asked for the caller's own identity."""
+        if not hasattr(self, "_identity_path_cache"):
+            self._identity_path_cache = self._identity_paths()
+        cache: set[str] = self._identity_path_cache
+        if path in cache:
+            return True
+        # The same endpoint with a different identifier is still the identity
+        # endpoint when the template has no placeholder.
+        for known in cache:
+            if "{" not in known and known == path:
+                return True
+        return False
 
     def _identity_endpoints(self) -> list[tuple[str, str, str]]:
         """Endpoints that answer "who am I?", learned from the traffic."""
@@ -607,6 +649,105 @@ class Mizan:
 
     # -- helpers ----------------------------------------------------------- #
 
+    def evaluate_action(
+        self, principal_id: str, method: str, path: str, body: Any = None
+    ) -> tuple[Any, list[Violation], list[str]]:
+        """Send one request and measure what it breaks.
+
+        Returns the response, the violations it caused and the identifiers it
+        revealed. The guided search uses this as its evaluation function.
+        """
+        principal = self.target.principal(principal_id)
+        if principal is None or not principal.token:
+            return None, [], []
+        session = self.target.session_for(principal)
+        url = self._url(path)
+        before = len(self._ledger_events())
+        if method.upper() in {"GET", "HEAD", "DELETE"}:
+            response = self._request(session, method.upper(), url, timeout=self.target.timeout)
+        else:
+            response = self._request(
+                session, method.upper(), url, json=body if body is not None else {}, timeout=self.target.timeout
+            )
+        new_events = self._ledger_events()[before:]
+
+        violations: list[Violation] = []
+        payload = _json(response)
+        is_read = method.upper() in {"GET", "HEAD"}
+        if (
+            is_read
+            and isinstance(payload, dict)
+            and 200 <= response.status_code < 300
+            and not self._is_identity_path(path)
+        ):
+            owner = None
+            for key in ("owner_id", "user_id", "owner"):
+                if isinstance(payload.get(key), (str, int)):
+                    owner = str(payload[key])
+                    break
+            if owner is not None and owner != principal_id:
+                violations.append(
+                    Violation(
+                        law="L2",
+                        title=f"{principal_id} received an object owned by {owner}",
+                        detail=(
+                            f"`{method.upper()} {url}` answered with an object owned by `{owner}` while the "
+                            f"request was authenticated as `{principal_id}`."
+                        ),
+                        severity="high",
+                        principal=principal_id,
+                        resource=None,
+                        action="read",
+                        evidence={"status": response.status_code, "object": _truncate(payload)},
+                        steps=[
+                            Step(
+                                method=method.upper(),
+                                url=url,
+                                headers={"Authorization": f"Bearer {principal.token}"},
+                                status=response.status_code,
+                                note="the request that crossed the ownership boundary",
+                            )
+                        ],
+                    )
+                )
+        violations.extend(TaintAnalyzer(self.policy).analyze(new_events))
+
+        # L1 - did the server act as the identity the token claims?
+        claims = decode_token(principal.token) if principal.token else None
+        if (
+            claims is not None
+            and claims.subject
+            and isinstance(payload, dict)
+            and self._is_identity_path(path)
+        ):
+            acted_as = payload.get("id")
+            if isinstance(acted_as, (str, int)) and str(acted_as) != claims.subject:
+                violations.append(
+                    Violation(
+                        law="L1",
+                        title=f"the token claims to be {claims.subject}, the server acted as {acted_as}",
+                        detail=(
+                            f"`{method.upper()} {url}` was authenticated with a token whose subject is "
+                            f"`{claims.subject}`, but the response describes `{acted_as}`."
+                        ),
+                        severity="critical",
+                        principal=principal_id,
+                        resource=None,
+                        action="authenticate",
+                        evidence={"token_subject": claims.subject, "acted_as": str(acted_as)},
+                        steps=[
+                            Step(
+                                method=method.upper(),
+                                url=url,
+                                headers={"Authorization": f"Bearer {principal.token}"},
+                                status=response.status_code,
+                                note="the token claimed one identity, the server acted as another",
+                            )
+                        ],
+                    )
+                )
+        return response, violations, _identifiers_in(payload)
+
     def _url(self, path: str) -> str:
         if path.startswith("http://") or path.startswith("https://"):
             return path
@@ -633,6 +774,7 @@ class Mizan:
         needs no instrumentation for this.
         """
         before = self.attributor.snapshot() if self.attributor is not None else None
+        self.requests += 1
         response = session.request(method, url, **kwargs)
         if before is not None:
             payload = kwargs.get("json")
@@ -738,6 +880,29 @@ class Mizan:
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
+
+
+def _normalize_path(path: str, identifiers: set[str]) -> str:
+    """Replace the known identifiers in a path with a placeholder."""
+    parts = path.split("/")
+    return "/".join("{id}" if part in identifiers else part for part in parts)
+
+
+def _identifiers_in(payload: Any, depth: int = 0) -> list[str]:
+    """Identifiers found in a response body."""
+    if depth > 4:
+        return []
+    found: list[str] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in {"id", "order_id", "user_id", "uuid"} and isinstance(value, (str, int)):
+                found.append(str(value))
+            else:
+                found.extend(_identifiers_in(value, depth + 1))
+    elif isinstance(payload, list):
+        for item in payload[:20]:
+            found.extend(_identifiers_in(item, depth + 1))
+    return found
 
 
 def _perturb(body: Any) -> Any:
