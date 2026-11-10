@@ -51,6 +51,56 @@ Access matrix: 8 observed cells, 4 outside the permitted space,
 residual norm {'bob': 1.41, 'alice': 1.41}
 ```
 
+## The twin - a private copy of your app, without Docker
+
+The usual way to test an application safely is a container. Mizan does not need
+one. It needs a process, a temporary directory and a copy of the data:
+
+```bash
+mizan twin \
+  --command "python -m myapp --port {port}" \
+  --data data/app.db \
+  --spec openapi.json \
+  --token alice=eyJhbGciOi... \
+  --token bob=eyJhbGciOi... \
+  --out mizan-proofs
+```
+
+What happens:
+
+| Step | Who does it |
+|---|---|
+| the application starts on a free port | `mizan.twin.Twin` |
+| the pristine state is snapshotted | `mizan.twin` (a copy of the data files) |
+| every request is recorded | `mizan.proxy.RecordingProxy` - the app is **not** modified |
+| the writes are attributed | `mizan.attribution.SqliteAttributor` - the database diff is the ledger |
+| the laws are learned | `mizan.engine.Mizan.learn()` |
+| the laws are attacked | every probe restores the state first, so the findings do not depend on the order of the probes |
+| the findings are written | one proof bundle per finding, with a regression test |
+
+The result on the bundled vulnerable application, with **no change to the
+application at all**:
+
+```
+application started on http://127.0.0.1:56543
+recorded 19 requests
+learned 4 resources and 3 rules
+
+Found 11 proven violation(s):
+  [high    ] L5 The same state transition was applied twice
+  [high    ] L2 bob read an object owned by alice
+  [high    ] L2 alice read an object owned by bob
+  [high    ] L3 bob wrote into an object owned by alice
+  [high    ] L3 alice wrote into an object owned by bob
+  [critical] L4 alice created authority by writing `role`
+```
+
+Two things make this possible without touching the application:
+
+* the **recording proxy** - traffic is observed from the outside;
+* the **data-level attribution** - the difference between two snapshots of the
+  database is the write, attributed to the identity that made the request.
+
 ## The laws
 
 | ID | Law | Severity | Breaks |
@@ -154,8 +204,15 @@ from mizan.recorder import Recorder
 application = Recorder(app, "traffic.jsonl")
 ```
 
-For applications you cannot wrap, `mizan/recorder.py` also ships a mitmproxy
-addon (`MITM_ADDON`) with the same output format.
+For applications you cannot wrap, use the recording proxy instead - it needs no
+cooperation from the application at all:
+
+```python
+from mizan.proxy import RecordingProxy
+
+proxy = RecordingProxy("http://127.0.0.1:8000", "traffic.jsonl")
+proxy.start()
+```
 
 ## Using the law checks inside Schemathesis
 
@@ -183,7 +240,8 @@ python -m pytest
 ```
 
 The end-to-end test runs the real engine against the real demo application -
-no mocks, and the vulnerabilities are genuine.
+no mocks, and the vulnerabilities are genuine. The twin tests start a real
+process, record it through a real proxy and diff a real database.
 
 ## Status
 
