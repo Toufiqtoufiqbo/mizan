@@ -32,6 +32,9 @@ from mizan.core import (
     actions_for,
     is_authority_field,
 )
+from mizan.identity import decode_token, forge_unsigned, subject_of
+from mizan.patching import render as patch_render
+from mizan.regression import render_test as regression_render
 from mizan.proof import ProofBundle
 from mizan.races import RaceOutcome, detect_race, looks_single_use, run_concurrently
 from mizan.taint import Ledger, TaintAnalyzer, WriteEvent
@@ -182,6 +185,7 @@ class Mizan:
         # changes the state of a resource would hide a race on it. (With a local
         # twin each probe would get a fresh snapshot instead.)
         violations.extend(self._probe_races())
+        violations.extend(self._probe_identity_coherence())
         violations.extend(self._probe_read_authorization())
         violations.extend(self._probe_write_authorization())
         violations.extend(self._probe_authority_creation())
@@ -276,6 +280,73 @@ class Mizan:
                         )
                     )
         return violations
+
+    def _probe_identity_coherence(self) -> list[Violation]:
+        """L1 - does the server act as the identity the token claims?"""
+        violations: list[Violation] = []
+        endpoints = self._identity_endpoints()
+        if not endpoints:
+            return violations
+        for principal in self.target.principals:
+            if not principal.token:
+                continue
+            claims = decode_token(principal.token)
+            if claims is None or claims.subject is None:
+                continue
+            for method, template, url in endpoints:
+                session = self.target.session_for(principal)
+                response = session.request(method, url, timeout=self.target.timeout)
+                if not (200 <= response.status_code < 300):
+                    continue
+                body = _json(response)
+                if not isinstance(body, dict):
+                    continue
+                acted_as = body.get("id") or body.get("user_id") or body.get("sub")
+                if acted_as is None or str(acted_as) == claims.subject:
+                    continue
+                violations.append(
+                    Violation(
+                        law="L1",
+                        title=f"the token claims to be {claims.subject}, the server acted as {acted_as}",
+                        detail=(
+                            f"`{method} {url}` was authenticated with a token whose subject is `{claims.subject}`, "
+                            f"but the response describes `{acted_as}`. The server did not act as the identity the "
+                            f"client presented."
+                        ),
+                        severity="critical",
+                        principal=principal.id,
+                        resource=None,
+                        action="authenticate",
+                        evidence={
+                            "token_subject": claims.subject,
+                            "acted_as": str(acted_as),
+                            "claims": claims.raw,
+                        },
+                        steps=[
+                            Step(
+                                method=method,
+                                url=url,
+                                headers={"Authorization": f"Bearer {principal.token}"},
+                                status=response.status_code,
+                                note="the token claimed one identity, the server acted as another",
+                            )
+                        ],
+                    )
+                )
+        return violations
+
+    def _identity_endpoints(self) -> list[tuple[str, str, str]]:
+        """Endpoints that answer "who am I?", learned from the traffic."""
+        endpoints: list[tuple[str, str, str]] = []
+        for (method, template), records in self._examples().items():
+            if method != "GET":
+                continue
+            for record in records:
+                body = record.response
+                if isinstance(body, dict) and str(body.get("id", "")) == str(record.principal):
+                    endpoints.append((method, template, self._url(record.path)))
+                    break
+        return endpoints
 
     def _probe_write_authorization(self) -> list[Violation]:
         """L3 - can one principal write into another principal's object?"""
@@ -562,6 +633,8 @@ class Mizan:
         directories = []
         residual = self.observed.residual(self.permitted)
         for violation in violations:
+            patch = patch_render(violation)
+            regression_test = regression_render(violation)
             directory = ProofBundle.create(
                 root,
                 violation,
@@ -571,6 +644,8 @@ class Mizan:
                     "permitted": self.permitted.to_dict(),
                     "residual": residual.to_dict(),
                 },
+                patch=patch,
+                regression_test=regression_test,
             )
             directories.append(directory)
         return directories
