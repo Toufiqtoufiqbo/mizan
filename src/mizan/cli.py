@@ -75,12 +75,16 @@ def learn(traffic_path: str, ledger_path: str | None, target: str, out_path: str
 @click.option("--ledger", "ledger_path", type=click.Path(exists=True), help="Write ledger (JSONL).")
 @click.option("--spec", "spec_path", type=click.Path(exists=True), help="OpenAPI document.")
 @click.option("--out", "out_path", default="mizan-proofs", type=click.Path(), help="Directory for proof bundles.")
+@click.option("--guided", is_flag=True, help="Search for the request sequence that breaks a law.")
+@click.option("--budget", default=40, show_default=True, help="How many actions the guided search may try.")
 def attack(
     target: str,
     traffic_path: str,
     ledger_path: str | None,
     spec_path: str | None,
     out_path: str,
+    guided: bool,
+    budget: int,
 ) -> None:
     """Attack the learned laws and write a proof bundle per finding."""
     principals = _principals_from_traffic(traffic_path)
@@ -91,7 +95,7 @@ def attack(
         spec_path=spec_path,
     )
     engine.learn()
-    violations = engine.attack()
+    violations = _guided_attack(engine, budget) if guided else engine.attack()
     directories = engine.write_bundles(violations, out_path)
     _print_report(engine, violations, directories)
 
@@ -110,6 +114,8 @@ def attack(
 @click.option("--out", "out_path", default="mizan-proofs", type=click.Path(), help="Directory for proof bundles.")
 @click.option("--traffic", "traffic_path", default=None, type=click.Path(), help="Traffic log to write (default: next to the proof bundles).")
 @click.option("--workers", default=1, show_default=True, help="How many isolated copies to attack in parallel.")
+@click.option("--guided", is_flag=True, help="Search for the request sequence that breaks a law, instead of running fixed probes.")
+@click.option("--budget", default=40, show_default=True, help="How many actions the guided search may try.")
 @click.option("--keep", is_flag=True, help="Keep the twin workspace.")
 def twin(
     command: str,
@@ -120,6 +126,8 @@ def twin(
     out_path: str,
     traffic_path: str | None,
     workers: int,
+    guided: bool,
+    budget: int,
     keep: bool,
 ) -> None:
     """Run the whole thing against a local copy of an application.
@@ -191,7 +199,9 @@ def twin(
             policy = engine.learn()
             click.echo(f"learned {len(policy.resources)} resources and {len(policy.rules)} rules")
 
-            if workers > 1:
+            if guided:
+                violations = _guided_attack(engine, budget)
+            elif workers > 1:
                 # The workers start from the pristine snapshot, not from the
                 # state the learning phase left behind.
                 pristine = engine_instance.snapshot_files() or resolved_data
@@ -282,10 +292,45 @@ def replay(bundles: str, target: str, token: str | None) -> None:
     click.echo(f"all {len(directories)} attacks are blocked")
 
 
+def _guided_attack(engine: Mizan, budget: int) -> list[Any]:
+    """Search for the request sequence that breaks a law."""
+    from mizan.search import GuidedSearch
+
+    search = GuidedSearch(engine, budget=budget)
+    result = search.run()
+    click.echo(
+        f"guided search: {result.requests} requests, laws {sorted(result.laws) or 'none'}"
+    )
+    return result.violations
+
+
 def _split_command(command: str) -> list[str]:
     import shlex
 
     return shlex.split(command)
+
+
+@main.command()
+@click.option("--size", default=10, show_default=True, help="How many applications to compare.")
+def compare(size: int) -> None:
+    """Compare the fixed probes with the guided search."""
+    from mizan.benchmark.evaluate import compare_modes
+
+    result = compare_modes(size)
+    click.echo(f"{result['applications']} applications")
+    click.echo("")
+    click.echo("| mode | average requests | breaches found |")
+    click.echo("|---|---|---|")
+    for mode in ("probes", "guided"):
+        data = result[mode]
+        click.echo(f"| {mode} | {data['average_requests']} | {data['detected']} |")
+    click.echo("")
+    for row in result["rows"]:
+        click.echo(
+            f"  {row['application']}: expected {','.join(row['expected'])} | "
+            f"probes {','.join(row['probes']['laws']) or '-'} ({row['probes']['requests']}) | "
+            f"guided {','.join(row['guided']['laws']) or '-'} ({row['guided']['requests']})"
+        )
 
 
 @main.command()
