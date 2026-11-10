@@ -11,6 +11,7 @@ from typing import Any
 import click
 import requests
 
+from mizan.tokens import make_token
 from mizan.core import LAWS, Principal, Step
 from mizan.engine import Mizan, Target
 from mizan.proof import ProofBundle
@@ -98,6 +99,96 @@ def attack(
 # --------------------------------------------------------------------------- #
 # verify
 # --------------------------------------------------------------------------- #
+
+
+@main.command()
+@click.option("--command", "command", required=True, help="How to start the application, e.g. 'python -m app --port {port}'.")
+@click.option("--data", "data_paths", multiple=True, type=click.Path(), help="File or directory holding the state (repeatable).")
+@click.option("--spec", "spec_path", required=True, type=click.Path(exists=True), help="OpenAPI document.")
+@click.option("--token", "tokens", multiple=True, help="Bearer token of an identity, in the form name=token (repeatable).")
+@click.option("--workdir", default=".", type=click.Path(), help="Where the application runs.")
+@click.option("--out", "out_path", default="mizan-proofs", type=click.Path(), help="Directory for proof bundles.")
+@click.option("--keep", is_flag=True, help="Keep the twin workspace.")
+def twin(
+    command: str,
+    data_paths: tuple[str, ...],
+    spec_path: str,
+    tokens: tuple[str, ...],
+    workdir: str,
+    out_path: str,
+    keep: bool,
+) -> None:
+    """Run the whole thing against a local copy of an application.
+
+    No Docker, no changes to the application: Mizan starts it, records the
+    traffic through a proxy, learns the laws from the database itself, and
+    attacks them - restoring the state between probes.
+    """
+    from mizan.attribution import SqliteAttributor
+    from mizan.learning import learn_from_spec
+    from mizan.proxy import RecordingProxy
+    from mizan.twin import Twin, TwinSpec
+
+    identities: list[Principal] = []
+    token_values: list[str] = []
+    for entry in tokens:
+        name, _, token = entry.partition("=")
+        identities.append(Principal(id=name, roles=("user",), token=token))
+        token_values.append(token)
+
+    workspace = Path(workdir) / ".mizan-twin"
+    resolved_data = [Path(workdir) / path if not Path(path).is_absolute() else Path(path) for path in data_paths]
+    spec = TwinSpec(
+        command=_split_command(command),
+        workdir=Path(workdir),
+        data_paths=resolved_data,
+        health_path="/",
+    )
+    traffic_path = Path(out_path).parent / "mizan-traffic.jsonl"
+    engine_instance = Twin(spec, workspace=workspace)
+    try:
+        engine_instance.start()
+        click.echo(f"application started on {engine_instance.base_url}")
+        # The pristine state is taken before anything runs, so every probe
+        # starts from the same place - including the ones that need an object
+        # in a state that only exists before the first request.
+        engine_instance.snapshot()
+        proxy = RecordingProxy(engine_instance.base_url, traffic_path)
+        proxy.start()
+        try:
+            learn_from_spec(spec_path, proxy.base_url, tokens=token_values or None)
+            click.echo(f"recorded {len(list(traffic_path.read_text(encoding='utf-8').splitlines()))} requests")
+
+            attributor = None
+            for path in resolved_data:
+                if str(path).lower().endswith((".sqlite", ".sqlite3", ".db")):
+                    attributor = SqliteAttributor(path)
+                    break
+
+            engine = Mizan(
+                Target(base_url=proxy.base_url, principals=identities),
+                traffic_path=traffic_path,
+                spec_path=spec_path,
+                twin=engine_instance,
+                attributor=attributor,
+            )
+            policy = engine.learn()
+            click.echo(f"learned {len(policy.resources)} resources and {len(policy.rules)} rules")
+            violations = engine.attack()
+            directories = engine.write_bundles(violations, out_path)
+            _print_report(engine, violations, directories)
+        finally:
+            proxy.stop()
+    finally:
+        engine_instance.stop()
+        if not keep:
+            shutil.rmtree(workspace, ignore_errors=True)
+
+
+def _split_command(command: str) -> list[str]:
+    import shlex
+
+    return shlex.split(command)
 
 
 @main.command()
@@ -230,9 +321,9 @@ def demo(out_path: str, keep: bool) -> None:
     try:
         _generate_normal_traffic(base_url)
         principals = [
-            Principal(id="alice", roles=("user",), token="tok-alice"),
-            Principal(id="bob", roles=("user",), token="tok-bob"),
-            Principal(id="root", roles=("admin",), token="tok-admin"),
+            Principal(id="alice", roles=("user",), token=make_token("alice")),
+            Principal(id="bob", roles=("user",), token=make_token("bob")),
+            Principal(id="root", roles=("admin",), token=make_token("root", "admin")),
         ]
         engine = Mizan(
             Target(base_url=base_url, principals=principals),
@@ -275,7 +366,7 @@ def _principals_from_traffic(traffic_path: str) -> list[Principal]:
 def _generate_normal_traffic(base_url: str) -> None:
     """Produce the kind of traffic a real application sees in normal use."""
     alice = requests.Session()
-    alice.headers["Authorization"] = "Bearer tok-alice"
+    alice.headers["Authorization"] = f"Bearer {make_token('alice')}"
     alice.get(f"{base_url}/me")
     alice.get(f"{base_url}/orders/o1")
     alice.post(f"{base_url}/orders/o1/approve")
@@ -283,7 +374,7 @@ def _generate_normal_traffic(base_url: str) -> None:
     alice.patch(f"{base_url}/users/me", json={"name": "Alice Updated"})
 
     bob = requests.Session()
-    bob.headers["Authorization"] = "Bearer tok-bob"
+    bob.headers["Authorization"] = f"Bearer {make_token('bob')}"
     bob.get(f"{base_url}/me")
     bob.get(f"{base_url}/orders/o2")
 
