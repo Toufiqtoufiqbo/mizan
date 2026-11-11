@@ -161,11 +161,31 @@ jobs:
           path: benchmark-report/
 
   # --------------------------------------------------------------------------
+  # Stage E - Mizan scans Mizan
+  # --------------------------------------------------------------------------
+  self-scan:
+    name: "E - Mizan scans Mizan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: The clean API must be clean, the weakened one must not be
+        run: python -m mizan.cli self-scan
+
+  # --------------------------------------------------------------------------
   # Opt-in: an external target.
   # Never part of ordinary CI: it needs an explicit variable and its own tokens.
   # --------------------------------------------------------------------------
   external-target:
-    name: "E - external target (opt-in)"
+    name: "F - external target (opt-in)"
     if: vars.MIZAN_TARGET != ''
     runs-on: ubuntu-latest
     steps:

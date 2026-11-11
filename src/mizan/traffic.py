@@ -167,6 +167,12 @@ def infer_resource(response: Any, template: str) -> tuple[str | None, str | None
     gives the type, an ``id`` field gives the id and an ``owner_id``/``user_id``
     field gives the owner.
     """
+    if isinstance(response, list):
+        # A listing carries objects as well.
+        for item in response:
+            if isinstance(item, dict) and "id" in item:
+                return infer_resource(item, template)
+        return None, None, None
     if not isinstance(response, dict):
         return None, None, None
     resource_id = response.get("id")
@@ -179,10 +185,16 @@ def infer_resource(response: Any, template: str) -> tuple[str | None, str | None
             owner = str(value)
             break
     segments = [segment for segment in template.split("/") if segment]
-    placeholder = next((index for index, segment in enumerate(segments) if segment.startswith("{")), None)
-    if placeholder is not None:
-        # `/orders/{id}/approve` describes the `orders` collection.
-        resource_type = segments[placeholder - 1] if placeholder > 0 else None
+    placeholders = [index for index, segment in enumerate(segments) if segment.startswith("{")]
+    resource_type = None
+    if placeholders:
+        # The collection the object belongs to: `/scans/{id}/findings` is a
+        # finding, `/orders/{id}` is an order.
+        after = placeholders[-1] + 1
+        if after < len(segments):
+            resource_type = segments[after]
+        elif placeholders[0] > 0:
+            resource_type = segments[placeholders[0] - 1]
     else:
         resource_type = segments[-1] if segments else None
         # `/users/me` describes the `users` collection, not a `me` resource.

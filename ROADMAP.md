@@ -55,6 +55,15 @@
 - [ ] **Attack regression**: re-run every proven attack on each pull request
       (the pieces exist: `mizan replay` plus the GitHub Action)
 
+## Next (v0.4 - the second user)
+
+- [ ] **A second, external user**: the self-scan proves the tool works on us;
+      it does not prove it works on somebody else's codebase
+- [ ] **Triage format**: SARIF and a pull-request comment, so findings land in
+      the workflow the team already uses
+- [ ] **The corpus across stacks** (Flask, FastAPI), with a manifest so
+      third parties can add cases
+
 ## Later (v0.3 - the rest of the laws)
 
 - [ ] **L7** - path confidentiality (cache, queue, logs, metrics)

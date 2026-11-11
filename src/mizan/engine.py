@@ -129,11 +129,14 @@ class Mizan:
         for record in self.traffic:
             resource = record.resource
             if resource is not None:
+                known = policy.resources.get(resource.key)
+                if known is None:
+                    policy.resources[resource.key] = resource
+                elif known.owner is None and resource.owner:
+                    # The same object, seen with its owner this time.
+                    policy.resources[resource.key] = resource
                 if resource.owner:
-                    policy.resources.setdefault(resource.key, resource)
                     owned_by_principal.setdefault(record.principal or "", set()).add(resource.key)
-                elif record.principal:
-                    policy.resources.setdefault(resource.key, resource)
             if record.principal and resource is not None:
                 accessed.setdefault((record.principal, resource.type, record.action), set()).add(resource.key)
                 self.observed.grant(record.principal, resource.key, record.action)
@@ -287,6 +290,10 @@ class Mizan:
                     if not (200 <= response.status_code < 300):
                         continue
                     body = _json(response)
+                    if not contains_object(body, resource.id):
+                        # The request was accepted, but the object was not
+                        # returned: nothing was disclosed.
+                        continue
                     returned_owner = None
                     if isinstance(body, dict):
                         for key in ("owner_id", "user_id", "owner"):
@@ -888,6 +895,23 @@ class Mizan:
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
+
+
+def contains_object(payload: Any, resource_id: str | None) -> bool:
+    """Whether a response body actually contains the given object.
+
+    A `200` with an empty list is not a disclosure: the object was not
+    returned. Without this check every successful request would look like a
+    cross-identity read.
+    """
+    if resource_id is None:
+        return False
+    if isinstance(payload, dict):
+        identifier = payload.get("id")
+        return identifier is not None and str(identifier) == str(resource_id)
+    if isinstance(payload, list):
+        return any(isinstance(item, dict) and str(item.get("id")) == str(resource_id) for item in payload)
+    return False
 
 
 def _normalize_path(path: str, identifiers: set[str]) -> str:

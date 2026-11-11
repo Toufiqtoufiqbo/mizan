@@ -55,10 +55,21 @@ def _resolve(schema: dict[str, Any], document: dict[str, Any], depth: int = 0) -
 
 
 def sample_body(schema: dict[str, Any], document: dict[str, Any], depth: int = 0) -> Any:
-    """A minimal body for a request schema."""
+    """A minimal body for a request schema.
+
+    An example from the specification wins over a generated value: a real
+    specification usually knows what a valid request looks like, and a
+    generated string is often rejected by the application.
+    """
     schema = _resolve(schema, document, depth)
     if not schema:
         return None
+    for key in ("example", "default"):
+        if key in schema and schema[key] is not None:
+            return schema[key]
+    examples = schema.get("examples")
+    if isinstance(examples, list) and examples:
+        return examples[0]
     kind = schema.get("type")
     if kind == "object" or "properties" in schema:
         properties = schema.get("properties", {})
@@ -98,6 +109,7 @@ def learn_from_spec(
     base_url: str,
     *,
     tokens: list[str] | None = None,
+    identities: dict[str, str] | None = None,
     timeout: float = 15.0,
     session: requests.Session | None = None,
     discover_ids: bool = True,
@@ -105,34 +117,62 @@ def learn_from_spec(
 ) -> list[dict[str, Any]]:
     """Send the smallest possible request for every operation.
 
-    Operations with required path parameters are handled in a second pass: the
-    identifiers are taken from the responses of the first pass, which is how a
-    client would find them too.
+    The learning runs in two passes. The first one exercises the operations
+    without path parameters - creates, listings, identity - and collects the
+    identifiers from the responses. The second one uses those identifiers for
+    the operations that need them.
+
+    When the identifiers are known per identity, the second pass acts as *the
+    identity that created the object*: a client reads back what it created,
+    not what somebody else created.
     """
     document = load_spec(spec_path)
     session = session or requests.Session()
     results: list[dict[str, Any]] = []
     pending: list[tuple[str, str, dict[str, Any]]] = []
-    identifiers: list[str] = []
+    discovered: dict[str, list[str]] = {}
+
+    principals = list((identities or {}).items())
+    if not principals:
+        principals = [(f"identity-{index}", token) for index, token in enumerate(tokens or [])]
 
     for index, (method, path, operation) in enumerate(operations(document)):
         if _has_required_path_parameter(operation):
             pending.append((method, path, operation))
             continue
-        result = _send(session, method, base_url, path, operation, document, tokens, index, timeout)
+        principal, token = _pick(principals, index)
+        result = _send(session, method, base_url, path, operation, document, token, timeout)
         results.append(result)
-        identifiers.extend(_identifiers_in(result.get("response")))
+        for identifier in _identifiers_in(result.get("response")):
+            if identifier not in discovered.setdefault(principal, []):
+                discovered[principal].append(identifier)
 
-    if discover_ids and pending and identifiers:
-        for method, path, operation in pending:
-            for candidate in identifiers[:max_discovered_ids]:
-                concrete = _fill_path(path, operation, candidate)
-                if concrete is None:
-                    continue
-                result = _send(session, method, base_url, concrete, operation, document, tokens, 0, timeout)
-                results.append(result)
-                identifiers.extend(_identifiers_in(result.get("response")))
+    if discover_ids and pending and discovered:
+        for principal, identifiers in discovered.items():
+            token = dict(principals).get(principal)
+            if token is None:
+                continue
+            # Writes first: a listing that is read before the object exists
+            # is empty, and an empty listing teaches the engine nothing.
+            ordered = sorted(pending, key=lambda item: 0 if item[0] in {"POST", "PUT", "PATCH"} else 1)
+            for method, path, operation in ordered:
+                for candidate in identifiers[:max_discovered_ids]:
+                    concrete = _fill_path(path, operation, candidate)
+                    if concrete is None:
+                        continue
+                    result = _send(session, method, base_url, concrete, operation, document, token, timeout)
+                    results.append(result)
+                    for found in _identifiers_in(result.get("response")):
+                        if found not in discovered[principal]:
+                            discovered[principal].append(found)
     return results
+
+
+def _pick(principals: list[tuple[str, str]], index: int) -> tuple[str, str]:
+    """The identity to act as for the n-th request."""
+    if not principals:
+        return ("anonymous", "")
+    return principals[index % len(principals)]
 
 
 def _send(
@@ -142,14 +182,13 @@ def _send(
     path: str,
     operation: dict[str, Any],
     document: dict[str, Any],
-    tokens: list[str] | None,
-    index: int,
+    token: str,
     timeout: float,
 ) -> dict[str, Any]:
     url = base_url.rstrip("/") + path
     headers = {"Content-Type": "application/json"}
-    if tokens:
-        headers["Authorization"] = f"Bearer {tokens[index % len(tokens)]}"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     body = None
     content = operation.get("requestBody", {})
     for media in (content or {}).get("content", {}).values():
