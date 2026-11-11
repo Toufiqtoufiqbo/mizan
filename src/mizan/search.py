@@ -476,9 +476,14 @@ class GuidedSearch:
         if action.repeat > 1:
             return self._execute_concurrently(action)
         self.requests += 1
-        response, violations, identifiers = self.engine.evaluate_action(
-            action.principal, action.method, action.path, action.body
-        )
+        try:
+            response, violations, identifiers = self.engine.evaluate_action(
+                action.principal, action.method, action.path, action.body
+            )
+        except Exception:
+            # A request that could not be completed tells us nothing; it must
+            # not abort the search.
+            return 0.0, []
         for identifier in identifiers:
             if identifier not in self._discovered_ids:
                 self._discovered_ids.append(identifier)

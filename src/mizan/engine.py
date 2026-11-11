@@ -52,7 +52,7 @@ class Target:
 
     base_url: str
     principals: list[Principal] = field(default_factory=list)
-    timeout: float = 10.0
+    timeout: float = 20.0
 
     def principal(self, principal_id: str) -> Principal | None:
         for principal in self.principals:

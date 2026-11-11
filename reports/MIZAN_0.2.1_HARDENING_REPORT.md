@@ -280,7 +280,21 @@ build instead of quietly removing the only proof of attribution.
 | Probes vs guided search | 49.4 vs 20.6 requests per application, same 10 breaches |
 | Skip guard (no server) | **FAILED** as required (no silent pass) |
 
-### 8.2 CI
+### 8.2 Flakiness found during validation
+
+One full-suite run failed while the machine was busy (a publishing job ran at the
+same time): the benchmark's detection rate dipped because requests timed out and
+the guided search lost actions to failures.
+
+Two hardenings:
+
+- the default request timeout went from 10 s to 20 s;
+- the guided search treats a request that could not be completed as "no
+  information" instead of aborting the whole search.
+
+After that, three consecutive full runs passed (103 tests, 76-85 s).
+
+### 8.3 CI
 
 The workflow is configured but has **not** been executed from this machine: it
 needs a GitHub runner. Its stages mirror the local commands exactly.
