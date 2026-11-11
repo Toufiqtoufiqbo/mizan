@@ -43,8 +43,14 @@
 - [x] **CI gate**: `mizan replay` replays every proven attack against a target
       and fails when one still works
 - [x] **Postgres auditor**: an audit table and a trigger, with the identity in
-      `application_name` (the round trip is covered by a test that runs when
-      `MIZAN_TEST_POSTGRES_DSN` is set)
+      `application_name`; primary keys read from the catalog (`id`, UUID, text,
+      composite); tables without a key are unidentified, never misattributed;
+      `SET LOCAL` keeps the identity inside the transaction; the round trip is
+      covered by real-server tests (15 of them, in CI and locally)
+- [x] **Proof bundles carry no secrets**: the bearer token is a placeholder,
+      resolved from the environment when the bundle is replayed
+- [x] **A write without an author is not a finding**: missing or malformed
+      identities are recorded as `unknown` and never reported as a breach
 - [ ] **Parallel Postgres**: the same isolation for a Postgres data directory
 - [ ] **Attack regression**: re-run every proven attack on each pull request
       (the pieces exist: `mizan replay` plus the GitHub Action)

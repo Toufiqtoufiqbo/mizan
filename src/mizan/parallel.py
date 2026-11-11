@@ -30,10 +30,11 @@ the command resolve to that worker's copy.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from mizan.twin import Twin, TwinSpec
 

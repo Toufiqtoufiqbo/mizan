@@ -33,7 +33,7 @@ def _seed(directory: Path) -> Path:
     from mizan.demo.app import DemoApp
 
     database = directory / "demo.sqlite"
-    app = DemoApp(database)
+    DemoApp(database)
     return database
 
 
@@ -45,8 +45,9 @@ def workspace(tmp_path: Path) -> Path:
 def test_pool_gives_every_worker_its_own_copy(workspace: Path) -> None:
     from mizan.demo.app import DemoApp
 
-    seed = DemoApp(workspace / "seed.sqlite")
     source = workspace / "seed.sqlite"
+    DemoApp(source)
+
     pool = TwinPool(
         _spec(),
         workers=2,

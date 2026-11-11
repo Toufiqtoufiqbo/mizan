@@ -10,7 +10,7 @@ classifiers = ["License :: OSI Approved :: MIT License", "Programming Language :
 dependencies = ["schemathesis>=4.33", "click>=8.0", "requests>=2.28"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
 mizan = "mizan.cli:main"
@@ -27,3 +27,14 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "postgres_integration: needs a real PostgreSQL server (MIZAN_TEST_POSTGRES_DSN)",
+]
+
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "W"]

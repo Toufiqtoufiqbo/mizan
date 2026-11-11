@@ -55,9 +55,7 @@ class _Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         path = self.path
 
-        headers = {
-            key: value for key, value in self.headers.items() if key.lower() not in HOP_BY_HOP
-        }
+        headers = {key: value for key, value in self.headers.items() if key.lower() not in HOP_BY_HOP}
         url = proxy.upstream.rstrip("/") + path
         request = urllib.request.Request(url, data=body or None, headers=headers, method=self.command)
 

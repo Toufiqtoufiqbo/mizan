@@ -1,4 +1,4 @@
-﻿"""The Mizan engine: learn the application's laws, then try to break them.
+"""The Mizan engine: learn the application's laws, then try to break them.
 
 The flow is deliberately small:
 
@@ -14,10 +14,10 @@ The flow is deliberately small:
 from __future__ import annotations
 
 import json
-import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 from urllib.parse import urlsplit
 
 import requests
@@ -30,17 +30,16 @@ from mizan.core import (
     Rule,
     Step,
     Violation,
-    actions_for,
     is_authority_field,
 )
-from mizan.identity import decode_token, forge_unsigned, subject_of
+from mizan.identity import decode_token
 from mizan.patching import render as patch_render
-from mizan.regression import render_test as regression_render
 from mizan.proof import ProofBundle
 from mizan.races import RaceOutcome, detect_race, looks_single_use, run_concurrently
+from mizan.regression import render_test as regression_render
 from mizan.taint import Ledger, TaintAnalyzer, WriteEvent
-from mizan.traffic import TrafficLog, TrafficRecord, infer_resource
-
+from mizan.tokens import mask_authorization
+from mizan.traffic import TrafficLog, TrafficRecord
 
 # --------------------------------------------------------------------------- #
 # Target description
@@ -53,7 +52,7 @@ class Target:
 
     base_url: str
     principals: list[Principal] = field(default_factory=list)
-    timeout: float = 10.0
+    timeout: float = 20.0
 
     def principal(self, principal_id: str) -> Principal | None:
         for principal in self.principals:
@@ -156,7 +155,7 @@ class Mizan:
             for role in principal.roles:
                 if role not in privileged_roles:
                     continue
-                for (principal_id, resource_type, action) in accessed:
+                for principal_id, resource_type, action in accessed:
                     if principal_id != principal.id:
                         continue
                     rule = Rule(kind="role", action=action, resource_type=resource_type, role=role)
@@ -320,7 +319,9 @@ class Mizan:
                                 Step(
                                     method=method,
                                     url=url,
-                                    headers={"Authorization": f"Bearer {attacker.token}"},
+                                    headers=mask_authorization(
+                                        {"Authorization": f"Bearer {attacker.token}"}, attacker.id
+                                    ),
                                     status=response.status_code,
                                     note=f"cross-identity read of `{resource.key}`",
                                 )
@@ -375,7 +376,9 @@ class Mizan:
                             Step(
                                 method=method,
                                 url=url,
-                                headers={"Authorization": f"Bearer {principal.token}"},
+                                headers=mask_authorization(
+                                    {"Authorization": f"Bearer {principal.token}"}, principal.id
+                                ),
                                 status=response.status_code,
                                 note="the token claimed one identity, the server acted as another",
                             )
@@ -454,9 +457,7 @@ class Mizan:
                     probe_body = _perturb(body)
                     before = len(self._ledger_events())
                     session = self.target.session_for(attacker)
-                    response = self._request(
-                        session, method, url, json=probe_body, timeout=self.target.timeout
-                    )
+                    response = self._request(session, method, url, json=probe_body, timeout=self.target.timeout)
                     new_events = self._ledger_events()[before:]
                     tainted = [event for event in new_events if event.principal == attacker.id]
                     if not tainted:
@@ -493,7 +494,9 @@ class Mizan:
                                 Step(
                                     method=method,
                                     url=url,
-                                    headers={"Authorization": f"Bearer {attacker.token}"},
+                                    headers=mask_authorization(
+                                        {"Authorization": f"Bearer {attacker.token}"}, attacker.id
+                                    ),
                                     body=body,
                                     status=response.status_code,
                                     note="cross-identity write",
@@ -557,7 +560,9 @@ class Mizan:
                                 Step(
                                     method=method,
                                     url=url,
-                                    headers={"Authorization": f"Bearer {principal.token}"},
+                                    headers=mask_authorization(
+                                        {"Authorization": f"Bearer {principal.token}"}, principal.id
+                                    ),
                                     body=body,
                                     status=response.status_code,
                                     note="authority creation attempt",
@@ -610,7 +615,9 @@ class Mizan:
                     Step(
                         method=method,
                         url=candidate_url,
-                        headers={"Authorization": f"Bearer {principal.token}"} if principal.token else {},
+                        headers=mask_authorization({"Authorization": f"Bearer {principal.token}"}, principal.id)
+                        if principal.token
+                        else {},
                         body=body,
                         status=outcome.statuses[0] if outcome.statuses else None,
                         note="first of two concurrent identical requests",
@@ -618,7 +625,9 @@ class Mizan:
                     Step(
                         method=method,
                         url=candidate_url,
-                        headers={"Authorization": f"Bearer {principal.token}"} if principal.token else {},
+                        headers=mask_authorization({"Authorization": f"Bearer {principal.token}"}, principal.id)
+                        if principal.token
+                        else {},
                         body=body,
                         status=outcome.statuses[1] if len(outcome.statuses) > 1 else None,
                         note="second, concurrent - it should have been rejected",
@@ -703,7 +712,9 @@ class Mizan:
                             Step(
                                 method=method.upper(),
                                 url=url,
-                                headers={"Authorization": f"Bearer {principal.token}"},
+                                headers=mask_authorization(
+                                    {"Authorization": f"Bearer {principal.token}"}, principal.id
+                                ),
                                 status=response.status_code,
                                 note="the request that crossed the ownership boundary",
                             )
@@ -714,12 +725,7 @@ class Mizan:
 
         # L1 - did the server act as the identity the token claims?
         claims = decode_token(principal.token) if principal.token else None
-        if (
-            claims is not None
-            and claims.subject
-            and isinstance(payload, dict)
-            and self._is_identity_path(path)
-        ):
+        if claims is not None and claims.subject and isinstance(payload, dict) and self._is_identity_path(path):
             acted_as = payload.get("id")
             if isinstance(acted_as, (str, int)) and str(acted_as) != claims.subject:
                 violations.append(
@@ -739,7 +745,9 @@ class Mizan:
                             Step(
                                 method=method.upper(),
                                 url=url,
-                                headers={"Authorization": f"Bearer {principal.token}"},
+                                headers=mask_authorization(
+                                    {"Authorization": f"Bearer {principal.token}"}, principal.id
+                                ),
                                 status=response.status_code,
                                 note="the token claimed one identity, the server acted as another",
                             )

@@ -249,14 +249,14 @@ def test_{attack.test_name}() -> None:
 
 def _render_body(attack: Attack) -> str:
     if attack.law == "L1":
-        return '''    response = requests.get(URL, headers=HEADERS, timeout=15)
+        return """    response = requests.get(URL, headers=HEADERS, timeout=15)
     assert response.status_code in (401, 403), (
         f"the identity endpoint answered {{response.status_code}} instead of rejecting the mismatch"
     )
     subject = _jwt_subject(TOKEN)
     assert subject is None or str(response.json().get("id")) == subject, (
         f"the server acted as {{response.json().get('id')}} while the token claimed {{subject}}"
-    )'''
+    )"""
     if attack.law == "L5":
         return '''    def call() -> int:
         return requests.post(URL, headers=HEADERS, timeout=15).status_code
@@ -267,16 +267,16 @@ def _render_body(attack: Attack) -> str:
     accepted = sum(1 for status in statuses if 200 <= status < 300)
     assert accepted <= 1, f"both concurrent requests were accepted: {{statuses}}"'''
     if attack.law == "L4":
-        return '''    response = requests.patch(URL, headers=HEADERS, json=BODY, timeout=15)
+        return """    response = requests.patch(URL, headers=HEADERS, json=BODY, timeout=15)
     assert response.status_code >= 400 or "mizan-probe-" not in response.text, (
         f"the authority field was applied: {{response.text[:200]}}"
-    )'''
+    )"""
     if attack.method == "GET":
-        return '''    response = requests.get(URL, headers=HEADERS, timeout=15)
+        return """    response = requests.get(URL, headers=HEADERS, timeout=15)
     assert response.status_code not in (200, 201), (
         f"the cross-identity request was still accepted: {{response.status_code}}"
-    )'''
-    return '''    response = requests.request("{attack.method}", URL, headers=HEADERS, json=BODY, timeout=15)
+    )"""
+    return """    response = requests.request("{attack.method}", URL, headers=HEADERS, json=BODY, timeout=15)
     assert response.status_code not in (200, 201), (
         f"the cross-identity write was still accepted: {{response.status_code}}"
-    )'''
+    )"""

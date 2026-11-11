@@ -75,7 +75,9 @@ class DemoApp:
     def _init_db(self) -> None:
         connection = self._connect()
         with connection:
-            connection.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT, role TEXT, password TEXT)")
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT, role TEXT, password TEXT)"
+            )
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, owner_id TEXT, status TEXT, amount INTEGER)"
             )

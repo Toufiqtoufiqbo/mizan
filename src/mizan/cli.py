@@ -11,10 +11,10 @@ from typing import Any
 import click
 import requests
 
-from mizan.tokens import make_token
 from mizan.core import LAWS, Principal, Step
 from mizan.engine import Mizan, Target
 from mizan.proof import ProofBundle
+from mizan.tokens import TokenResolver, make_token
 
 SPEC_PATH = Path(__file__).parent / "demo" / "openapi.json"
 
@@ -106,15 +106,35 @@ def attack(
 
 
 @main.command()
-@click.option("--command", "command", required=True, help="How to start the application, e.g. 'python -m app --port {port}'.")
-@click.option("--data", "data_paths", multiple=True, type=click.Path(), help="File or directory holding the state (repeatable).")
-@click.option("--spec", "spec_path", default=None, type=click.Path(exists=True), help="OpenAPI document (optional if the traffic log is already filled).")
-@click.option("--token", "tokens", multiple=True, help="Bearer token of an identity, in the form name=token (repeatable).")
+@click.option(
+    "--command", "command", required=True, help="How to start the application, e.g. 'python -m app --port {port}'."
+)
+@click.option(
+    "--data", "data_paths", multiple=True, type=click.Path(), help="File or directory holding the state (repeatable)."
+)
+@click.option(
+    "--spec",
+    "spec_path",
+    default=None,
+    type=click.Path(exists=True),
+    help="OpenAPI document (optional if the traffic log is already filled).",
+)
+@click.option(
+    "--token", "tokens", multiple=True, help="Bearer token of an identity, in the form name=token (repeatable)."
+)
 @click.option("--workdir", default=".", type=click.Path(), help="Where the application runs.")
 @click.option("--out", "out_path", default="mizan-proofs", type=click.Path(), help="Directory for proof bundles.")
-@click.option("--traffic", "traffic_path", default=None, type=click.Path(), help="Traffic log to write (default: next to the proof bundles).")
+@click.option(
+    "--traffic",
+    "traffic_path",
+    default=None,
+    type=click.Path(),
+    help="Traffic log to write (default: next to the proof bundles).",
+)
 @click.option("--workers", default=1, show_default=True, help="How many isolated copies to attack in parallel.")
-@click.option("--guided", is_flag=True, help="Search for the request sequence that breaks a law, instead of running fixed probes.")
+@click.option(
+    "--guided", is_flag=True, help="Search for the request sequence that breaks a law, instead of running fixed probes."
+)
 @click.option("--budget", default=40, show_default=True, help="How many actions the guided search may try.")
 @click.option("--keep", is_flag=True, help="Keep the twin workspace.")
 def twin(
@@ -250,16 +270,17 @@ def replay(bundles: str, target: str, token: str | None) -> None:
     Exits with a non-zero status when an attack still works, so a pull request
     that reintroduces a fixed vulnerability fails the build.
     """
-    import os
     from urllib.parse import urlsplit
 
     from mizan.regression import Attack, attack_succeeds
 
+    resolver = TokenResolver.from_env()
     directories = sorted(path for path in Path(bundles).iterdir() if path.is_dir())
     if not directories:
         click.echo("no proof bundles found")
         return
     reproduced = 0
+    unreachable = 0
     for directory in directories:
         payload = json.loads((directory / "replay.json").read_text(encoding="utf-8"))
         steps = payload.get("steps") or []
@@ -267,10 +288,12 @@ def replay(bundles: str, target: str, token: str | None) -> None:
             continue
         step = steps[0]
         principal = payload.get("principal") or "attacker"
-        bearer = token or os.environ.get(f"MIZAN_TOKEN_{principal.upper()}", "")
+        bearer = token or resolver.token_for(principal)
         if not bearer:
-            click.echo(f"  ? {directory.name}: no token for {principal}")
-            continue
+            raise click.ClickException(
+                f'no token for principal {principal!r}. Set MIZAN_TOKENS=\'{{"{principal}": "..."}}\' '
+                f"or MIZAN_TOKEN_{principal.upper()}. The replay cannot be trusted without it."
+            )
         attack = Attack(
             law=payload["law"],
             title=payload["title"],
@@ -282,11 +305,19 @@ def replay(bundles: str, target: str, token: str | None) -> None:
             expectation="the request is rejected",
             principal=principal,
         )
-        if attack_succeeds(attack, bearer, target):
+        try:
+            still_works = attack_succeeds(attack, bearer, target)
+        except Exception as exc:
+            click.echo(f"  ! {payload['law']} {payload['title']} - target unreachable: {type(exc).__name__}")
+            unreachable += 1
+            continue
+        if still_works:
             reproduced += 1
             click.echo(f"  ✗ {payload['law']} {payload['title']} - STILL REPRODUCIBLE")
         else:
             click.echo(f"  ✓ {payload['law']} {payload['title']} - fixed")
+    if unreachable:
+        raise SystemExit(2)
     if reproduced:
         raise SystemExit(1)
     click.echo(f"all {len(directories)} attacks are blocked")
@@ -298,9 +329,7 @@ def _guided_attack(engine: Mizan, budget: int) -> list[Any]:
 
     search = GuidedSearch(engine, budget=budget)
     result = search.run()
-    click.echo(
-        f"guided search: {result.requests} requests, laws {sorted(result.laws) or 'none'}"
-    )
+    click.echo(f"guided search: {result.requests} requests, laws {sorted(result.laws) or 'none'}")
     return result.violations
 
 
@@ -374,9 +403,7 @@ def regress(bundle: str, out_path: str) -> None:
         principal=payload.get("principal"),
         resource=payload.get("resource"),
         action=payload.get("action"),
-        steps=[
-            Step(**step) for step in payload.get("steps", [])
-        ],
+        steps=[Step(**step) for step in payload.get("steps", [])],
     )
     directory = Path(out_path)
     directory.mkdir(parents=True, exist_ok=True)
@@ -395,17 +422,17 @@ def regress(bundle: str, out_path: str) -> None:
 def verify(bundle: str, target: str, token: str | None, expect_fixed: bool) -> None:
     """Replay a proof bundle against a live target."""
     proof = ProofBundle.load(bundle)
+    resolver = TokenResolver.from_env()
     if expect_fixed:
-        _verify_fixed(bundle, target, token)
+        _verify_fixed(bundle, target, token, resolver)
         return
     session = requests.Session()
-    result = proof.verify(session)
+    result = proof.verify(session, resolver=resolver)
     click.echo(json.dumps(result, indent=2, ensure_ascii=False, default=str))
 
 
-def _verify_fixed(bundle: str, target: str, token: str | None) -> None:
+def _verify_fixed(bundle: str, target: str, token: str | None, resolver: TokenResolver) -> None:
     """Check that the attack behind a bundle no longer works."""
-    import os
     from urllib.parse import urlsplit
 
     from mizan.regression import Attack, attack_succeeds
@@ -417,7 +444,7 @@ def _verify_fixed(bundle: str, target: str, token: str | None) -> None:
         raise SystemExit(2)
     step = steps[0]
     principal = payload.get("principal") or "attacker"
-    token = token or os.environ.get(f"MIZAN_TOKEN_{principal.upper()}", "")
+    token = token or resolver.token_for(principal) or ""
     attack = Attack(
         law=payload["law"],
         title=payload["title"],

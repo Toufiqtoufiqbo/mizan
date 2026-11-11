@@ -1,3 +1,17 @@
+# Mīzān CI - four mandatory stages and one optional job.
+#
+# A: static + unit        - ruff, formatting, the unit suite
+# B: PostgreSQL           - a disposable database, the real round trip.
+#                          MIZAN_REQUIRE_POSTGRES makes a skip a failure:
+#                          a broken database setup must fail the build, not
+#                          quietly remove the only test that proves attribution.
+# C: security regression  - the regression tests and the proof replay. This is
+#                          the gate: an attack that works fails the build.
+# D: benchmark            - the labelled corpus, reported not asserted.
+#
+# External-target testing is opt-in (see the last job): ordinary CI never
+# attacks anything it does not own.
+
 name: mizan
 
 on:
@@ -6,49 +20,164 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  FORCE_COLOR: "1"
+
 jobs:
-  self-check:
+  # --------------------------------------------------------------------------
+  # Stage A - static and unit
+  # --------------------------------------------------------------------------
+  static-and-unit:
+    name: "A - static & unit"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+
       - name: Install
         run: pip install -e ".[dev]"
-      - name: Tests
-        run: python -m pytest -q
-      - name: Benchmark (subset)
-        run: python -m mizan.cli benchmark --size 10 --controls 2 --out benchmark-report
 
-  attack-regression:
-    # Replays the proven attacks against a running target.
-    # Configure the target with the repository secrets MIZAN_TARGET and
-    # MIZAN_TOKEN_<IDENTITY>.
+      - name: Lint
+        run: ruff check .
+
+      - name: Formatting
+        run: ruff format --check .
+
+      - name: Unit tests
+        run: python -m pytest -q -m "not postgres_integration"
+
+  # --------------------------------------------------------------------------
+  # Stage B - PostgreSQL integration
+  # --------------------------------------------------------------------------
+  postgres-integration:
+    name: "B - PostgreSQL"
     runs-on: ubuntu-latest
-    if: ${{ vars.MIZAN_TARGET != '' }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: mizan
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      MIZAN_TEST_POSTGRES_DSN: postgresql://postgres:mizan@localhost:5432/postgres
+      # A missing database fails instead of skipping: the integration suite is
+      # the only proof that attribution works.
+      MIZAN_REQUIRE_POSTGRES: "1"
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: PostgreSQL round trip
+        run: python -m pytest -q tests/test_postgres_roundtrip.py
+
+      - name: No skipped tests
+        # A skip here means the suite did not run - fail rather than pass.
+        run: python -m pytest tests/test_postgres_roundtrip.py -rs --tb=no -q | tee out.txt; |
+          if grep -q "skipped" out.txt; then echo "::error::PostgreSQL tests were skipped"; exit 1; fi
+
+  # --------------------------------------------------------------------------
+  # Stage C - security regression
+  # --------------------------------------------------------------------------
+  security-regression:
+    name: "C - security regression"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Regression tests
+        run: python -m pytest -q tests/test_regression.py
+
+      - name: Proof replay - an attack reproduces before the fix and is blocked after
+        # Self-contained: the benchmark owns a vulnerable application and its
+        # patched twin, and the attacks are replayed against both. No external
+        # target is needed.
+        run: python -m pytest -q tests/test_search_benchmark.py
+
+      - name: Fixed probes against the guided search
+        run: python -m mizan.cli compare --size 10
+
+  # --------------------------------------------------------------------------
+  # Stage D - benchmark
+  # --------------------------------------------------------------------------
+  benchmark:
+    name: "D - benchmark"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: AuthzBugs (subset)
+        run: python -m mizan.cli benchmark --size 10 --controls 2 --out benchmark-report
+
+      - name: Detection rate
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+          metrics = json.loads(pathlib.Path("benchmark-report/report.json").read_text())["metrics"]
+          print(f"detection {metrics['detection_rate']:.0%}, false positives {metrics['false_positives_on_patched_apps']}")
+          if metrics["detection_rate"] < 0.9 or metrics["false_positives_on_patched_apps"] > 0:
+              print("::error::benchmark regressed", metrics)
+              sys.exit(1)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: benchmark-report/
+
+  # --------------------------------------------------------------------------
+  # Opt-in: an external target.
+  # Never part of ordinary CI: it needs an explicit variable and its own tokens.
+  # --------------------------------------------------------------------------
+  external-target:
+    name: "E - external target (opt-in)"
+    if: vars.MIZAN_TARGET != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
       - name: Install
         run: pip install -e .
-      - name: Replay every proven attack
+
+      - name: Replay every proven attack against the target
         env:
           MIZAN_TARGET: ${{ vars.MIZAN_TARGET }}
+          MIZAN_TOKENS: ${{ secrets.MIZAN_TOKENS }}
         run: |
-          set -e
-          for bundle in mizan-proofs/*/; do
-            principal=$(python -c "import json,sys;print(json.load(open('$bundle/replay.json')).get('principal','').upper())")
-            if [ -n "$principal" ] && [ -z "${!principal:-}" ]; then
-              echo "no token for $principal, skipping $bundle"
-              continue
-            fi
-            echo "::group::$bundle"
-            token_var="MIZAN_TOKEN_$principal"
-            MIZAN_TOKEN="$token_var" mizan verify "$bundle" --target "$MIZAN_TARGET" --expect-fixed
-            echo "::endgroup::"
-          done
-      - name: The CI gate
-        run: mizan replay mizan-proofs --target "$MIZAN_TARGET"
+          python -m mizan.cli replay mizan-proofs --target "$MIZAN_TARGET"

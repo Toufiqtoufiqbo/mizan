@@ -66,10 +66,10 @@ def test_attack_is_built_from_the_first_step() -> None:
 
 
 def test_attack_succeeds_against_a_vulnerable_target(workspace=None) -> None:
-    from mizan.benchmark.apps import BenchmarkApp, serve
-
     import tempfile
     from pathlib import Path
+
+    from mizan.benchmark.apps import BenchmarkApp, serve
 
     root = Path(tempfile.mkdtemp())
     app = BenchmarkApp(root / "db.sqlite", bugs=("idor_read",))
@@ -154,10 +154,10 @@ def test_generated_test_fails_on_vulnerable_and_passes_on_fixed(tmp_path) -> Non
 
 
 def test_attack_is_blocked_by_the_fixed_application() -> None:
-    from mizan.benchmark.apps import BenchmarkApp, serve
-
     import tempfile
     from pathlib import Path
+
+    from mizan.benchmark.apps import BenchmarkApp, serve
 
     root = Path(tempfile.mkdtemp())
     app = BenchmarkApp(root / "db.sqlite", bugs=())

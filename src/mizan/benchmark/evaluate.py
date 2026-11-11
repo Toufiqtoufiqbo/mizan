@@ -20,8 +20,8 @@ import requests
 
 from mizan.benchmark.apps import BUGS, AppSpec, BenchmarkApp, serve
 from mizan.benchmark.generator import BENCHMARK_NAME, Suite, build_suite
-from mizan.engine import Mizan, Target
 from mizan.core import Principal
+from mizan.engine import Mizan, Target
 from mizan.regression import Attack, attack_succeeds, build_attack
 
 #: The OpenAPI document of the benchmark applications.
@@ -196,7 +196,9 @@ class Report:
     def write(self, directory: str | Path) -> Path:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / "report.json").write_text(json.dumps(self.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+        (directory / "report.json").write_text(
+            json.dumps(self.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         (directory / "report.md").write_text(self.to_markdown(), encoding="utf-8")
         return directory / "report.json"
 
@@ -272,9 +274,9 @@ def run_application(
     try:
         tokens = app.tokens()
         generate_traffic(base_url, tokens, spec.users, spec.orders)
-        principals = [
-            Principal(id=user, roles=("user",), token=tokens[user]) for user in spec.users
-        ] + [Principal(id="admin", roles=("admin",), token=tokens["admin"])]
+        principals = [Principal(id=user, roles=("user",), token=tokens[user]) for user in spec.users] + [
+            Principal(id="admin", roles=("admin",), token=tokens["admin"])
+        ]
         engine = Mizan(
             Target(base_url=base_url, principals=principals),
             traffic_path=traffic_path,

@@ -115,9 +115,7 @@ class SqliteAttributor:
                 old = previous.rows.get(key)
                 if old is None:
                     continue
-                changed = {
-                    column: value for column, value in values.items() if old.get(column) != value
-                }
+                changed = {column: value for column, value in values.items() if old.get(column) != value}
                 if not changed:
                     continue
                 events.append(

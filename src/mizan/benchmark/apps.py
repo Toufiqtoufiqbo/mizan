@@ -9,15 +9,14 @@ from __future__ import annotations
 
 import base64
 import json
+import socketserver
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
-
-import socketserver
 
 from mizan.taint import WriteEvent
 from mizan.tokens import make_token
@@ -43,7 +42,9 @@ BUGS: dict[str, Bug] = {
     "idor_write": Bug("idor_write", "L3", "a write lands in a row owned by somebody else", "high"),
     "mass_assignment": Bug("mass_assignment", "L4", "the client can set the role of its own account", "critical"),
     "race": Bug("race", "L5", "two concurrent requests both apply the same transition", "high"),
-    "confused_identity": Bug("confused_identity", "L1", "the server acts as a different identity than the token claims", "critical"),
+    "confused_identity": Bug(
+        "confused_identity", "L1", "the server acts as a different identity than the token claims", "critical"
+    ),
 }
 
 #: Bugs that the current engine is expected to detect.
@@ -222,9 +223,7 @@ class BenchmarkApp:
         status, payload = self._route(method, path, body, principal, request_id)
         raw = json.dumps(payload).encode("utf-8")
         headers = [("Content-Type", "application/json"), ("Content-Length", str(len(raw)))]
-        self._record_traffic(
-            method=method, path=path, status=status, principal=principal, body=body, response=payload
-        )
+        self._record_traffic(method=method, path=path, status=status, principal=principal, body=body, response=payload)
         start_response(f"{status} {status_text(status)}", headers)
         return [raw]
 

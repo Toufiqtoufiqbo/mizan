@@ -74,9 +74,13 @@ class ProofBundle:
             json.dumps(evidence or violation.evidence, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
         )
         if dbdiff is not None:
-            (directory / "dbdiff.json").write_text(json.dumps(dbdiff, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+            (directory / "dbdiff.json").write_text(
+                json.dumps(dbdiff, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
+            )
         if matrix is not None:
-            (directory / "matrix.json").write_text(json.dumps(matrix, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+            (directory / "matrix.json").write_text(
+                json.dumps(matrix, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
+            )
         if patch:
             (directory / "patch.diff").write_text(patch, encoding="utf-8")
         if regression_test:
@@ -92,16 +96,35 @@ class ProofBundle:
     def replay(self) -> dict[str, Any]:
         return json.loads((self.directory / "replay.json").read_text(encoding="utf-8"))
 
-    def verify(self, session: Any) -> dict[str, Any]:
+    def verify(self, session: Any, resolver: Any = None) -> dict[str, Any]:
         """Replay the recorded steps against a live target.
 
         `session` is a `requests.Session`-like object. The verifier returns a
         structured result instead of raising, so a CI job can decide.
+
+        The bundle never contains a secret: it contains a placeholder such as
+        `${MIZAN_TOKEN_ALICE}`. The `resolver` turns it back into a token.
         """
+        from mizan.tokens import MissingToken, placeholder_for, principal_from_placeholder, resolve_headers
+
+        if resolver is None:
+            payload = self.replay()
+            for step in payload.get("steps", []):
+                for name, value in (step.get("headers") or {}).items():
+                    principal = principal_from_placeholder(value.split(" ", 1)[-1].strip())
+                    if principal is not None:
+                        raise MissingToken(
+                            f"this bundle contains the token placeholder of {principal!r} "
+                            f"({placeholder_for(principal)}). Pass a resolver: "
+                            "TokenResolver.from_env() reads MIZAN_TOKENS or MIZAN_TOKEN_<NAME>."
+                        )
         payload = self.replay()
         results: list[dict[str, Any]] = []
         for step in payload.get("steps", []):
-            request_kwargs: dict[str, Any] = {"headers": step.get("headers") or {}}
+            headers = step.get("headers") or {}
+            if resolver is not None:
+                headers = resolve_headers(headers, resolver)
+            request_kwargs: dict[str, Any] = {"headers": headers}
             if step.get("body") is not None:
                 request_kwargs["json"] = step["body"]
             try:
@@ -165,7 +188,9 @@ def _render_markdown(violation: Violation, evidence: dict[str, Any] | None) -> s
             lines.append(f"> {step.note}")
         lines.append("")
     if evidence:
-        lines.extend(["## Evidence", "", "```json", json.dumps(evidence, indent=2, ensure_ascii=False, default=str), "```", ""])
+        lines.extend(
+            ["## Evidence", "", "```json", json.dumps(evidence, indent=2, ensure_ascii=False, default=str), "```", ""]
+        )
     lines.extend(
         [
             "---",

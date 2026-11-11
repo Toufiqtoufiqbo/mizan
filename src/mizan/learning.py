@@ -129,9 +129,7 @@ def learn_from_spec(
                 concrete = _fill_path(path, operation, candidate)
                 if concrete is None:
                     continue
-                result = _send(
-                    session, method, base_url, concrete, operation, document, tokens, 0, timeout
-                )
+                result = _send(session, method, base_url, concrete, operation, document, tokens, 0, timeout)
                 results.append(result)
                 identifiers.extend(_identifiers_in(result.get("response")))
     return results
