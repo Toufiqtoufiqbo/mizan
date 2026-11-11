@@ -124,9 +124,19 @@ stages; the PostgreSQL round trip runs against a real server, not a mock.
 | F | independent application validation | green |
 | G | external target | opt-in, skipped |
 
-The run of this branch is linked in the pull request. Every mandatory stage
-fails when its suite is skipped - the PostgreSQL stage proved it twice during
-this phase (it caught a missing driver and a broken guard step).
+Run: <https://github.com/Toufiqtoufiqbo/mizan/actions/runs/43115998685> (commit
+`3f57c6f`, **success**). Pull request: #6.
+
+Every mandatory stage fails when its suite is skipped - the CI proved it three
+times during this phase: it caught a missing PostgreSQL driver, a broken guard
+step, and a missing Flask dependency (the independent-validation target is a
+Flask application, and Flask was not in the dev extras). Each time the stage
+failed loudly instead of passing quietly.
+
+The stages are not decorative: the benchmark stage asserts the detection rate
+and the false-positive count, the PostgreSQL stage fails when the integration
+suite is skipped, and the independent-validation stage fails when *its* suite is
+skipped.
 
 ---
 
