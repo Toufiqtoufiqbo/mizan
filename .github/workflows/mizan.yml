@@ -88,8 +88,12 @@ jobs:
 
       - name: No skipped tests
         # A skip here means the suite did not run - fail rather than pass.
-        run: python -m pytest tests/test_postgres_roundtrip.py -rs --tb=no -q | tee out.txt; |
-          if grep -q "skipped" out.txt; then echo "::error::PostgreSQL tests were skipped"; exit 1; fi
+        run: |
+          python -m pytest tests/test_postgres_roundtrip.py -rs --tb=no -q | tee out.txt
+          if grep -q "skipped" out.txt; then
+            echo "::error::PostgreSQL tests were skipped"
+            exit 1
+          fi
 
   # --------------------------------------------------------------------------
   # Stage C - security regression
