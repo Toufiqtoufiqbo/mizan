@@ -30,6 +30,8 @@ SKIP_DIRS = {
     ".schemathesis",
     "demo-proofs",
     "node_modules",
+    # A local build artifact: the same files live on the Schemathesis fork.
+    "fork-patch",
 }
 SKIP_SUFFIXES = {".pyc", ".pyo", ".sqlite", ".log"}
 
@@ -92,7 +94,9 @@ def main() -> int:
         print("nothing to publish")
         return 0
 
-    # The branch, from the base.
+    # The branch, from the base. When it already exists, the new commit
+    # becomes a child of the current head, so the update is a fast-forward.
+    parent = base_commit
     exists = client.get(f"{API}/repos/{OWNER}/{REPO}/git/ref/heads/{BRANCH}")
     if exists.status_code == 404:
         response = client.post(
@@ -101,6 +105,9 @@ def main() -> int:
         )
         response.raise_for_status()
         print(f"created branch {BRANCH}")
+    else:
+        parent = exists.json()["object"]["sha"]
+        print(f"branch head: {parent}")
 
     entries = []
     for relative, path in changed:
@@ -121,7 +128,7 @@ def main() -> int:
     message = sys.argv[1] if len(sys.argv) > 1 else "chore: publish the working tree"
     commit = client.post(
         f"{API}/repos/{OWNER}/{REPO}/git/commits",
-        json={"message": message, "tree": tree.json()["sha"], "parents": [base_commit]},
+        json={"message": message, "tree": tree.json()["sha"], "parents": [parent]},
     )
     commit.raise_for_status()
     commit_sha = commit.json()["sha"]
