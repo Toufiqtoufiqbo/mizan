@@ -55,14 +55,34 @@
 - [ ] **Attack regression**: re-run every proven attack on each pull request
       (the pieces exist: `mizan replay` plus the GitHub Action)
 
+## 0.2.2 (done - independent validation)
+
+- [x] **The self-scan is trustworthy**: isolated workspaces, accurate counts,
+      fail-closed gate, a real request budget, `--out` writes the bundles
+- [x] **Independent application validation**: a standalone Flask target with a
+      clean and a vulnerable variant; the clean one produces nothing, the
+      vulnerable one produces L2 and L3
+- [x] **Control-plane security**: opaque random tokens stored as a hash, no
+      default credential, strict request models, a full ownership boundary,
+      target validation (scheme, host, port, credentials in the URL)
+- [x] **SARIF 2.1.0 export** with stable rule identifiers and a validator
+- [x] **Six CI stages**, every mandatory stage failing when its suite is skipped
+- [x] **Native Windows measurements** (`reports/MIZAN_0.2.2_WINDOWS_PERFORMANCE.md`)
+
+Testing somebody else's application found six real defects in the engine, among
+them a false positive on every successful request.
+
 ## Next (v0.4 - the second user)
 
 - [ ] **A second, external user**: the self-scan proves the tool works on us;
       it does not prove it works on somebody else's codebase
 - [ ] **Triage format**: SARIF and a pull-request comment, so findings land in
       the workflow the team already uses
-- [ ] **The corpus across stacks** (Flask, FastAPI), with a manifest so
-      third parties can add cases
+- [ ] **The corpus across stacks**: the Flask fixture is the second stack;
+      a FastAPI and an Express application follow, with a manifest so third
+      parties can add cases
+- [ ] **An identity map in the CLI** (`--identity-map`): Mizan is blind against
+      opaque tokens unless it is told who is who
 
 ## Later (v0.3 - the rest of the laws)
 

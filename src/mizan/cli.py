@@ -18,6 +18,10 @@ from mizan.tokens import TokenResolver, make_token
 
 SPEC_PATH = Path(__file__).parent / "demo" / "openapi.json"
 
+#: The probes, in the order they run. The parallel mode splits them between the
+#: isolated copies.
+PROBE_GROUPS = ("L5", "L1", "L2", "L3", "L4", "T")
+
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(package_name="mizan", prog_name="mizan")
@@ -246,7 +250,11 @@ def _attack_parallel(
     build_engine: Any,
     out_path: str,
 ) -> list[Any]:
-    """Attack several isolated copies of the application at the same time."""
+    """Attack several isolated copies of the application at the same time.
+
+    The same probes as the serial run - they are split between the copies, so
+    the result does not depend on the number of workers.
+    """
     from mizan.parallel import run_parallel
 
     findings, executed = run_parallel(
@@ -255,9 +263,29 @@ def _attack_parallel(
         workspace=workspace.parent / f"{workspace.name}-pool",
         data_paths=data_paths,
         build_engine=build_engine,
+        groups=PROBE_GROUPS,
     )
     click.echo(f"attacked with {workers} isolated copies: {', '.join(executed)}")
     return findings
+
+
+@main.command()
+@click.argument("bundles", type=click.Path(exists=True))
+@click.option("--out", "out_path", required=True, type=click.Path(), help="The SARIF file to write.")
+def export_sarif(bundles: str, out_path: str) -> None:
+    """Export the proof bundles as SARIF 2.1.0."""
+    from mizan.sarif import export_sarif as _export
+    from mizan.sarif import validate_sarif
+
+    result = _export(bundles, out_path)
+    for warning in result.warnings:
+        click.echo(f"  ! {warning}")
+    problems = validate_sarif(result.document)
+    if problems:
+        for problem in problems:
+            click.echo(f"  ! {problem}")
+        raise SystemExit(1)
+    click.echo(f"{result.results} finding(s) from {result.bundles} bundle(s) -> {out_path}")
 
 
 @main.command()
@@ -341,31 +369,92 @@ def _split_command(command: str) -> list[str]:
 
 @main.command()
 @click.option("--out", "out_path", default=None, type=click.Path(), help="Where to write the proof bundles.")
-@click.option("--budget", default=60, show_default=True, help="How many actions the search may try.")
+@click.option("--budget", default=60, show_default=True, help="How many requests a variant may send.")
 def self_scan(out_path: str | None, budget: int) -> None:
     """Scan Mizan's own control plane with Mizan.
 
-    The clean API must produce no findings, and a deliberately weakened twin
-    must produce one - otherwise the check is not known to bite.
+    The clean API must produce no finding, and a deliberately weakened twin
+    must produce one - otherwise the check is not known to bite. The scan is
+    fail-closed: a crash, an empty scan or a finding without evidence is a
+    failure, not an empty result.
     """
-    from mizan.dogfood import scan_server
+    from mizan.dogfood import run_self_check
 
-    clean = scan_server(variant="clean", vulnerable=False, budget=budget)
-    weakened = scan_server(variant="weakened", vulnerable=True, budget=budget)
-    for result in (clean, weakened):
-        if result.error:
-            click.echo(f"  {result.variant}: ERROR {result.error}")
+    check = run_self_check(budget=budget)
+    for variant in (check.clean, check.weakened):
+        if variant is None:
             continue
-        click.echo(
-            f"  {result.variant}: {len(result.laws)} finding(s) {result.laws or ''} in {result.requests} requests"
-        )
-        for finding in result.findings:
-            click.echo(f"      - {finding['law']} {finding['title']}")
-    if clean.clean and not weakened.clean:
-        click.echo("self-scan OK: the real API is clean, the weakened one is not")
-        return
-    click.echo("self-scan FAILED")
-    raise SystemExit(1)
+        click.echo(f"{variant.variant}:")
+        click.echo(f"  findings: {variant.finding_count}")
+        click.echo(f"  law types: {variant.law_types}")
+        click.echo(f"  requests: {variant.request_count}")
+        if variant.error:
+            click.echo(f"  error: {variant.error}")
+        for finding in variant.findings:
+            click.echo(f"    - {finding['law']} {finding['title']}")
+            click.echo(
+                f"      principal={finding.get('principal')} resource={finding.get('resource')} "
+                f"severity={finding.get('severity')}"
+            )
+            if out_path:
+                bundles = _write_bundles(finding, out_path)
+                click.echo(f"      bundle: {bundles}")
+    click.echo("")
+    for item in check.checks:
+        click.echo(f"  [{'PASS' if item['passed'] else 'FAIL'}] {item['check']} - {item['detail']}")
+    if not check.passed:
+        click.echo("self-scan FAILED")
+        raise SystemExit(1)
+    click.echo("self-scan OK: the real API is clean, the weakened one is not")
+
+
+def _write_bundles(finding: dict[str, Any], out_path: str) -> str:
+    """Write a proof bundle for one finding."""
+    from mizan.core import Step, Violation
+    from mizan.proof import ProofBundle
+
+    violation = Violation(
+        law=finding["law"],
+        title=finding["title"],
+        detail=finding.get("detail", ""),
+        severity=finding.get("severity", "high"),
+        principal=finding.get("principal"),
+        resource=finding.get("resource"),
+        action=finding.get("action"),
+        steps=[Step(**step) for step in finding.get("steps", [])],
+    )
+    directory = ProofBundle.create(out_path, violation, evidence=finding.get("evidence", {}))
+    return str(directory)
+
+
+@main.command()
+@click.argument("application", type=click.Path(exists=True))
+@click.option("--budget", default=60, show_default=True, help="How many requests a variant may send.")
+def validate(application: str, budget: int) -> None:
+    """Validate an application that does not depend on Mizan.
+
+    The clean variant must produce no finding, and the vulnerable variant must
+    produce the expected one. This is how Mizan is checked against code it did
+    not write.
+    """
+    from mizan.validation import validate_application
+
+    result = validate_application(application, budget=budget, expected_laws=("L2", "L3"))
+    for variant in ("clean", "vulnerable"):
+        data = result[variant]
+        click.echo(f"{variant}:")
+        click.echo(f"  findings: {data['finding_count']}")
+        click.echo(f"  law types: {data['law_types']}")
+        click.echo(f"  requests: {data['request_count']}")
+        if data["error"]:
+            click.echo(f"  error: {data['error']}")
+    click.echo("")
+    for item in result["checks"]:
+        click.echo(f"  [{'PASS' if item['passed'] else 'FAIL'}] {item['check']} - {item['detail']}")
+    if not result["passed"]:
+        click.echo("validation FAILED")
+        raise SystemExit(1)
+    click.echo("validation OK")
 
 
 @main.command()

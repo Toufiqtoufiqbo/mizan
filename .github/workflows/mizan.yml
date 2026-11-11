@@ -181,11 +181,42 @@ jobs:
         run: python -m mizan.cli self-scan
 
   # --------------------------------------------------------------------------
+  # Stage F - independent application validation
+  # --------------------------------------------------------------------------
+  independent-validation:
+    name: "F - independent application"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: A standalone application that knows nothing about Mizan
+        # The application has its own authentication, its own database and its
+        # own OpenAPI document. The clean variant must produce no finding, the
+        # vulnerable one must produce the expected finding.
+        run: python -m pytest -q tests/test_external_validation.py
+
+      - name: The gate must not skip
+        run: |
+          python -m pytest tests/test_external_validation.py -rs --tb=no -q | tee out.txt
+          if grep -q "skipped" out.txt; then
+            echo "::error::the independent validation was skipped"
+            exit 1
+          fi
+
+  # --------------------------------------------------------------------------
   # Opt-in: an external target.
   # Never part of ordinary CI: it needs an explicit variable and its own tokens.
   # --------------------------------------------------------------------------
   external-target:
-    name: "F - external target (opt-in)"
+    name: "G - external target (opt-in)"
     if: vars.MIZAN_TARGET != ''
     runs-on: ubuntu-latest
     steps:

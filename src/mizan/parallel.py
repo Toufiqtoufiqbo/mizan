@@ -205,4 +205,14 @@ def run_parallel(
                 findings.extend(future.result())
     finally:
         pool.stop()
-    return findings, executed
+    # The same breach can be reported by two workers - the probe and the data
+    # view see it. Keep one.
+    unique: dict[tuple[Any, ...], Any] = {}
+    for finding in findings:
+        key = (
+            getattr(finding, "law", None),
+            getattr(finding, "principal", None),
+            getattr(finding, "resource", None),
+        )
+        unique.setdefault(key, finding)
+    return list(unique.values()), executed

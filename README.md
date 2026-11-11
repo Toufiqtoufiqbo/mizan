@@ -152,6 +152,46 @@ The search is not a replacement for the probes: the probes are predictable, the
 search explores. Run both - `mizan twin --guided` runs the search, and the
 probes are one command away.
 
+## Independent validation
+
+Mīzān is tested against an application that knows nothing about it:
+`tests/fixtures/external_apps/flask_store/` - a standalone Flask application
+with its own authentication, its own database and its own OpenAPI document.
+
+```bash
+mizan validate tests/fixtures/external_apps/flask_store
+```
+
+| Variant | Result |
+|---|---|
+| clean | **0 findings** in 4 requests |
+| vulnerable (one ownership check removed) | **3 findings** - `L2` (cross-user read) and `L3` (cross-user write) |
+
+Every finding names the principal, the method, the endpoint, the resource, the
+owner and the reproduction. The gate is a CI stage, and it fails when the
+suite is skipped.
+
+Testing somebody else's application is what exposed six real defects in the
+engine - among them a false positive on every successful request, and a blind
+spot against applications that do not use JWTs. See
+`reports/MIZAN_0.2.2_EXTERNAL_VALIDATION.md`.
+
+---
+
+## SARIF
+
+Findings can be written as SARIF 2.1.0, the format code-scanning tools read:
+
+```bash
+mizan export-sarif mizan-proofs --out findings.sarif
+```
+
+Every law has a stable rule identifier (`MIZAN-L2`), the evidence travels as
+properties, and no source location is invented - Mīzān does not know where in
+your code the flaw is, and it does not pretend to.
+
+---
+
 ## Mīzān scans itself
 
 Mīzān has a small control plane of its own (`mizan.server`): it starts scans,
@@ -159,9 +199,14 @@ lists findings and hands out proof bundles. That API is Mīzān's **first user**
 
 ```bash
 mizan self-scan
-#   clean: 0 finding(s) in 6 requests
-#   weakened: 1 finding(s) ['L2'] in 6 requests
-#       - L2 alice read an object owned by root
+# clean:
+#   findings: 0
+#   law types: []
+#   requests: 6
+# weakened:
+#   findings: 2
+#   law types: ['L2']
+#   requests: 6
 # self-scan OK: the real API is clean, the weakened one is not
 ```
 
