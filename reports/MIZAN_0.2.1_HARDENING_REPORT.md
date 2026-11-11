@@ -370,3 +370,43 @@ on `main` - all four mandatory stages pass, including the 15 PostgreSQL
 integration tests against a disposable service container (section 8.3). The
 release branch was merged into `main` through PR #1, followed by PR #2 and
 PR #3 for the two defects the CI itself uncovered.
+
+---
+
+## Addendum - Mīzān scans itself
+
+The project's own control plane (`mizan.server`) is now attacked with the tool:
+`mizan self-scan` starts it, records its traffic, learns its laws and attacks
+it - twice, once clean and once deliberately weakened.
+
+| Variant | Result |
+|---|---|
+| clean | **0 findings** in 6 requests |
+| weakened (the ownership check on one endpoint removed) | **L2** - a cross-identity read of another user's findings |
+
+The second half is what makes the first half meaningful: "no findings" is only
+evidence if the check is known to bite.
+
+### What the self-scan found
+
+Four real defects in the engine, all of them invisible to the synthetic tests:
+
+| Defect | Consequence for a user |
+|---|---|
+| the learning phase ignored the `example` values in a specification | invalid requests, `400`s, nothing learned |
+| a listing response taught the engine nothing | list endpoints invisible to the attack surface |
+| the learning phase read back objects with the wrong identity | ownership never learned, so no probe ever fired |
+| **a `200` with an empty list counted as a disclosure** | **a false positive on every successful request** |
+
+The last one is the reason to dogfood. It would have hit every user of the
+tool, and no synthetic test had caught it.
+
+### Changes
+
+- `mizan.server` - the control plane (scans, findings, bundles), owner-scoped,
+  closed request models, and an allow-list for the targets it may scan.
+- `mizan.dogfood` - the self-scan, with the clean and the weakened variant.
+- `mizan self-scan` - the command; it is also a CI stage (E) and a test
+  module (`tests/test_dogfood.py`, 6 tests).
+
+The benchmark is unchanged by this work: 100% detection, 0 false positives.

@@ -152,6 +152,38 @@ The search is not a replacement for the probes: the probes are predictable, the
 search explores. Run both - `mizan twin --guided` runs the search, and the
 probes are one command away.
 
+## Mīzān scans itself
+
+Mīzān has a small control plane of its own (`mizan.server`): it starts scans,
+lists findings and hands out proof bundles. That API is Mīzān's **first user**.
+
+```bash
+mizan self-scan
+#   clean: 0 finding(s) in 6 requests
+#   weakened: 1 finding(s) ['L2'] in 6 requests
+#       - L2 alice read an object owned by root
+# self-scan OK: the real API is clean, the weakened one is not
+```
+
+The scan runs twice: against the real API, which must produce nothing, and
+against a deliberately weakened twin, which must produce something. Without the
+second half, "no findings" would mean nothing.
+
+**Using ourselves found four real defects in the engine** - the kind that only
+a real application exposes:
+
+| What the self-scan exposed | Consequence |
+|---|---|
+| the learning phase ignored the examples in a specification | it sent invalid requests and got `400`s |
+| a listing response taught the engine nothing | list endpoints were invisible |
+| the learning phase read back objects with the wrong identity | ownership was never learned, so no probe fired |
+| **a `200` with an empty list was reported as a disclosure** | **a false positive on every successful request** |
+
+The last one is the reason to dogfood: it would have hit every user of the
+tool, and no synthetic test had caught it.
+
+---
+
 ## The laws
 
 | ID | Law | Severity | Breaks |

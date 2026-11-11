@@ -340,6 +340,35 @@ def _split_command(command: str) -> list[str]:
 
 
 @main.command()
+@click.option("--out", "out_path", default=None, type=click.Path(), help="Where to write the proof bundles.")
+@click.option("--budget", default=60, show_default=True, help="How many actions the search may try.")
+def self_scan(out_path: str | None, budget: int) -> None:
+    """Scan Mizan's own control plane with Mizan.
+
+    The clean API must produce no findings, and a deliberately weakened twin
+    must produce one - otherwise the check is not known to bite.
+    """
+    from mizan.dogfood import scan_server
+
+    clean = scan_server(variant="clean", vulnerable=False, budget=budget)
+    weakened = scan_server(variant="weakened", vulnerable=True, budget=budget)
+    for result in (clean, weakened):
+        if result.error:
+            click.echo(f"  {result.variant}: ERROR {result.error}")
+            continue
+        click.echo(
+            f"  {result.variant}: {len(result.laws)} finding(s) {result.laws or ''} in {result.requests} requests"
+        )
+        for finding in result.findings:
+            click.echo(f"      - {finding['law']} {finding['title']}")
+    if clean.clean and not weakened.clean:
+        click.echo("self-scan OK: the real API is clean, the weakened one is not")
+        return
+    click.echo("self-scan FAILED")
+    raise SystemExit(1)
+
+
+@main.command()
 @click.option("--size", default=10, show_default=True, help="How many applications to compare.")
 def compare(size: int) -> None:
     """Compare the fixed probes with the guided search."""
