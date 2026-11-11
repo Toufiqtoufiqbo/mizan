@@ -1,9 +1,10 @@
 # Mīzān 0.2.1 — PostgreSQL & CI Hardening Report
 
 **Date:** 2026-11-10
-**Branch:** `fix/mizan-021-postgres-ci-hardening`
+**Branch:** `fix/mizan-021-postgres-ci-hardening` (tip `a041856`)
 **Scope:** PostgreSQL write attribution, identity provenance, proof-bundle secret handling, CI reliability.
 **Out of scope:** new security laws, an LLM planner, UI, architectural changes.
+**Merged into `main`:** no - the branch is pushed for review, as instructed.
 
 ---
 
@@ -300,8 +301,10 @@ needs a GitHub runner. Its stages mirror the local commands exactly.
    auditing requires passing them explicitly.
 6. **The external-target job is untested here** (it needs a real target).
 7. **No git binary on this machine**, so the branch was created through the
-   GitHub API; the commits were pushed with the contents API rather than a
-   local `git commit`.
+   GitHub Git Data API (blobs -> tree -> commit -> ref) rather than with a
+   local `git commit`. The history was not rewritten: the branch therefore
+   carries an earlier commit that still lists a few scratch files, while the
+   branch tip is clean (37 files against `main`, no build metadata).
 
 ---
 
