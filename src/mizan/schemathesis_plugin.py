@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from mizan.core import Policy, Principal, Violation
+from mizan.core import Policy, Violation
 from mizan.taint import Ledger, TaintAnalyzer
 
 POLICY_ENV = "MIZAN_POLICY"

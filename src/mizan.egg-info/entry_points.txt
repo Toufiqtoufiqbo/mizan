@@ -1,0 +1,5 @@
+[console_scripts]
+mizan = mizan.cli:main
+
+[pytest11]
+mizan = mizan.pytest_plugin

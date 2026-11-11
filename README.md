@@ -235,11 +235,52 @@ compares two snapshots of the database around a request; the difference is the
 write, attributed to the identity that made it. This is what the twin uses.
 
 **2. Postgres.** `mizan.postgres_audit.PostgresAuditor` installs an audit table
-and a trigger on every table. The identity travels in `application_name`:
+and a trigger on every table of the schemas you point it at. The identity
+travels in `application_name`:
 
 ```sql
-SET application_name = 'mizan:' || current_user_id;
+SET LOCAL application_name = 'mizan:' || current_user_id;
 ```
+
+`SET LOCAL` is transaction-scoped, so a pooled connection cannot carry one
+user's identity into another user's work.
+
+The auditor needs to own the tables it instruments (creating a trigger requires
+it), and it keeps both the row before and after the change, so the changed
+columns are computed exactly instead of guessed.
+
+Primary keys are read from the catalog: `id`, UUID, text and composite keys all
+work. A table without a primary key is recorded but reported as unidentified -
+it is never given a made-up identity, and its writes are never reported as
+breaches.
+
+```python
+import psycopg
+
+from mizan.postgres_audit import PostgresAuditor
+
+with psycopg.connect("postgresql://localhost/app") as connection:
+    auditor = PostgresAuditor(connection, schemas=("public",))
+    auditor.install()
+    ...
+    auditor.refresh()  # after a migration
+    events = auditor.read()
+```
+
+.. warning::
+
+    ``application_name`` is metadata, not authentication. Anyone who can run
+    SQL on that connection can claim any identity. The attribution is only as
+    trustworthy as the application's ability to control its own database
+    connections - which is the assumption an audit of *your own* application
+    rests on. A write whose author cannot be established is recorded with the
+    principal ``unknown`` and is **never** reported as a confirmed breach.
+
+.. note::
+
+    Mass assignment cannot be proven from the database alone: the database
+    cannot tell whether a field was sent by the client or set by the server.
+    Use an application ledger (`source_fields`) for that check - Mizan does.
 
 **3. The application itself.** A ledger is a JSONL file of attributed writes:
 

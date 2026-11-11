@@ -25,11 +25,10 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from mizan.core import Step, Violation
 from mizan.races import looks_single_use
-from mizan.traffic import TrafficRecord
 
 #: How much a breach is worth, per law. A breach that grants authority is
 #: worth more than one that leaks a field.
@@ -78,13 +77,13 @@ class Node:
     """A node of the search tree: one executed action."""
 
     action: Action | None
-    parent: "Node | None" = None
-    children: list["Node"] = field(default_factory=list)
+    parent: Node | None = None
+    children: list[Node] = field(default_factory=list)
     untried: list[Action] = field(default_factory=list)
     visits: int = 0
     value: float = 0.0
 
-    def best_child(self, exploration: float) -> "Node | None":
+    def best_child(self, exploration: float) -> Node | None:
         """The child with the best UCT score."""
         if not self.children:
             return None
@@ -237,9 +236,7 @@ class GuidedSearch:
                 for resource in self.engine.policy.resources.values()
                 if resource.id and resource.id not in identifiers
             )
-            identifiers.extend(
-                identifier for identifier in self._discovered_ids if identifier not in identifiers
-            )
+            identifiers.extend(identifier for identifier in self._discovered_ids if identifier not in identifiers)
         paths = [template.replace("{id}", identifier) for identifier in identifiers]
         if record_path and record_path not in paths:
             paths.append(record_path)
@@ -265,14 +262,10 @@ class GuidedSearch:
                                 kind="read" if method in {"GET", "HEAD"} else "write",
                             )
                         )
-                        actions.extend(
-                            self._race_variants(method, template, path_value, body, principal.id)
-                        )
+                        actions.extend(self._race_variants(method, template, path_value, body, principal.id))
         return actions
 
-    def _race_variants(
-        self, method: str, template: str, record_path: str, body: Any, principal: str
-    ) -> list[Action]:
+    def _race_variants(self, method: str, template: str, record_path: str, body: Any, principal: str) -> list[Action]:
         """Two identical requests at the same time, on the caller's own resource.
 
         That is where a one-shot action must reject the second request.
@@ -308,9 +301,7 @@ class GuidedSearch:
                 continue
             record = records[0]
             for principal in self._principals_for(record.path):
-                for path_value in self._paths_for(
-                    template, record.path, principal.id, own_only=False
-                ):
+                for path_value in self._paths_for(template, record.path, principal.id, own_only=False):
                     for body in self._bodies(template, record.body):
                         actions.append(
                             Action(
@@ -322,9 +313,7 @@ class GuidedSearch:
                                 kind="read" if method in {"GET", "HEAD"} else "write",
                             )
                         )
-                        actions.extend(
-                            self._race_variants(method, template, path_value, body, principal.id)
-                        )
+                        actions.extend(self._race_variants(method, template, path_value, body, principal.id))
         return actions
 
     # -- the search --------------------------------------------------------- #
@@ -359,11 +348,7 @@ class GuidedSearch:
             child = Node(action=action, parent=node)
             node.children.append(child)
             self._backpropagate(child, gain)
-            if (
-                self.patience
-                and self.requests >= self.min_actions
-                and self._since_finding >= self.patience
-            ):
+            if self.patience and self.requests >= self.min_actions and self._since_finding >= self.patience:
                 # Nothing new for a while: the search has converged.
                 break
         best = self._best_node()
@@ -445,6 +430,7 @@ class GuidedSearch:
             # Fair exploration: when the templates are equally promising, the
             # next one is drawn at random instead of always the first.
             candidates = [name for name, score in scores.items() if score == best]
+
             # Among the equally promising templates, the one whose best action
             # looks most promising goes first.
             def potential(name: str) -> int:
@@ -524,7 +510,10 @@ class GuidedSearch:
 
         def call():
             return session.request(
-                action.method, url, json=action.body if action.body is not None else {}, timeout=self.engine.target.timeout
+                action.method,
+                url,
+                json=action.body if action.body is not None else {},
+                timeout=self.engine.target.timeout,
             )
 
         self.requests += action.repeat

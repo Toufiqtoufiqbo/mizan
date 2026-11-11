@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from mizan.identity import decode_token
 from mizan.traffic import TrafficRecord, infer_resource, to_template

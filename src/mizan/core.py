@@ -8,8 +8,9 @@ of those laws is a reportable, reproducible finding.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Iterator
+from typing import Any
 
 # --------------------------------------------------------------------------- #
 # Laws
@@ -27,13 +28,45 @@ class Law:
 LAWS: dict[str, Law] = {
     law.id: law
     for law in (
-        Law("L1", "Authentication coherence", "high", "The identity used to serve a request is the one the client presented."),
-        Law("L2", "Read authorization (read-taint)", "high", "An object returned to a caller must belong to that caller or be visible to their role."),
-        Law("L3", "Write authorization (write-taint)", "high", "Every database write must be attributable to a principal and permitted for that exact row."),
-        Law("L4", "No authority creation", "critical", "A request must never change the authority of its sender or of anybody else."),
-        Law("L5", "Atomicity (TOCTOU)", "high", "A check followed by an action must be atomic; concurrent identical actions must not both succeed."),
-        Law("L6", "Cardinality and bounds", "medium", "Counters are bounded and single-use resources are not reusable."),
-        Law("L7", "Path confidentiality", "medium", "No field may leave the system outside the caller's authority, including through caches and queues."),
+        Law(
+            "L1",
+            "Authentication coherence",
+            "high",
+            "The identity used to serve a request is the one the client presented.",
+        ),
+        Law(
+            "L2",
+            "Read authorization (read-taint)",
+            "high",
+            "An object returned to a caller must belong to that caller or be visible to their role.",
+        ),
+        Law(
+            "L3",
+            "Write authorization (write-taint)",
+            "high",
+            "Every database write must be attributable to a principal and permitted for that exact row.",
+        ),
+        Law(
+            "L4",
+            "No authority creation",
+            "critical",
+            "A request must never change the authority of its sender or of anybody else.",
+        ),
+        Law(
+            "L5",
+            "Atomicity (TOCTOU)",
+            "high",
+            "A check followed by an action must be atomic; concurrent identical actions must not both succeed.",
+        ),
+        Law(
+            "L6", "Cardinality and bounds", "medium", "Counters are bounded and single-use resources are not reusable."
+        ),
+        Law(
+            "L7",
+            "Path confidentiality",
+            "medium",
+            "No field may leave the system outside the caller's authority, including through caches and queues.",
+        ),
     )
 }
 
@@ -92,6 +125,11 @@ SINGLE_USE_HINTS: tuple[str, ...] = (
 # --------------------------------------------------------------------------- #
 # Actors and data
 # --------------------------------------------------------------------------- #
+
+
+#: The principal used when the identity of a write is missing or malformed.
+#: A write with this principal is never reported as a confirmed breach.
+UNKNOWN_PRINCIPAL = "unknown"
 
 
 @dataclass(frozen=True)

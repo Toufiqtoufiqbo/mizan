@@ -127,9 +127,7 @@ class Twin:
         last_error: Exception | None = None
         while time.time() < deadline:
             if self.process is not None and self.process.poll() is not None:
-                raise RuntimeError(
-                    f"the application exited with code {self.process.returncode}; see {self._log.name}"
-                )
+                raise RuntimeError(f"the application exited with code {self.process.returncode}; see {self._log.name}")
             try:
                 request = urllib.request.Request(url, method="GET")
                 with urllib.request.urlopen(request, timeout=2) as response:

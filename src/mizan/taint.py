@@ -9,11 +9,19 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from mizan.core import Policy, Principal, Resource, Step, Violation, actions_for
+from mizan.core import (
+    UNKNOWN_PRINCIPAL,
+    Policy,
+    Resource,
+    Step,
+    Violation,
+    actions_for,
+)
 
 # --------------------------------------------------------------------------- #
 # Events
@@ -249,10 +257,18 @@ class TaintAnalyzer:
     def __init__(self, policy: Policy, strict: bool = False) -> None:
         self.policy = policy
         self.strict = strict
+        #: Writes whose author could not be established. They are evidence of
+        #: a write, but not of a breach, so they are never reported as one.
+        self.unattributed: list[WriteEvent] = []
 
     def analyze(self, events: Iterable[WriteEvent]) -> list[Violation]:
         violations: list[Violation] = []
         for event in events:
+            if not event.principal or event.principal == UNKNOWN_PRINCIPAL:
+                # Without an author there is nobody to blame and nothing to
+                # prove: the write is kept, the breach is not claimed.
+                self.unattributed.append(event)
+                continue
             violations.extend(self._analyze_event(event))
         return violations
 
@@ -303,7 +319,17 @@ class TaintAnalyzer:
                 )
 
         # L4 - nobody may create authority through a request.
+        #
+        # The database cannot tell whether the client sent a field or the
+        # server set it. A field that the client did not send is not evidence
+        # of anything, so the check only looks at the fields the request
+        # actually carried (`source_fields`). When those are unknown - as they
+        # are for a database-only ledger - no finding is made.
+        if not event.source_fields:
+            return violations
         for column, value in event.columns.items():
+            if column not in event.source_fields:
+                continue
             if not self.policy.authority_fields or column.lower() not in {
                 field.lower() for field in self.policy.authority_fields
             }:

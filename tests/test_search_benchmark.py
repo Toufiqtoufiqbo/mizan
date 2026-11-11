@@ -6,12 +6,9 @@ need more requests to do it.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from mizan.benchmark.evaluate import compare_modes, run_application
-from mizan.benchmark.generator import build_suite
+from mizan.benchmark.evaluate import compare_modes
 
 
 @pytest.fixture(scope="module")

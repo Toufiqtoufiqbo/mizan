@@ -13,12 +13,12 @@ import pytest
 import requests
 
 from mizan import Mizan, Policy, Principal, Rule, Target, WriteEvent
-from mizan.tokens import make_token
 from mizan.core import AccessMatrix
 from mizan.demo.app import DemoApp, serve
 from mizan.proof import ProofBundle
 from mizan.races import RaceOutcome, detect_race
 from mizan.taint import PostgresLogParser, TaintAnalyzer
+from mizan.tokens import make_token
 
 SPEC_PATH = Path(__file__).resolve().parents[1] / "src" / "mizan" / "demo" / "openapi.json"
 
@@ -194,7 +194,8 @@ def test_taint_accepts_legitimate_self_write() -> None:
 def test_postgres_log_parser_attributes_writes() -> None:
     parser = PostgresLogParser()
     lines = [
-        "2026-11-10 12:00:00.000 UTC [1] mizan:alice LOG:  statement: UPDATE orders SET status = 'approved' WHERE id = 'o1'",
+        "2026-11-10 12:00:00.000 UTC [1] mizan:alice LOG:  statement: "
+        "UPDATE orders SET status = 'approved' WHERE id = 'o1'",
         "2026-11-10 12:00:01.000 UTC [1] mizan:bob LOG:  statement: UPDATE orders SET amount = 5 WHERE id = 'o2'",
         "2026-11-10 12:00:02.000 UTC [1] someapp LOG:  statement: SELECT 1",
     ]
@@ -286,7 +287,15 @@ def test_proof_bundle_replays_against_the_target(engine: Mizan, demo, tmp_path: 
     violations = engine.attack()
     directories = engine.write_bundles(violations, tmp_path / "proofs")
     read_bundle = next(directory for directory in directories if directory.name.startswith("L2"))
-    result = ProofBundle.load(read_bundle).verify(requests.Session())
+    from mizan.tokens import TokenResolver
+
+    resolver = TokenResolver(
+        tokens={
+            "alice": make_token("alice"),
+            "bob": make_token("bob"),
+        }
+    )
+    result = ProofBundle.load(read_bundle).verify(requests.Session(), resolver=resolver)
     statuses = [step.get("status") for step in result["steps"]]
     assert statuses and all(status == 200 for status in statuses), "the replay did not reproduce the finding"
 
