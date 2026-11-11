@@ -63,7 +63,9 @@ def local_files() -> list[Path]:
             continue
         if path.suffix in SKIP_SUFFIXES:
             continue
-        if relative.parts and relative.parts[0] in {"mizan.egg-info", "build", "dist"}:
+        if relative.parts and relative.parts[0] in {"build", "dist"}:
+            continue
+        if "egg-info" in relative.parts:
             continue
         files.append(path)
     return sorted(files)
