@@ -296,8 +296,28 @@ After that, three consecutive full runs passed (103 tests, 76-85 s).
 
 ### 8.3 CI
 
-The workflow is configured but has **not** been executed from this machine: it
-needs a GitHub runner. Its stages mirror the local commands exactly.
+The workflow ran on GitHub Actions and is green on `main` (run
+[43082748604](https://github.com/Toufiqtoufiqbo/mizan/actions/runs/43082748604),
+commit `55d76fa`):
+
+| Stage | Result |
+|---|---|
+| A - static & unit | **success** |
+| B - PostgreSQL | **success** - 15 passed against the disposable `postgres:16-alpine` service container |
+| C - security regression | **success** |
+| D - benchmark | **success** |
+| E - external target (opt-in) | skipped, as designed |
+
+Two defects were found *by the CI itself* and fixed:
+
+1. the PostgreSQL stage failed with `1 skipped` - `psycopg` was not in the dev
+   extras. The guard behaved exactly as intended: it failed the stage instead
+   of letting it pass silently (PR #2).
+2. the skipped-tests guard step had a shell syntax error, so the stage failed
+   even though the integration suite had passed (PR #3).
+
+That is the guard doing its job in both directions: it caught a missing
+dependency, and it caught a broken step.
 
 ---
 
@@ -344,3 +364,9 @@ needs a GitHub runner. Its stages mirror the local commands exactly.
 **Assessment:** ready for review. The one thing that cannot be claimed from this
 machine is the execution of the GitHub Actions workflow itself; everything it
 runs was executed locally with the same commands, against a real PostgreSQL.
+
+**Update:** the workflow has since been executed on GitHub Actions and is green
+on `main` - all four mandatory stages pass, including the 15 PostgreSQL
+integration tests against a disposable service container (section 8.3). The
+release branch was merged into `main` through PR #1, followed by PR #2 and
+PR #3 for the two defects the CI itself uncovered.
