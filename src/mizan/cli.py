@@ -439,13 +439,17 @@ def validate(application: str, budget: int) -> None:
     """
     from mizan.validation import validate_application
 
-    result = validate_application(application, budget=budget, expected_laws=("L2", "L3"))
-    for variant in ("clean", "vulnerable"):
-        data = result[variant]
+    result = validate_application(application, budget=budget)
+    for variant, data in result["variants"].items():
         click.echo(f"{variant}:")
         click.echo(f"  findings: {data['finding_count']}")
         click.echo(f"  law types: {data['law_types']}")
-        click.echo(f"  requests: {data['request_count']}")
+        click.echo(f"  requests: {data['requests']['total']} "
+                   f"(bootstrap {data['requests']['bootstrap']}, "
+                   f"learning {data['requests']['learning']}, "
+                   f"attack {data['requests']['attack']})")
+        if data["setup_error"]:
+            click.echo(f"  setup error: {data['setup_error']}")
         if data["error"]:
             click.echo(f"  error: {data['error']}")
     click.echo("")
