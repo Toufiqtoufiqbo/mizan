@@ -3,6 +3,7 @@
 **Branch:** `feat/mizan-022-independent-validation`
 **Pull request:** #6 — <https://github.com/Toufiqtoufiqbo/mizan/pull/6> (open, not merged)
 **Baseline:** `07de6a5` (PR #6 as it was received)
+**Head after the remediation:** `e65242b` - the CI run below is that commit.
 **Environment:** native Windows 10 Pro 10.0.19045, Python 3.12.10, PostgreSQL 16.2
 
 ---
@@ -156,6 +157,8 @@ The single warning is a third-party deprecation notice from
 
 The branch was pushed and the workflow ran on GitHub Actions:
 
+Run: <https://github.com/Toufiqtoufiqbo/mizan/actions/runs/43214048202> (commit `e65242b`).
+
 | Stage | Result |
 |---|---|
 | A - static and unit | success |
@@ -165,8 +168,6 @@ The branch was pushed and the workflow ran on GitHub Actions:
 | E - Mīzān scans Mīzān | success |
 | F - independent application | success |
 | G - external target | skipped (opt-in) |
-
-Run: **RUN_ID_PLACEHOLDER**
 
 PR #6 stays **open**.
 
