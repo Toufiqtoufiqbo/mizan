@@ -11,3 +11,8 @@ mizan-proofs/
 demo-proofs/
 *.jsonl
 !src/mizan/demo/openapi.json
+.pytest-accounting/
+.pytest-auth/
+.pytest-listing-*/
+measure-bench/
+measure_workers.py

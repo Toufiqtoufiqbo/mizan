@@ -108,6 +108,8 @@ class Mizan:
         self.requests = 0
         #: The number of requests the engine may send. ``None`` means no limit.
         self.request_budget = request_budget
+        #: Whether the last attack stopped because the budget ran out.
+        self.budget_exhausted = False
 
     # -- learning ---------------------------------------------------------- #
 
@@ -220,7 +222,9 @@ class Mizan:
             try:
                 violations.extend(probe())
             except RequestBudgetExhausted:
-                # The budget is a limit, not a failure: stop cleanly.
+                # The budget is a limit, not a failure: stop cleanly - and say
+                # so, because a truncated scan is not a complete one.
+                self.budget_exhausted = True
                 break
         return _dedupe(violations)
 
@@ -295,7 +299,10 @@ class Mizan:
                         continue
                     url = self._url(record.path)
                     session = self.target.session_for(attacker)
-                    response = self._request(session, "GET", url, timeout=self.target.timeout)
+                    # The read probe always sends a GET, whatever the traffic
+                    # contained: the evidence must name the method that was
+                    # transmitted.
+                    response = self._request(session, READ_METHOD, url, timeout=self.target.timeout)
                     if not (200 <= response.status_code < 300):
                         continue
                     body = _json(response)
@@ -333,7 +340,7 @@ class Mizan:
                             },
                             steps=[
                                 Step(
-                                    method=method,
+                                    method=READ_METHOD,
                                     url=url,
                                     headers=mask_authorization(
                                         {"Authorization": f"Bearer {attacker.token}"}, attacker.id
@@ -518,7 +525,7 @@ class Mizan:
                                     headers=mask_authorization(
                                         {"Authorization": f"Bearer {attacker.token}"}, attacker.id
                                     ),
-                                    body=body,
+                                    body=probe_body,
                                     status=response.status_code,
                                     note="cross-identity write",
                                 )
@@ -933,6 +940,10 @@ class Mizan:
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
+
+
+#: The method the read probe sends. The evidence must always match it.
+READ_METHOD = "GET"
 
 
 def contains_object(payload: Any, resource_id: str | None) -> bool:

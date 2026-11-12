@@ -162,14 +162,20 @@ with its own authentication, its own database and its own OpenAPI document.
 mizan validate tests/fixtures/external_apps/flask_store
 ```
 
-| Variant | Result |
-|---|---|
-| clean | **0 findings** in 4 requests |
-| vulnerable (one ownership check removed) | **3 findings** - `L2` (cross-user read) and `L3` (cross-user write) |
+The fixture has four variants, and each one changes exactly one thing - the
+listing of orders stays scoped to the caller in every variant:
+
+| Variant | The read check | The write check | Result |
+|---|---|---|---|
+| clean | on | on | **0 findings** |
+| `read` | **off** | on | **1 finding** - `L2` (cross-user read) only |
+| `write` | on | **off** | **1 finding** - `L3` (cross-user write) only |
+| `both` | **off** | **off** | **2 findings** - `L2` and `L3` |
 
 Every finding names the principal, the method, the endpoint, the resource, the
-owner and the reproduction. The gate is a CI stage, and it fails when the
-suite is skipped.
+owner and the reproduction - and the reproduction is the request that was
+actually sent, verified by replaying it. The gate is a CI stage, and it fails
+when the suite is skipped or when a variant reports a law it should not.
 
 Testing somebody else's application is what exposed six real defects in the
 engine - among them a false positive on every successful request, and a blind

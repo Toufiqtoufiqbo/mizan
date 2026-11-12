@@ -10,16 +10,25 @@ This application knows nothing about Mizan. It has:
 The only thing Mizan uses is ordinary HTTP, plus the database file for
 attribution - the same way it would work against a real application.
 
-Set ``STORE_VULNERABLE=1`` to remove the ownership checks. The vulnerable
-variant is what proves that Mizan's detection works on an application it did
-not write.
+The weaknesses are independent, so an experiment changes exactly one thing:
+
+``--vulnerability read``
+    only the read check is removed. Writing somebody else's order is still
+    refused.
+``--vulnerability write``
+    only the write check is removed. Reading somebody else's order is still
+    refused.
+``--vulnerability both``
+    both checks are removed.
+
+The listing of orders is **always** scoped to the caller in every variant. A
+listing weakness would be a separate experiment, not a side effect.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
-import os
 import secrets
 import sqlite3
 import time
@@ -55,11 +64,22 @@ def hash_password(password: str, salt: str) -> str:
     return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
 
 
-def create_app(database: str | Path, *, vulnerable: bool = False) -> Flask:
-    """Build the store API."""
+#: The independent weaknesses a variant can carry.
+VARIANTS = ("clean", "read", "write", "both")
+
+
+def create_app(database: str | Path, *, vulnerability: str = "clean") -> Flask:
+    """Build the store API.
+
+    ``vulnerability`` names the weakness to inject: ``clean``, ``read``,
+    ``write`` or ``both``. Anything else is an error - a variant that does not
+    exist must not be mistaken for the clean one.
+    """
+    if vulnerability not in VARIANTS:
+        raise ValueError(f"unknown variant {vulnerability!r}; expected one of {VARIANTS}")
     app = Flask(__name__)
     app.config["DATABASE"] = str(database)
-    app.config["VULNERABLE"] = vulnerable
+    app.config["VULNERABILITY"] = vulnerability
 
     def connect() -> sqlite3.Connection:
         connection = sqlite3.connect(app.config["DATABASE"], timeout=15)
@@ -105,12 +125,15 @@ def create_app(database: str | Path, *, vulnerable: bool = False) -> Flask:
             connection.close()
         return bool(row) and row["role"] == "admin"
 
-    def owns(order: sqlite3.Row, user_id: str) -> bool:
-        """Whether the caller may touch this order.
+    def may_read(order: sqlite3.Row, user_id: str) -> bool:
+        """Whether the caller may read this order."""
+        if app.config["VULNERABILITY"] in {"read", "both"}:
+            return True
+        return order["owner_id"] == user_id or is_admin(user_id)
 
-        The vulnerable variant skips the check - that is the whole point of it.
-        """
-        if app.config["VULNERABLE"]:
+    def may_write(order: sqlite3.Row, user_id: str) -> bool:
+        """Whether the caller may change this order."""
+        if app.config["VULNERABILITY"] in {"write", "both"}:
             return True
         return order["owner_id"] == user_id or is_admin(user_id)
 
@@ -197,12 +220,10 @@ def create_app(database: str | Path, *, vulnerable: bool = False) -> Flask:
             return jsonify({"error": "unauthenticated"}), 401
         connection = connect()
         try:
-            if app.config["VULNERABLE"]:
-                rows = connection.execute("SELECT * FROM orders ORDER BY created_at").fetchall()
-            else:
-                rows = connection.execute(
-                    "SELECT * FROM orders WHERE owner_id = ? ORDER BY created_at", (user_id,)
-                ).fetchall()
+            # The listing is always scoped to the caller, in every variant.
+            rows = connection.execute(
+                "SELECT * FROM orders WHERE owner_id = ? ORDER BY created_at", (user_id,)
+            ).fetchall()
         finally:
             connection.close()
         return jsonify({"orders": [order_json(row) for row in rows]})
@@ -215,7 +236,7 @@ def create_app(database: str | Path, *, vulnerable: bool = False) -> Flask:
         row = _fetch(order_id)
         if row is None:
             return jsonify({"error": "order not found"}), 404
-        if not owns(row, user_id):
+        if not may_read(row, user_id):
             return jsonify({"error": "forbidden"}), 403
         return jsonify(order_json(row))
 
@@ -227,7 +248,7 @@ def create_app(database: str | Path, *, vulnerable: bool = False) -> Flask:
         row = _fetch(order_id)
         if row is None:
             return jsonify({"error": "order not found"}), 404
-        if not owns(row, user_id):
+        if not may_write(row, user_id):
             return jsonify({"error": "forbidden"}), 403
         body = request.get_json(silent=True) or {}
         status = body.get("status")
@@ -247,7 +268,7 @@ def create_app(database: str | Path, *, vulnerable: bool = False) -> Flask:
         row = _fetch(order_id)
         if row is None:
             return jsonify({"error": "order not found"}), 404
-        if not owns(row, user_id):
+        if not may_write(row, user_id):
             return jsonify({"error": "forbidden"}), 403
         connection = connect()
         with connection:
@@ -270,10 +291,15 @@ def main() -> None:  # pragma: no cover - the entry point
     parser.add_argument("--db", default="store.sqlite")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0)
+    parser.add_argument(
+        "--vulnerability",
+        default="clean",
+        choices=list(VARIANTS),
+        help="which authorization weakness to inject",
+    )
     arguments = parser.parse_args()
 
-    vulnerable = os.environ.get("STORE_VULNERABLE") == "1"
-    application = create_app(arguments.db, vulnerable=vulnerable)
+    application = create_app(arguments.db, vulnerability=arguments.vulnerability)
     application.run(host=arguments.host, port=arguments.port, threaded=True, debug=False)
 
 

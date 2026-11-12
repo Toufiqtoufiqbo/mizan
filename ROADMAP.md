@@ -72,6 +72,25 @@
 Testing somebody else's application found six real defects in the engine, among
 them a false positive on every successful request.
 
+## 0.2.2.1 (done - PR #6 remediation)
+
+- [x] **Independent variants** of the external application: clean, read-only,
+      write-only and combined - the listing stays owner-scoped in all of them
+- [x] **Evidence integrity**: the write probe records the body it sent, the
+      read probe records the method it sent, every finding is validated
+      individually, and the replay reproduces the finding
+- [x] **Request accounting**: bootstrap, learning, attack and total are counted
+      separately; one budget covers learning and attack; exhaustion is reported
+- [x] **Database migration**: a control-plane database from the previous
+      version is migrated safely (the plaintext tokens are hashed, the users and
+      their roles are kept, the migration is transactional and idempotent)
+- [x] **Fail-closed validation**: a missing identity is a setup error, never a
+      clean scan
+- [x] **Control-plane audit**: the bundle endpoint cannot walk out of its root,
+      the IPv6 form of a target is understood, the SARIF validator says it is
+      structural
+- [x] **CI**: every mandatory stage fails when its suite is skipped
+
 ## Next (v0.4 - the second user)
 
 - [ ] **A second, external user**: the self-scan proves the tool works on us;

@@ -123,6 +123,7 @@ def learn_from_spec(
     discover_ids: bool = True,
     max_discovered_ids: int = 5,
     include_destructive: bool = False,
+    max_requests: int | None = None,
 ) -> list[dict[str, Any]]:
     """Send the smallest possible request for every operation.
 
@@ -137,6 +138,8 @@ def learn_from_spec(
 
     Destructive operations are skipped by default: a learning run must not
     destroy the objects the attack phase is going to look at.
+
+    ``max_requests`` bounds the number of requests the learning phase may send.
     """
     document = load_spec(spec_path)
     session = session or requests.Session()
@@ -155,6 +158,8 @@ def learn_from_spec(
             pending.append((method, path, operation))
             continue
         principal, token = _pick(principals, index)
+        if max_requests is not None and len(results) >= max_requests:
+            break
         result = _send(session, method, base_url, path, operation, document, token, timeout)
         results.append(result)
         for identifier in _identifiers_in(result.get("response")):
@@ -174,6 +179,8 @@ def learn_from_spec(
             )
             for method, path, operation in ordered:
                 for candidate in identifiers[:max_discovered_ids]:
+                    if max_requests is not None and len(results) >= max_requests:
+                        break
                     concrete = _fill_path(path, operation, candidate)
                     if concrete is None:
                         continue

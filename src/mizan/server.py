@@ -69,6 +69,11 @@ DEFAULT_BUNDLE_ROOT = os.environ.get("MIZAN_BUNDLE_ROOT", "mizan-proofs")
 MAX_BODY_BYTES = 64 * 1024
 
 
+def hash_token(token: str) -> str:
+    """The stored form of a token."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 class DevAuth:
     """Development authentication: opaque random tokens, stored as a hash.
 
@@ -91,7 +96,7 @@ class DevAuth:
 
     @staticmethod
     def _hash(token: str) -> str:
-        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+        return hash_token(token)
 
     def forget(self) -> None:
         """Drop every token."""
@@ -105,11 +110,62 @@ class Store:
     path: Path
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=15)
+        # Autocommit: the migration manages its own transaction explicitly.
+        connection = sqlite3.connect(self.path, timeout=15, isolation_level=None)
         connection.row_factory = sqlite3.Row
         return connection
 
+    def migrate(self) -> list[str]:
+        """Bring an older database up to the current schema.
+
+        The user table used to store the token itself. A database created by an
+        older version still has that column and no ``token_hash``, and
+        ``CREATE TABLE IF NOT EXISTS`` would not notice. The migration hashes the
+        existing tokens, keeps the user ids and the roles, and leaves no
+        plaintext token behind.
+
+        It is idempotent: a second run finds the current schema and does
+        nothing.
+        """
+        notes: list[str] = []
+        connection = self.connect()
+        try:
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)")}
+            if "token_hash" in columns:
+                return notes
+            if "token" not in columns:
+                # Nothing to migrate: a fresh database.
+                return notes
+            rows = connection.execute("SELECT id, token, role FROM users").fetchall()
+            connection.execute("BEGIN")
+            try:
+                connection.execute(
+                    """
+                    CREATE TABLE users_migrated (
+                        id TEXT PRIMARY KEY,
+                        token_hash TEXT UNIQUE NOT NULL,
+                        role TEXT NOT NULL DEFAULT 'user'
+                    )
+                    """
+                )
+                for row in rows:
+                    connection.execute(
+                        "INSERT INTO users_migrated (id, token_hash, role) VALUES (?, ?, ?)",
+                        (row["id"], hash_token(row["token"]), row["role"]),
+                    )
+                connection.execute("DROP TABLE users")
+                connection.execute("ALTER TABLE users_migrated RENAME TO users")
+                connection.execute("COMMIT")
+            except Exception as exc:
+                connection.execute("ROLLBACK")
+                raise RuntimeError(f"the user table could not be migrated safely: {exc}") from exc
+            notes.append(f"migrated {len(rows)} user(s) from a plaintext token column")
+        finally:
+            connection.close()
+        return notes
+
     def initialise(self) -> None:
+        self.migrate()
         connection = self.connect()
         with connection:
             connection.execute(
@@ -157,16 +213,14 @@ class Store:
         with connection:
             connection.execute(
                 "INSERT OR IGNORE INTO users (id, token_hash, role) VALUES (?, ?, ?)",
-                (user_id, DevAuth._hash(token), role),
+                (user_id, hash_token(token), role),
             )
         connection.close()
 
     def user_for_token(self, token: str) -> tuple[str, str] | None:
         connection = self.connect()
         try:
-            row = connection.execute(
-                "SELECT id, role FROM users WHERE token_hash = ?", (DevAuth._hash(token),)
-            ).fetchone()
+            row = connection.execute("SELECT id, role FROM users WHERE token_hash = ?", (hash_token(token),)).fetchone()
         finally:
             connection.close()
         return (row["id"], row["role"]) if row else None
@@ -251,7 +305,9 @@ def validate_target(target: str) -> str:
         raise HTTPException(status_code=400, detail="the target has no host")
     if parts.username or parts.password:
         raise HTTPException(status_code=400, detail="the target must not carry credentials")
-    host = parts.hostname.lower()
+    host = (parts.hostname or "").lower()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
     if host not in ALLOWED_TARGET_HOSTS:
         raise HTTPException(status_code=400, detail=f"target host is not allowed: {host}")
     if ALLOWED_TARGET_PORTS and (parts.port or 0) not in ALLOWED_TARGET_PORTS:
@@ -411,9 +467,14 @@ def create_app(
             connection.close()
         if row is None or row["owner_id"] != owner_id:
             raise HTTPException(status_code=404, detail="scan not found")
-        directory = app.state.bundle_root / scan_id
+        # The path must stay inside the configured root: a scan id is not
+        # allowed to walk out of it.
+        root = Path(app.state.bundle_root).resolve()
+        directory = (root / scan_id).resolve()
+        if root != directory and root not in directory.parents:
+            raise HTTPException(status_code=404, detail="no bundle for this scan")
         replay = directory / "replay.json"
-        if not replay.exists():
+        if not replay.exists() or not replay.is_file():
             raise HTTPException(status_code=404, detail="no bundle for this scan")
         return JSONResponse(json.loads(replay.read_text(encoding="utf-8")))
 

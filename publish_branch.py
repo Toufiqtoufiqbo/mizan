@@ -32,6 +32,11 @@ SKIP_DIRS = {
     "node_modules",
     # A local build artifact: the same files live on the Schemathesis fork.
     "fork-patch",
+    ".hypothesis",
+    ".schemathesis",
+    "measure-bench",
+    "demo-proofs",
+    "mizan-proofs",
 }
 SKIP_SUFFIXES = {".pyc", ".pyo", ".sqlite", ".log"}
 
@@ -65,6 +70,11 @@ def local_files() -> list[Path]:
             continue
         if relative.parts and relative.parts[0] in {"build", "dist"}:
             continue
+        if relative.parts and relative.parts[0].startswith(".pytest-"):
+            continue
+        if relative.parts and relative.parts[0] in {"authzbugs-report"}:
+            # The published report is a result, not a source change.
+            pass
         if "egg-info" in relative.parts:
             continue
         files.append(path)
