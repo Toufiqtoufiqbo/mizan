@@ -84,10 +84,18 @@ def local_files() -> list[Path]:
 def main() -> int:
     client = session()
 
-    base_ref = client.get(f"{API}/repos/{OWNER}/{REPO}/git/ref/heads/{BASE}").json()
-    base_commit = base_ref["object"]["sha"]
-    base_tree = client.get(f"{API}/repos/{OWNER}/{REPO}/git/commits/{base_commit}").json()["tree"]["sha"]
-    remote = client.get(f"{API}/repos/{OWNER}/{REPO}/git/trees/{base_tree}?recursive=1").json()
+    # The comparison is against the **branch head**, not against the base:
+    # comparing with the base would make every run look like a change and
+    # produce an empty commit.
+    branch_ref = client.get(f"{API}/repos/{OWNER}/{REPO}/git/ref/heads/{BRANCH}")
+    if branch_ref.status_code == 200:
+        parent = branch_ref.json()["object"]["sha"]
+        head_tree = client.get(f"{API}/repos/{OWNER}/{REPO}/git/commits/{parent}").json()["tree"]["sha"]
+    else:
+        base_ref = client.get(f"{API}/repos/{OWNER}/{REPO}/git/ref/heads/{BASE}").json()
+        parent = base_ref["object"]["sha"]
+        head_tree = client.get(f"{API}/repos/{OWNER}/{REPO}/git/commits/{parent}").json()["tree"]["sha"]
+    remote = client.get(f"{API}/repos/{OWNER}/{REPO}/git/trees/{head_tree}?recursive=1").json()
     remote_map = {entry["path"]: entry["sha"] for entry in remote.get("tree", []) if entry["type"] == "blob"}
 
     changed: list[tuple[str, Path]] = []
@@ -103,22 +111,20 @@ def main() -> int:
         print(f"  {relative}")
 
     if not changed:
-        print("nothing to publish")
+        print("nothing to publish - the tree matches the branch head")
         return 0
 
     # The branch, from the base. When it already exists, the new commit
     # becomes a child of the current head, so the update is a fast-forward.
-    parent = base_commit
     exists = client.get(f"{API}/repos/{OWNER}/{REPO}/git/ref/heads/{BRANCH}")
     if exists.status_code == 404:
         response = client.post(
             f"{API}/repos/{OWNER}/{REPO}/git/refs",
-            json={"ref": f"refs/heads/{BRANCH}", "sha": base_commit},
+            json={"ref": f"refs/heads/{BRANCH}", "sha": parent},
         )
         response.raise_for_status()
         print(f"created branch {BRANCH}")
     else:
-        parent = exists.json()["object"]["sha"]
         print(f"branch head: {parent}")
 
     entries = []
@@ -133,7 +139,7 @@ def main() -> int:
 
     tree = client.post(
         f"{API}/repos/{OWNER}/{REPO}/git/trees",
-        json={"base_tree": base_tree, "tree": entries},
+        json={"base_tree": head_tree, "tree": entries},
     )
     tree.raise_for_status()
 
