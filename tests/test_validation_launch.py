@@ -171,10 +171,11 @@ def test_the_process_is_stopped_even_when_the_scan_fails() -> None:
     import subprocess
 
     before = len(subprocess.run(["tasklist"], capture_output=True, text=True).stdout.splitlines())
-    result = scan_application(FIXTURES / "flask_store", variant="clean", budget=1)
-    assert result.error is None or result.setup_error is None or True
+    result = scan_application(FIXTURES / "flask_store", variant="write", budget=60)
+    # Scan should produce L3 findings (cross-user write vulnerability)
+    assert "L3" in result.law_types, f"expected L3 law type, got {result.law_types}"
     after = len(subprocess.run(["tasklist"], capture_output=True, text=True).stdout.splitlines())
-    assert after <= before + 1, "the application was left running"
+    assert after <= before, "the application was left running"
 
 
 def test_the_environment_of_a_scan_reaches_the_application() -> None:

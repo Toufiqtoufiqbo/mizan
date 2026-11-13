@@ -121,6 +121,7 @@ def build_command(
     cmd: list[str] = list(launch.command)
 
     entry_point = "server.js" if fixture_dir.name == "express_store" else "app.py"
+    cmd = [str(fixture_dir / part) if Path(part).name == entry_point else part for part in cmd]
     if not any(Path(part).name == entry_point for part in cmd):
         cmd.append(str(fixture_dir / entry_point))
 
@@ -296,8 +297,15 @@ def scan_application(
     else:
         env.pop("STORE_VULNERABLE", None)
 
+    resolved_launch = resolve_launch(app_dir, launch)
+    if resolved_launch is not None:
+        command = build_command(resolved_launch, app_dir, database, variant)
+    else:
+        command = script_command(
+            app_dir / "app.py", "--db", str(database), "--port", "{port}", "--vulnerability", variant
+        )
     spec = TwinSpec(
-        command=script_command(app_dir / "app.py", "--db", str(database), "--port", "{port}"),
+        command=command,
         workdir=root,
         env=env,
         data_paths=[database],
@@ -305,24 +313,24 @@ def scan_application(
         health_timeout=60.0,
     )
 
-    twin = Twin(spec, workspace=root / "twin" if keep_workspace else None)
-
-    # Add observer if provided.
-    if observer is not None:
-        twin._observer = observer  # type: ignore[attr-defined]
-
-    proxy: RecordingProxy | None = None
+    twin = Twin(spec, workspace=root / "twin")
+    proxy = RecordingProxy("http://127.0.0.1:1", traffic_path)
+    accounting = RequestAccounting(budget=budget)
     result = ValidationResult(
         application=str(app_dir),
         variant=variant,
-        workspace=root if keep_workspace else None,
+        requests=accounting,
+        workspace=str(root) if keep_workspace else None,
     )
 
     try:
         twin.start()
 
         if observer is not None:
-            observer(twin)
+            try:
+                observer(twin)
+            except Exception as exc:
+                raise RuntimeError(f"the observer failed: {exc}") from exc
 
         proxy = RecordingProxy(twin.base_url, traffic_path)
         proxy.start()
@@ -333,30 +341,17 @@ def scan_application(
             "root": ("root", "root-secret"),
         }
 
-        tokens: dict[str, str] = {}
-        for principal, (username, password) in credentials.items():
-            token = _login(twin.base_url, username, password)
-            if token:
-                tokens[principal] = token
-
-        if not tokens:
-            result.setup_error = "could not authenticate: " + ", ".join(
-                p for p, _ in credentials.items() if not _login(twin.base_url, *_)
-            )
-            # Clean up and return early.
-            if proxy is not None:
-                proxy.stop()
-            twin.stop()
-            shutil.rmtree(root, ignore_errors=True)
+        required = ["alice", "bob"]
+        tokens, missing = _authenticate(twin.base_url, credentials, required)
+        accounting.bootstrap = len(required)
+        result.missing_identities = missing
+        if missing:
+            result.setup_error = f"could not authenticate: {', '.join(missing)}"
             return result
 
         spec_path = app_dir / spec_name
         if not spec_path.exists():
             result.setup_error = f"the application has no OpenAPI document at {spec_path}"
-            if proxy is not None:
-                proxy.stop()
-            twin.stop()
-            shutil.rmtree(root, ignore_errors=True)
             return result
 
         # The application issued opaque tokens: the proxy is told who owns what
@@ -364,9 +359,11 @@ def scan_application(
         # produce anonymous requests.
         proxy.identity_map = {token: name for name, token in tokens.items()}
 
-        from mizen.learning import learn_from_spec
-
-        learn_from_spec(spec_path, proxy.base_url, identities=tokens)
+        learning_budget = max(0, budget - accounting.bootstrap)
+        learned = learn_from_spec(spec_path, proxy.base_url, identities=tokens, max_requests=learning_budget)
+        accounting.learning = len(learned)
+        if accounting.learning >= learning_budget and learning_budget > 0:
+            accounting.budget_exhausted = True
 
         principals = [
             Principal(id=name, roles=("admin" if name == "root" else "user",), token=token)
@@ -381,15 +378,16 @@ def scan_application(
             spec_path=spec_path,
             twin=twin,
             attributor=SqliteAttributor(database),
-            request_budget=budget,
+            request_budget=max(0, budget - accounting.bootstrap - accounting.learning),
         )
 
         engine.learn()
         violations = engine.attack()
+        accounting.attack = engine.requests
+        accounting.budget_exhausted = accounting.budget_exhausted or engine.budget_exhausted
 
         result.finding_count = len(violations)
         result.law_types = sorted({violation.law for violation in violations})
-        result.request_count = engine.requests
         result.findings = [violation.to_dict() for violation in violations]
 
         result.traffic_lines = (
@@ -397,11 +395,8 @@ def scan_application(
         )
     except Exception as exc:  # pragma: no cover - reported, never hidden
         result.error = f"{type(exc).__name__}: {exc}"
-        if not result.setup_error:
-            result.setup_error = ""
     finally:
-        if proxy is not None:
-            proxy.stop()
+        proxy.stop()
         twin.stop()
         if not keep_workspace:
             shutil.rmtree(root, ignore_errors=True)
@@ -442,7 +437,7 @@ def validate_application(
 
             record("no setup error", result.setup_error is None, result.setup_error or "the setup worked")
             record("no execution error", result.error is None, result.error or "the scan ran")
-            record("the scan sent requests", result.request_count > 0, f"{result.request_count} requests")
+            record("the scan sent requests", result.requests.total > 0, f"{result.requests.total} requests")
             record(
                 "the expected laws are detected",
                 all(law in result.law_types for law in expected_laws),
@@ -455,7 +450,7 @@ def validate_application(
             )
             record(
                 "every finding carries its evidence",
-                all(not any(validate_finding(f) for f in result.findings) for _ in range(result.finding_count)),
+                all(not validate_finding(finding) for finding in result.findings),
                 "; ".join(problem for finding in result.findings for problem in validate_finding(finding))
                 or f"{result.finding_count} findings",
             )

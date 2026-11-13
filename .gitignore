@@ -1,18 +1,22 @@
+# Ignore backup directories
+mizan-backups/
+
+# Ignore temporary validation debug artifacts
+.tmp-validation-debug/
+
+# Ignore Python caches
 __pycache__/
 *.py[cod]
-*.egg-info/
-build/
-dist/
+
+# Ignore pytest cache
 .pytest_cache/
-.venv/
-venv/
-*.sqlite
-mizan-proofs/
-demo-proofs/
-*.jsonl
-!src/mizan/demo/openapi.json
-.pytest-accounting/
-.pytest-auth/
-.pytest-listing-*/
-measure-bench/
-measure_workers.py
+
+# Ignore build artifacts
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Ignore mission promotion files (temporary)
+MISSION_030_PROMOTION_REPORT_FINAL.md
+SESSION_TERMINATION_NOTES.md
