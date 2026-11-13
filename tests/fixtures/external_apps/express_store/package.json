@@ -1,0 +1,16 @@
+{
+  "name": "mizan-express-store-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "An independent Express implementation of the Mizan behavioral contract",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "4.21.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

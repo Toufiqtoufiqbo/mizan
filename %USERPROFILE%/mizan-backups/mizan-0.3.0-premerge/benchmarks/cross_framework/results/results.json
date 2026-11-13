@@ -1,0 +1,959 @@
+{
+  "benchmark": "cross_framework",
+  "repetitions": 3,
+  "budget": 60,
+  "frameworks": [
+    "express",
+    "fastapi"
+  ],
+  "variants": [
+    "clean",
+    "read",
+    "write",
+    "both"
+  ],
+  "environment": {
+    "python": "3.12.10",
+    "executable": "C:\\Users\\Rahim\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "machine": "AMD64",
+    "processor": "Intel64 Family 6 Model 94 Stepping 3, GenuineIntel",
+    "cpu_count": 4,
+    "memory_bytes": 12255346688,
+    "sqlite": "3.49.1",
+    "node": "v26.13.1",
+    "fastapi": "0.162.4",
+    "uvicorn": "0.54.0",
+    "requests": "2.34.2",
+    "mizan_commit": null,
+    "mizan_commit_note": "git is not installed on this machine",
+    "mizan_tree_digest": "587d1c6d08a205cb",
+    "fixture_digests": {
+      "fastapi": "c812fdcc0270a3e3",
+      "express": "8395cee58b03bf04"
+    }
+  },
+  "scenarios": [
+    {
+      "framework": "express",
+      "variant": "clean",
+      "repetition": 1,
+      "outcome": "expected",
+      "expected_findings": [],
+      "observed_findings": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.676,
+      "peak_memory_bytes": 54161408,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 0,
+        "succeeded": 0,
+        "requests": 0,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "read",
+      "repetition": 1,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2"
+      ],
+      "observed_findings": [
+        "L2"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.613,
+      "peak_memory_bytes": 54321152,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "write",
+      "repetition": 1,
+      "outcome": "expected",
+      "expected_findings": [
+        "L3"
+      ],
+      "observed_findings": [
+        "L3"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.605,
+      "peak_memory_bytes": 55463936,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "both",
+      "repetition": 1,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2",
+        "L3"
+      ],
+      "observed_findings": [
+        "L2",
+        "L3"
+      ],
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.61,
+      "peak_memory_bytes": 54562816,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 2,
+        "succeeded": 2,
+        "requests": 2,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "clean",
+      "repetition": 1,
+      "outcome": "expected",
+      "expected_findings": [],
+      "observed_findings": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.253,
+      "peak_memory_bytes": 50229248,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 0,
+        "succeeded": 0,
+        "requests": 0,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "read",
+      "repetition": 1,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2"
+      ],
+      "observed_findings": [
+        "L2"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.374,
+      "peak_memory_bytes": 50319360,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "write",
+      "repetition": 1,
+      "outcome": "expected",
+      "expected_findings": [
+        "L3"
+      ],
+      "observed_findings": [
+        "L3"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.177,
+      "peak_memory_bytes": 50335744,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "both",
+      "repetition": 1,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2",
+        "L3"
+      ],
+      "observed_findings": [
+        "L2",
+        "L3"
+      ],
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.403,
+      "peak_memory_bytes": 50245632,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 2,
+        "succeeded": 2,
+        "requests": 2,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "clean",
+      "repetition": 2,
+      "outcome": "expected",
+      "expected_findings": [],
+      "observed_findings": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.586,
+      "peak_memory_bytes": 54661120,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 0,
+        "succeeded": 0,
+        "requests": 0,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "read",
+      "repetition": 2,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2"
+      ],
+      "observed_findings": [
+        "L2"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.695,
+      "peak_memory_bytes": 55246848,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "write",
+      "repetition": 2,
+      "outcome": "expected",
+      "expected_findings": [
+        "L3"
+      ],
+      "observed_findings": [
+        "L3"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.64,
+      "peak_memory_bytes": 54673408,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "both",
+      "repetition": 2,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2",
+        "L3"
+      ],
+      "observed_findings": [
+        "L2",
+        "L3"
+      ],
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.842,
+      "peak_memory_bytes": 54591488,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 2,
+        "succeeded": 2,
+        "requests": 2,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "clean",
+      "repetition": 2,
+      "outcome": "expected",
+      "expected_findings": [],
+      "observed_findings": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.244,
+      "peak_memory_bytes": 50327552,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 0,
+        "succeeded": 0,
+        "requests": 0,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "read",
+      "repetition": 2,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2"
+      ],
+      "observed_findings": [
+        "L2"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.43,
+      "peak_memory_bytes": 50212864,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "write",
+      "repetition": 2,
+      "outcome": "expected",
+      "expected_findings": [
+        "L3"
+      ],
+      "observed_findings": [
+        "L3"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.406,
+      "peak_memory_bytes": 50118656,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "both",
+      "repetition": 2,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2",
+        "L3"
+      ],
+      "observed_findings": [
+        "L2",
+        "L3"
+      ],
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.379,
+      "peak_memory_bytes": 50257920,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 2,
+        "succeeded": 2,
+        "requests": 2,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "clean",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [],
+      "observed_findings": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.663,
+      "peak_memory_bytes": 54489088,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 0,
+        "succeeded": 0,
+        "requests": 0,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "read",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2"
+      ],
+      "observed_findings": [
+        "L2"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.662,
+      "peak_memory_bytes": 54484992,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "write",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [
+        "L3"
+      ],
+      "observed_findings": [
+        "L3"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.633,
+      "peak_memory_bytes": 54624256,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "both",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2",
+        "L3"
+      ],
+      "observed_findings": [
+        "L2",
+        "L3"
+      ],
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.185,
+      "peak_memory_bytes": 55099392,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 2,
+        "succeeded": 2,
+        "requests": 2,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "clean",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [],
+      "observed_findings": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.314,
+      "peak_memory_bytes": 50470912,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 0,
+        "succeeded": 0,
+        "requests": 0,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "read",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2"
+      ],
+      "observed_findings": [
+        "L2"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.814,
+      "peak_memory_bytes": 50049024,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "write",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [
+        "L3"
+      ],
+      "observed_findings": [
+        "L3"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.365,
+      "peak_memory_bytes": 49954816,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "both",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2",
+        "L3"
+      ],
+      "observed_findings": [
+        "L2",
+        "L3"
+      ],
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.38,
+      "peak_memory_bytes": 50515968,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 2,
+        "succeeded": 2,
+        "requests": 2,
+        "failures": []
+      },
+      "evidence_complete": true
+    }
+  ],
+  "totals": {
+    "scenarios": 24,
+    "scenarios_expected": 24,
+    "scenarios_unexpected": 0,
+    "scenarios_error": 0,
+    "true_positives": 24,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "requests_total": 336,
+    "requests_bootstrap": 48,
+    "requests_learning": 216,
+    "requests_attack": 72,
+    "wall_clock_seconds": 48.949,
+    "budget_exhausted": 0,
+    "setup_errors": 0,
+    "reproduction_attempted": 24,
+    "reproduction_succeeded": 24,
+    "peak_memory_bytes": 55463936
+  }
+}

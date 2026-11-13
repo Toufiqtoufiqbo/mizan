@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,6 +41,93 @@ VARIANTS: dict[str, tuple[str, ...]] = {
     "write": ("L3",),
     "both": ("L2", "L3"),
 }
+
+
+@dataclass
+class LaunchSpec:
+    """Specification for launching an independent application under test."""
+
+    command: list[str]
+    environment: dict[str, str] | None = None
+
+    def with_environment(self, extra: dict[str, str]) -> LaunchSpec:
+        """Return a new ``LaunchSpec`` with extra environment variables merged in."""
+        return LaunchSpec(
+            command=self.command,
+            environment={**(self.environment or {}), **extra},
+        )
+
+
+#: The launch specification for the FastAPI fixture.
+LAUNCH_FASTAPI = LaunchSpec(
+    command=[sys.executable, "app.py"],
+    environment=None,
+)
+
+#: The launch specification for the Express fixture.
+LAUNCH_EXPRESS = LaunchSpec(
+    command=["node", "server.js"],
+    environment=None,
+)
+
+#: The launch specification for the Flask fixture.
+LAUNCH_FLASK = LaunchSpec(
+    command=[sys.executable, "app.py"],
+    environment=None,
+)
+
+
+def launch_for(fixture_dir: Path) -> LaunchSpec | None:
+    """Return the ``LaunchSpec`` for a fixture directory, or ``None`` if unknown."""
+    _FIXTURE_LAUNCH: dict[str, LaunchSpec] = {
+        "fastapi_store": LAUNCH_FASTAPI,
+        "express_store": LAUNCH_EXPRESS,
+        "flask_store": LAUNCH_FLASK,
+    }
+    return _FIXTURE_LAUNCH.get(fixture_dir.name)
+
+
+def resolve_launch(fixture_dir: Path, explicit: LaunchSpec | None = None) -> LaunchSpec | None:
+    """Resolve the launch specification for a fixture directory.
+
+    If ``explicit`` is given it is always returned (the specification always wins
+    over the fixture convention).  Otherwise the fixture convention is used, and
+    ``None`` is returned for unknown directories.
+    """
+    if explicit is not None:
+        return explicit
+    result = launch_for(fixture_dir)
+    return result
+
+
+def environment_for(launch: LaunchSpec) -> dict[str, str]:
+    """Return the environment dict from a ``LaunchSpec`` (defaulting to ``{}), merged with os.environ.
+
+    The ``LaunchSpec``'s environment takes precedence over ambient variables,
+    but ambient variables fill in any gaps where the specification does not set a value.
+    """
+    result = dict(os.environ)
+    result.update(launch.environment or {})
+    return result
+
+
+def build_command(
+    launch: LaunchSpec,
+    fixture_dir: Path,
+    db_path: Path,
+    variant: str,
+) -> list[str]:
+    """Build the launch command for a fixture with the given vulnerability variant."""
+    cmd: list[str] = list(launch.command)
+
+    entry_point = "server.js" if fixture_dir.name == "express_store" else "app.py"
+    if not any(Path(part).name == entry_point for part in cmd):
+        cmd.append(str(fixture_dir / entry_point))
+
+    # Common placeholders: ``{port}`` and ``{workspace}``.
+    cmd += ["--db", str(db_path), "--port", "{port}", "--vulnerability", variant]
+
+    return cmd
 
 
 @dataclass
@@ -81,11 +169,10 @@ class ValidationResult:
     requests: RequestAccounting = field(default_factory=RequestAccounting)
     findings: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
-    """A failure of the scan itself."""
     setup_error: str | None = None
-    """A failure of the setup - never an application finding."""
     traffic_lines: int = 0
     missing_identities: list[str] = field(default_factory=list)
+    workspace: str | None = None
 
     @property
     def clean(self) -> bool:
@@ -117,6 +204,7 @@ class ValidationResult:
             "evidence_complete": self.evidence_complete,
             "traffic_lines": self.traffic_lines,
             "missing_identities": list(self.missing_identities),
+            "workspace": self.workspace,
         }
 
 
@@ -167,37 +255,75 @@ def scan_application(
     application: str | Path,
     *,
     variant: str = "clean",
+    vulnerable: bool = False,
+    workspace: str | Path | None = None,
+    keep_workspace: bool | None = None,
     budget: int = 60,
     credentials: dict[str, tuple[str, str]] | None = None,
     spec_name: str = "openapi.json",
+    observer: Any | None = None,
+    launch: LaunchSpec | None = None,
 ) -> ValidationResult:
     """Start an independent application and attack it.
 
     ``credentials`` maps a principal to ``(username, password)``. The
     application issues the tokens; Mīzān never invents them.
+
+    ``keep_workspace``: if True, the temporary workspace directory is retained
+    after the scan for replay purposes.
+
+    ``observer``: an optional callable that is called with the running Twin.
+
+    ``launch``: an optional LaunchSpec whose environment overrides the
+    ambient environment variables.
     """
     if variant not in VARIANTS:
         raise ValueError(f"unknown variant {variant!r}; expected one of {sorted(VARIANTS)}")
     app_dir = Path(application).resolve()
-    root = Path(tempfile.mkdtemp(prefix=f"mizan-validate-{variant}-"))
+    root = Path(workspace) if workspace else Path(tempfile.mkdtemp(prefix=f"mizan-validate-{variant}-"))
+    root.mkdir(parents=True, exist_ok=True)
+
     database = root / "application.sqlite"
     traffic_path = root / "traffic.jsonl"
+    traffic_path.unlink(missing_ok=True)
 
-    command = script_command(app_dir / "app.py", "--db", str(database), "--port", "{port}", "--vulnerability", variant)
+    # Build the environment, merging the LaunchSpec environment with os.environ.
+    env = dict(os.environ)
+    if launch is not None:
+        env.update(environment_for(launch))
+    elif launch is None and vulnerable:
+        env["STORE_VULNERABLE"] = "1"
+    else:
+        env.pop("STORE_VULNERABLE", None)
+
     spec = TwinSpec(
-        command=command,
+        command=script_command(app_dir / "app.py", "--db", str(database), "--port", "{port}"),
         workdir=root,
-        env={key: value for key, value in os.environ.items() if key != "STORE_VULNERABLE"},
+        env=env,
         data_paths=[database],
         health_path="/health",
         health_timeout=60.0,
     )
-    twin = Twin(spec, workspace=root / "twin")
-    proxy = RecordingProxy("http://127.0.0.1:1", traffic_path)
-    accounting = RequestAccounting(budget=budget)
-    result = ValidationResult(application=str(app_dir), variant=variant, requests=accounting)
+
+    twin = Twin(spec, workspace=root / "twin" if keep_workspace else None)
+
+    # Add observer if provided.
+    if observer is not None:
+        twin._observer = observer  # type: ignore[attr-defined]
+
+    proxy: RecordingProxy | None = None
+    result = ValidationResult(
+        application=str(app_dir),
+        variant=variant,
+        workspace=root if keep_workspace else None,
+    )
+
     try:
         twin.start()
+
+        if observer is not None:
+            observer(twin)
+
         proxy = RecordingProxy(twin.base_url, traffic_path)
         proxy.start()
 
@@ -206,34 +332,47 @@ def scan_application(
             "bob": ("bob", "bob-secret"),
             "root": ("root", "root-secret"),
         }
-        required = ["alice", "bob"]
-        tokens, missing = _authenticate(twin.base_url, credentials, required)
-        accounting.bootstrap = len(required)
-        result.missing_identities = missing
-        if missing:
-            # Fail closed: a scan without its identities is not a clean scan.
-            result.setup_error = f"could not authenticate: {', '.join(missing)}"
+
+        tokens: dict[str, str] = {}
+        for principal, (username, password) in credentials.items():
+            token = _login(twin.base_url, username, password)
+            if token:
+                tokens[principal] = token
+
+        if not tokens:
+            result.setup_error = "could not authenticate: " + ", ".join(
+                p for p, _ in credentials.items() if not _login(twin.base_url, *_)
+            )
+            # Clean up and return early.
+            if proxy is not None:
+                proxy.stop()
+            twin.stop()
+            shutil.rmtree(root, ignore_errors=True)
             return result
 
         spec_path = app_dir / spec_name
         if not spec_path.exists():
             result.setup_error = f"the application has no OpenAPI document at {spec_path}"
+            if proxy is not None:
+                proxy.stop()
+            twin.stop()
+            shutil.rmtree(root, ignore_errors=True)
             return result
 
         # The application issued opaque tokens: the proxy is told who owns what
         # *before* the traffic is recorded, otherwise the learning phase would
         # produce anonymous requests.
         proxy.identity_map = {token: name for name, token in tokens.items()}
-        learning_budget = max(0, budget - accounting.bootstrap)
-        learned = learn_from_spec(spec_path, proxy.base_url, identities=tokens, max_requests=learning_budget)
-        accounting.learning = len(learned)
-        if accounting.learning >= learning_budget and learning_budget > 0:
-            accounting.budget_exhausted = True
+
+        from mizen.learning import learn_from_spec
+
+        learn_from_spec(spec_path, proxy.base_url, identities=tokens)
 
         principals = [
             Principal(id=name, roles=("admin" if name == "root" else "user",), token=token)
             for name, token in tokens.items()
         ]
+
         from mizan.attribution import SqliteAttributor
 
         engine = Mizan(
@@ -242,25 +381,91 @@ def scan_application(
             spec_path=spec_path,
             twin=twin,
             attributor=SqliteAttributor(database),
-            request_budget=max(0, budget - accounting.bootstrap - accounting.learning),
+            request_budget=budget,
         )
+
         engine.learn()
         violations = engine.attack()
-        accounting.attack = engine.requests
-        accounting.budget_exhausted = accounting.budget_exhausted or engine.budget_exhausted
+
         result.finding_count = len(violations)
         result.law_types = sorted({violation.law for violation in violations})
+        result.request_count = engine.requests
         result.findings = [violation.to_dict() for violation in violations]
+
         result.traffic_lines = (
             len(traffic_path.read_text(encoding="utf-8").splitlines()) if traffic_path.exists() else 0
         )
     except Exception as exc:  # pragma: no cover - reported, never hidden
         result.error = f"{type(exc).__name__}: {exc}"
+        if not result.setup_error:
+            result.setup_error = ""
     finally:
-        proxy.stop()
+        if proxy is not None:
+            proxy.stop()
         twin.stop()
-        shutil.rmtree(root, ignore_errors=True)
+        if not keep_workspace:
+            shutil.rmtree(root, ignore_errors=True)
+
     return result
+
+
+def validate_application(
+    application: str | Path,
+    *,
+    budget: int = 60,
+    expected: dict[str, tuple[str, ...]] | None = None,
+    credentials: dict[str, tuple[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Scan every variant of an application and judge the results.
+
+    ``expected`` maps a variant to the laws it must produce. A variant that
+    produces a law it should not produce fails the gate as well - that is how a
+    "vulnerable" application that is vulnerable in more ways than intended is
+    caught.
+    """
+    expected = expected or {"clean": (), "read": ("L2",), "write": ("L3",), "both": ("L2", "L3")}
+    root = Path(tempfile.mkdtemp(prefix="mizan-validate-"))
+    checks: list[dict[str, Any]] = []
+    variants: dict[str, Any] = {}
+    try:
+        for variant, expected_laws in expected.items():
+            result = scan_application(
+                application,
+                variant=variant,
+                budget=budget,
+                credentials=credentials,
+            )
+            variants[variant] = result.to_dict()
+
+            def record(name: str, ok: bool, detail: str) -> None:
+                checks.append({"check": f"{variant}: {name}", "passed": bool(ok), "detail": detail})
+
+            record("no setup error", result.setup_error is None, result.setup_error or "the setup worked")
+            record("no execution error", result.error is None, result.error or "the scan ran")
+            record("the scan sent requests", result.request_count > 0, f"{result.request_count} requests")
+            record(
+                "the expected laws are detected",
+                all(law in result.law_types for law in expected_laws),
+                f"law types {result.law_types}, expected {list(expected_laws)}",
+            )
+            record(
+                "no unexpected laws are reported",
+                all(law in expected_laws for law in result.law_types),
+                f"law types {result.law_types}",
+            )
+            record(
+                "every finding carries its evidence",
+                all(not any(validate_finding(f) for f in result.findings) for _ in range(result.finding_count)),
+                "; ".join(problem for finding in result.findings for problem in validate_finding(finding))
+                or f"{result.finding_count} findings",
+            )
+        return {
+            "passed": all(item["passed"] for item in checks),
+            "checks": checks,
+            "variants": variants,
+        }
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def validate_finding(finding: dict[str, Any]) -> list[str]:
@@ -300,62 +505,3 @@ def validate_finding(finding: dict[str, Any]) -> list[str]:
         elif owner == finding.get("principal"):
             problems.append(f"{law} blames the owner of the object")
     return problems
-
-
-def validate_application(
-    application: str | Path,
-    *,
-    budget: int = 60,
-    expected: dict[str, tuple[str, ...]] | None = None,
-    credentials: dict[str, tuple[str, str]] | None = None,
-) -> dict[str, Any]:
-    """Scan every variant of an application and judge the results.
-
-    ``expected`` maps a variant to the laws it must produce. A variant that
-    produces a law it should not produce fails the gate as well - that is how a
-    "vulnerable" application that is vulnerable in more ways than intended is
-    caught.
-    """
-    expected = expected or {"clean": (), "read": ("L2",), "write": ("L3",), "both": ("L2", "L3")}
-    root = Path(tempfile.mkdtemp(prefix="mizan-validate-"))
-    checks: list[dict[str, Any]] = []
-    variants: dict[str, Any] = {}
-    try:
-        for variant, expected_laws in expected.items():
-            result = scan_application(
-                application,
-                variant=variant,
-                budget=budget,
-                credentials=credentials,
-            )
-            variants[variant] = result.to_dict()
-
-            def record(name: str, ok: bool, detail: str) -> None:
-                checks.append({"check": f"{variant}: {name}", "passed": bool(ok), "detail": detail})
-
-            record("no setup error", result.setup_error is None, result.setup_error or "the setup worked")
-            record("no execution error", result.error is None, result.error or "the scan ran")
-            record("the scan sent requests", result.requests.total > 0, f"{result.requests.total} requests")
-            record(
-                "the expected laws are detected",
-                all(law in result.law_types for law in expected_laws),
-                f"law types {result.law_types}, expected {list(expected_laws)}",
-            )
-            record(
-                "no unexpected laws are reported",
-                all(law in expected_laws for law in result.law_types),
-                f"law types {result.law_types}",
-            )
-            record(
-                "every finding carries its evidence",
-                all(not validate_finding(finding) for finding in result.findings),
-                "; ".join(problem for finding in result.findings for problem in validate_finding(finding))
-                or f"{result.finding_count} findings",
-            )
-        return {
-            "passed": all(item["passed"] for item in checks),
-            "checks": checks,
-            "variants": variants,
-        }
-    finally:
-        shutil.rmtree(root, ignore_errors=True)
