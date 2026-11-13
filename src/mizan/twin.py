@@ -244,3 +244,8 @@ def _process_group_kwargs() -> dict[str, Any]:
 def python_command(module: str, *arguments: str) -> list[str]:
     """A command that runs a module with the current interpreter."""
     return [sys.executable, "-m", module, *arguments]
+
+
+def script_command(script: str | Path, *arguments: str) -> list[str]:
+    """A command that runs a script file with the current interpreter."""
+    return [sys.executable, str(script), *arguments]

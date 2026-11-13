@@ -119,8 +119,19 @@ class _Handler(BaseHTTPRequestHandler):
         self._handle()
 
 
+#: The environment variable that tells the proxy which token belongs to whom.
+#: A token that is not a JWT carries no readable identity, so the operator has
+#: to say who it is - Mizan will not guess.
+IDENTITY_MAP_ENV = "MIZAN_IDENTITY_MAP"
+
+
 class RecordingProxy:
-    """A proxy that writes the traffic log."""
+    """A proxy that writes the traffic log.
+
+    The identity of a request comes from the token's claims when the token is
+    a JWT, and from `identity_map` otherwise. Without an identity the traffic is
+    still recorded, but the engine cannot say who owns what.
+    """
 
     def __init__(
         self,
@@ -129,11 +140,15 @@ class RecordingProxy:
         *,
         host: str = "127.0.0.1",
         port: int = 0,
+        identity_map: dict[str, str] | None = None,
     ) -> None:
         self.upstream = upstream
         self.path = Path(traffic_path)
         self.host = host
         self.port = port
+        self.identity_map = dict(identity_map or {})
+        if not self.identity_map:
+            self.identity_map = _identity_map_from_env()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -188,7 +203,7 @@ class RecordingProxy:
             path=path.split("?")[0],
             template=template,
             status=status,
-            principal=_principal(headers),
+            principal=_principal(headers, self.identity_map),
             body=_json(body),
             response=response_json,
             resource_type=resource_type,
@@ -200,10 +215,31 @@ class RecordingProxy:
                 handle.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
 
 
-def _principal(headers: Any) -> str | None:
+def _identity_map_from_env() -> dict[str, str]:
+    """The identity map from the environment, if there is one."""
+    import json
+    import os
+
+    raw = os.environ.get(IDENTITY_MAP_ENV)
+    if not raw:
+        return {}
+    try:
+        loaded = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return {str(token): str(principal) for token, principal in loaded.items()}
+
+
+def _principal(headers: Any, identity_map: dict[str, str] | None = None) -> str | None:
+    """The identity behind a request, as far as it can be told."""
     value = headers.get("Authorization") or headers.get("authorization")
     if value and value.startswith("Bearer "):
-        claims = decode_token(value[len("Bearer ") :].strip())
+        token = value[len("Bearer ") :].strip()
+        if identity_map and token in identity_map:
+            return identity_map[token]
+        claims = decode_token(token)
         if claims:
             return claims.subject
     fallback = headers.get("X-User-Id") or headers.get("x-user-id")

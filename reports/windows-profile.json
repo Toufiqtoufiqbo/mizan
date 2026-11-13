@@ -1,0 +1,71 @@
+{
+  "platform": {
+    "system": "Windows",
+    "release": "10",
+    "version": "10.0.19045",
+    "machine": "AMD64",
+    "python": "3.12.10",
+    "processor": "Intel64 Family 6 Model 94 Stepping 3, GenuineIntel",
+    "cpu_count": 4
+  },
+  "measurements": {
+    "unit_tests": {
+      "command": "C:\\Users\\Rahim\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m pytest -q -m not postgres_integration",
+      "seconds": 97.43,
+      "peak_memory_mb": 162.7,
+      "exit_code": 0,
+      "output_tail": [
+        "",
+        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
+        "120 passed, 15 deselected, 1 warning in 94.97s (0:01:34)"
+      ]
+    },
+    "postgres_integration": {
+      "command": "C:\\Users\\Rahim\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m pytest -q -m postgres_integration",
+      "seconds": 14.59,
+      "peak_memory_mb": 118.6,
+      "exit_code": 0,
+      "output_tail": [
+        "...............                                                          [100%]",
+        "15 passed, 120 deselected in 11.50s"
+      ]
+    },
+    "self_scan": {
+      "command": "C:\\Users\\Rahim\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m mizan.cli self-scan",
+      "seconds": 5.92,
+      "peak_memory_mb": 98.4,
+      "exit_code": 0,
+      "output_tail": [
+        "  [PASS] weakened: every finding carries its evidence - 2 findings",
+        "  [PASS] the two variants are isolated - separate workspaces, databases, traffic logs and processes",
+        "self-scan OK: the real API is clean, the weakened one is not"
+      ]
+    },
+    "independent_validation": {
+      "command": "C:\\Users\\Rahim\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m pytest -q tests/test_external_validation.py",
+      "seconds": 7.96,
+      "peak_memory_mb": 100.2,
+      "exit_code": 0,
+      "output_tail": [
+        "........                                                                 [100%]",
+        "8 passed in 5.76s"
+      ]
+    },
+    "benchmark": {
+      "command": "C:\\Users\\Rahim\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m mizan.cli benchmark --size 10 --controls 2 --out measure-bench",
+      "seconds": 42.53,
+      "peak_memory_mb": 34.8,
+      "exit_code": 0,
+      "output_tail": [
+        "",
+        "Detection rate: 100% (10/10) | false positives on patched apps: 0/2",
+        "Report written to measure-bench"
+      ]
+    },
+    "sarif_export": {
+      "seconds": 0.294,
+      "note": "measured through the CLI in the self-scan run"
+    },
+    "temp_disk_bytes": 0
+  }
+}

@@ -23,9 +23,11 @@ from urllib.parse import urlsplit
 import requests
 
 from mizan.core import (
+    UNKNOWN_PRINCIPAL,
     AccessMatrix,
     Policy,
     Principal,
+    RequestBudgetExhausted,
     Resource,
     Rule,
     Step,
@@ -83,6 +85,7 @@ class Mizan:
         spec_path: str | Path | None = None,
         twin: Any | None = None,
         attributor: Any | None = None,
+        request_budget: int | None = None,
     ) -> None:
         self.target = target
         self.policy = policy or Policy()
@@ -103,6 +106,10 @@ class Mizan:
         self._attributed_events: list[WriteEvent] = []
         #: How many requests the engine sent - the cost of a finding.
         self.requests = 0
+        #: The number of requests the engine may send. ``None`` means no limit.
+        self.request_budget = request_budget
+        #: Whether the last attack stopped because the budget ran out.
+        self.budget_exhausted = False
 
     # -- learning ---------------------------------------------------------- #
 
@@ -212,7 +219,13 @@ class Mizan:
         for name, probe in self.probe_groups():
             if groups is not None and name not in groups:
                 continue
-            violations.extend(probe())
+            try:
+                violations.extend(probe())
+            except RequestBudgetExhausted:
+                # The budget is a limit, not a failure: stop cleanly - and say
+                # so, because a truncated scan is not a complete one.
+                self.budget_exhausted = True
+                break
         return _dedupe(violations)
 
     def probe_names(self) -> list[str]:
@@ -286,7 +299,10 @@ class Mizan:
                         continue
                     url = self._url(record.path)
                     session = self.target.session_for(attacker)
-                    response = self._request(session, "GET", url, timeout=self.target.timeout)
+                    # The read probe always sends a GET, whatever the traffic
+                    # contained: the evidence must name the method that was
+                    # transmitted.
+                    response = self._request(session, READ_METHOD, url, timeout=self.target.timeout)
                     if not (200 <= response.status_code < 300):
                         continue
                     body = _json(response)
@@ -324,7 +340,7 @@ class Mizan:
                             },
                             steps=[
                                 Step(
-                                    method=method,
+                                    method=READ_METHOD,
                                     url=url,
                                     headers=mask_authorization(
                                         {"Authorization": f"Bearer {attacker.token}"}, attacker.id
@@ -437,7 +453,7 @@ class Mizan:
         """L3 - can one principal write into another principal's object?"""
         violations: list[Violation] = []
         self._restore()
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[str, str, str]] = set()
         examples = self._examples()
         for (method, template), records in examples.items():
             if method not in {"POST", "PUT", "PATCH"}:
@@ -446,6 +462,10 @@ class Mizan:
             if record is None:
                 continue
             body = record.body
+            working = self._primary_record(records)
+            if working is not record:
+                record = working
+                body = record.body if isinstance(record.body, dict) else body
             for url, resource in self._candidate_urls(method, template, records):
                 if resource is None or not resource.owner:
                     continue
@@ -455,9 +475,10 @@ class Mizan:
                         continue
                     if not self._is_testable(attacker):
                         continue
-                    if (attacker.id, resource.key) in seen:
+                    candidate = (attacker.id, resource.key, method)
+                    if candidate in seen:
                         continue
-                    seen.add((attacker.id, resource.key))
+                    seen.add(candidate)
                     # The body is perturbed on purpose: replaying the recorded
                     # values would change nothing, and a write that changes
                     # nothing is invisible in the data.
@@ -504,7 +525,7 @@ class Mizan:
                                     headers=mask_authorization(
                                         {"Authorization": f"Bearer {attacker.token}"}, attacker.id
                                     ),
-                                    body=body,
+                                    body=probe_body,
                                     status=response.status_code,
                                     note="cross-identity write",
                                 )
@@ -643,6 +664,18 @@ class Mizan:
                 violations.append(violation)
         return violations
 
+    def _primary_record(self, records: list[TrafficRecord]) -> TrafficRecord:
+        """The record that worked.
+
+        A traffic log starts with guesses - a path parameter that did not
+        exist, an identifier nobody knew yet. Probing those teaches nothing, so
+        the first successful request is the one to build on.
+        """
+        for record in records:
+            if 200 <= record.status < 300:
+                return record
+        return records[0]
+
     def _candidate_urls(
         self, method: str, template: str, records: list[TrafficRecord]
     ) -> list[tuple[str, Resource | None]]:
@@ -774,12 +807,22 @@ class Mizan:
             self.twin.restore()
 
     def _principal_of(self, session: requests.Session) -> str:
+        """The identity of the request the session makes.
+
+        The engine holds the tokens, so it knows who they belong to - even when
+        the token itself says nothing (an opaque token). Only when nothing is
+        known is the identity unknown.
+        """
         header = session.headers.get("Authorization", "")
         if header.startswith("Bearer "):
-            claims = decode_token(header[len("Bearer ") :].strip())
+            token = header[len("Bearer ") :].strip()
+            for principal in self.target.principals:
+                if principal.token == token:
+                    return principal.id
+            claims = decode_token(token)
             if claims and claims.subject:
                 return claims.subject
-        return "unknown"
+        return UNKNOWN_PRINCIPAL
 
     def _request(self, session: requests.Session, method: str, url: str, **kwargs: Any) -> requests.Response:
         """Send a request and attribute what it changed.
@@ -789,6 +832,8 @@ class Mizan:
         needs no instrumentation for this.
         """
         before = self.attributor.snapshot() if self.attributor is not None else None
+        if self.request_budget is not None and self.requests >= self.request_budget:
+            raise RequestBudgetExhausted(f"the scan reached its budget of {self.request_budget} requests")
         self.requests += 1
         response = session.request(method, url, **kwargs)
         if before is not None:
@@ -895,6 +940,10 @@ class Mizan:
 # --------------------------------------------------------------------------- #
 # Small helpers
 # --------------------------------------------------------------------------- #
+
+
+#: The method the read probe sends. The evidence must always match it.
+READ_METHOD = "GET"
 
 
 def contains_object(payload: Any, resource_id: str | None) -> bool:

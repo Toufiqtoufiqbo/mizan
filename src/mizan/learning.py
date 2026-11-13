@@ -76,9 +76,17 @@ def sample_body(schema: dict[str, Any], document: dict[str, Any], depth: int = 0
         body: dict[str, Any] = {}
         for name, definition in properties.items():
             resolved = _resolve(definition, document, depth + 1)
-            body[name] = sample_body(resolved, document, depth + 1)
-            if len(body) >= 2:
-                break
+            # A field may carry its own example - that is often the only value
+            # the application will accept.
+            value = sample_body(resolved, document, depth + 1)
+            for key in ("example", "default"):
+                if isinstance(resolved, dict) and key in resolved and resolved[key] is not None:
+                    value = resolved[key]
+                    break
+            examples = resolved.get("examples") if isinstance(resolved, dict) else None
+            if isinstance(examples, list) and examples:
+                value = examples[0]
+            body[name] = value
         return body
     if kind == "array":
         return []
@@ -114,6 +122,8 @@ def learn_from_spec(
     session: requests.Session | None = None,
     discover_ids: bool = True,
     max_discovered_ids: int = 5,
+    include_destructive: bool = False,
+    max_requests: int | None = None,
 ) -> list[dict[str, Any]]:
     """Send the smallest possible request for every operation.
 
@@ -125,6 +135,11 @@ def learn_from_spec(
     When the identifiers are known per identity, the second pass acts as *the
     identity that created the object*: a client reads back what it created,
     not what somebody else created.
+
+    Destructive operations are skipped by default: a learning run must not
+    destroy the objects the attack phase is going to look at.
+
+    ``max_requests`` bounds the number of requests the learning phase may send.
     """
     document = load_spec(spec_path)
     session = session or requests.Session()
@@ -137,10 +152,14 @@ def learn_from_spec(
         principals = [(f"identity-{index}", token) for index, token in enumerate(tokens or [])]
 
     for index, (method, path, operation) in enumerate(operations(document)):
+        if method == "DELETE" and not include_destructive:
+            continue
         if _has_required_path_parameter(operation):
             pending.append((method, path, operation))
             continue
         principal, token = _pick(principals, index)
+        if max_requests is not None and len(results) >= max_requests:
+            break
         result = _send(session, method, base_url, path, operation, document, token, timeout)
         results.append(result)
         for identifier in _identifiers_in(result.get("response")):
@@ -154,9 +173,14 @@ def learn_from_spec(
                 continue
             # Writes first: a listing that is read before the object exists
             # is empty, and an empty listing teaches the engine nothing.
-            ordered = sorted(pending, key=lambda item: 0 if item[0] in {"POST", "PUT", "PATCH"} else 1)
+            ordered = sorted(
+                pending,
+                key=lambda item: 0 if item[0] in {"POST", "PUT", "PATCH"} else 1,
+            )
             for method, path, operation in ordered:
                 for candidate in identifiers[:max_discovered_ids]:
+                    if max_requests is not None and len(results) >= max_requests:
+                        break
                     concrete = _fill_path(path, operation, candidate)
                     if concrete is None:
                         continue

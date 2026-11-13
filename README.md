@@ -152,6 +152,52 @@ The search is not a replacement for the probes: the probes are predictable, the
 search explores. Run both - `mizan twin --guided` runs the search, and the
 probes are one command away.
 
+## Independent validation
+
+Mīzān is tested against an application that knows nothing about it:
+`tests/fixtures/external_apps/flask_store/` - a standalone Flask application
+with its own authentication, its own database and its own OpenAPI document.
+
+```bash
+mizan validate tests/fixtures/external_apps/flask_store
+```
+
+The fixture has four variants, and each one changes exactly one thing - the
+listing of orders stays scoped to the caller in every variant:
+
+| Variant | The read check | The write check | Result |
+|---|---|---|---|
+| clean | on | on | **0 findings** |
+| `read` | **off** | on | **1 finding** - `L2` (cross-user read) only |
+| `write` | on | **off** | **1 finding** - `L3` (cross-user write) only |
+| `both` | **off** | **off** | **2 findings** - `L2` and `L3` |
+
+Every finding names the principal, the method, the endpoint, the resource, the
+owner and the reproduction - and the reproduction is the request that was
+actually sent, verified by replaying it. The gate is a CI stage, and it fails
+when the suite is skipped or when a variant reports a law it should not.
+
+Testing somebody else's application is what exposed six real defects in the
+engine - among them a false positive on every successful request, and a blind
+spot against applications that do not use JWTs. See
+`reports/MIZAN_0.2.2_EXTERNAL_VALIDATION.md`.
+
+---
+
+## SARIF
+
+Findings can be written as SARIF 2.1.0, the format code-scanning tools read:
+
+```bash
+mizan export-sarif mizan-proofs --out findings.sarif
+```
+
+Every law has a stable rule identifier (`MIZAN-L2`), the evidence travels as
+properties, and no source location is invented - Mīzān does not know where in
+your code the flaw is, and it does not pretend to.
+
+---
+
 ## Mīzān scans itself
 
 Mīzān has a small control plane of its own (`mizan.server`): it starts scans,
@@ -159,9 +205,14 @@ lists findings and hands out proof bundles. That API is Mīzān's **first user**
 
 ```bash
 mizan self-scan
-#   clean: 0 finding(s) in 6 requests
-#   weakened: 1 finding(s) ['L2'] in 6 requests
-#       - L2 alice read an object owned by root
+# clean:
+#   findings: 0
+#   law types: []
+#   requests: 6
+# weakened:
+#   findings: 2
+#   law types: ['L2']
+#   requests: 6
 # self-scan OK: the real API is clean, the weakened one is not
 ```
 

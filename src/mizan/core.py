@@ -127,6 +127,10 @@ SINGLE_USE_HINTS: tuple[str, ...] = (
 # --------------------------------------------------------------------------- #
 
 
+class RequestBudgetExhausted(RuntimeError):
+    """The scan reached the number of requests it was allowed to send."""
+
+
 #: The principal used when the identity of a write is missing or malformed.
 #: A write with this principal is never reported as a confirmed breach.
 UNKNOWN_PRINCIPAL = "unknown"
