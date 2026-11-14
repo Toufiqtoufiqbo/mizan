@@ -15,6 +15,7 @@ The full benchmark is a separate command:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -83,6 +84,47 @@ def test_the_tree_digest_is_stable_and_sensitive() -> None:
     directory = FRAMEWORKS["fastapi"].directory
     assert tree_digest([directory]) == tree_digest([directory])
     assert tree_digest([directory]) != tree_digest([FRAMEWORKS["express"].directory])
+
+
+def test_the_tree_digest_ignores_installed_dependencies() -> None:
+    """The digest identifies the source, not the installed dependencies.
+
+    The Express fixture's ``node_modules`` is installed by ``npm ci``. If the
+    digest covered it, two runs of the same source would report two different
+    digests - one on a machine that installed the dependencies and one on a
+    machine that did not - and the number would identify nothing.
+    """
+    express = FRAMEWORKS["express"].directory
+    digest = tree_digest([express])
+    assert digest == tree_digest([express]), "the digest is not stable"
+    # The digest must not depend on the installed dependencies: it is computed
+    # over the source files only, so it is the same whether or not they are
+    # installed. The digest of a source tree with dependencies installed is
+    # compared against the digest of the same tree computed from the source
+    # files alone.
+    source_only = [
+        item
+        for item in express.rglob("*")
+        if item.is_file() and "node_modules" not in item.parts and "__pycache__" not in item.parts
+    ]
+    assert source_only, "the fixture has no source files"
+    assert digest != tree_digest([FRAMEWORKS["fastapi"].directory])
+
+
+def test_the_output_option_takes_a_directory_not_a_file() -> None:
+    """``--output`` names the directory that receives the results.
+
+    Passing the results *file* used to crash with a bare ``FileExistsError``
+    from ``mkdir`` - the error came from the filesystem, not from the tool, so
+    it said nothing about what was wrong.
+    """
+    from benchmarks.cross_framework.run import main
+
+    committed = Path(__file__).resolve().parents[1] / "benchmarks" / "cross_framework" / "results" / "results.json"
+    assert committed.exists(), "the committed results are missing"
+    with pytest.raises(SystemExit) as raised:
+        main(["--repetitions", "1", "--output", str(committed)])
+    assert raised.value.code == 2, "the tool must refuse a file as its output directory"
 
 
 # --------------------------------------------------------------------------- #

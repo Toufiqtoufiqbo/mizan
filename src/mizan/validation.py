@@ -501,7 +501,12 @@ def scan_application(
     root.mkdir(parents=True, exist_ok=True)
 
     required = list(required_identities) if required_identities else list(REQUIRED_IDENTITIES)
-    database = root / "application.sqlite"
+    resolved_launch = resolve_launch(app_dir, launch)
+    # The database name comes from the launch contract, so the replay - which
+    # reopens the scan's state through the same contract - finds the same
+    # file. Two different names would silently break the replay.
+    database_name = resolved_launch.database if resolved_launch is not None else "application.sqlite"
+    database = root / database_name
     traffic_path = root / "traffic.jsonl"
     traffic_path.unlink(missing_ok=True)
 
@@ -514,7 +519,6 @@ def scan_application(
     else:
         env.pop("STORE_VULNERABLE", None)
 
-    resolved_launch = resolve_launch(app_dir, launch)
     if resolved_launch is not None:
         command = build_command(resolved_launch, app_dir, database, variant)
     else:

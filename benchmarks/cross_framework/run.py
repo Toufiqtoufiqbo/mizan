@@ -47,12 +47,20 @@ def main(argv: list[str] | None = None) -> int:
         "--output",
         type=Path,
         default=DEFAULT_OUTPUT,
-        help=f"where to write results.json and results.md (default: {DEFAULT_OUTPUT})",
+        help=(f"the DIRECTORY where results.json and results.md are written (default: {DEFAULT_OUTPUT})"),
     )
     arguments = parser.parse_args(argv)
 
     if arguments.repetitions < 1:
         parser.error("--repetitions must be at least 1")
+
+    output = arguments.output
+    if output.exists() and not output.is_dir():
+        parser.error(
+            f"--output is the directory that receives results.json and results.md, "
+            f"but {output} is a file. Pass its directory instead."
+        )
+    output.mkdir(parents=True, exist_ok=True)
 
     frameworks = arguments.framework or sorted(FRAMEWORKS)
     scenarios = []
@@ -89,7 +97,6 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     output = arguments.output
-    output.mkdir(parents=True, exist_ok=True)
     (output / "results.json").write_text(render_json(results), encoding="utf-8")
     (output / "results.md").write_text(render_markdown(results), encoding="utf-8")
 

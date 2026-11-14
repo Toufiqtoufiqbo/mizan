@@ -314,6 +314,37 @@ def test_the_command_is_rebuilt_identically_for_the_replay() -> None:
     assert Path(first[1]).name == "server.js"
 
 
+def test_the_scan_and_the_replay_use_the_same_database_file() -> None:
+    """The scan must write the database the replay reopens.
+
+    The scan used to hardcode ``application.sqlite`` while the replay read
+    ``launch.database``. The two names agreed by coincidence; a specification
+    that named a different file would have made the replay open a database the
+    scan never wrote - and the findings would silently fail to reproduce.
+    """
+    import shutil
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = Path(directory)
+        result = scan_application(
+            FIXTURES / "flask_store",
+            variant="write",
+            budget=60,
+            workspace=workspace,
+            keep_workspace=True,
+        )
+        try:
+            assert result.error is None, result.error
+            # The scan wrote the database the launch contract names.
+            assert (workspace / LAUNCH_FLASK.database).exists(), sorted(path.name for path in workspace.iterdir())
+            # And it is a real SQLite database, not a stand-in.
+            header = (workspace / LAUNCH_FLASK.database).read_bytes()[:16]
+            assert header.startswith(b"SQLite format 3"), header
+        finally:
+            shutil.rmtree(workspace, ignore_errors=True)
+
+
 # --------------------------------------------------------------------------- #
 # Regression: the OpenAPI source
 # --------------------------------------------------------------------------- #

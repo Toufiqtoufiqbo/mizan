@@ -267,6 +267,13 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
+      - name: Install the Express fixture's dependencies from the lockfile
+        # The benchmark needs the fixture's own dependencies. It must not depend
+        # on another step having installed them: `npm ci` installs exactly what
+        # package-lock.json pins and never touches the lockfile.
+        run: npm ci --no-audit --no-fund
+        working-directory: tests/fixtures/external_apps/express_store
+
       - name: The launch contract
         run: python -m pytest -q tests/test_validation_launch.py tests/test_validation_fail_closed.py
 
@@ -285,7 +292,8 @@ jobs:
           fi
 
       - name: The cross-framework benchmark (2 frameworks x 4 variants x 3 repetitions)
-        run: python -m benchmarks.cross_framework.run --repetitions 3 --out benchmarks/cross_framework/results/results.json
+        # --output names the DIRECTORY that receives results.json and results.md.
+        run: python -m benchmarks.cross_framework.run --repetitions 3 --output benchmarks/cross_framework/results
 
       - name: The independent checker rejects nothing less than the expected matrix
         run: python -m benchmarks.cross_framework.check benchmarks/cross_framework/results/results.json

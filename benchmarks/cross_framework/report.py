@@ -27,6 +27,12 @@ from .scenarios import FRAMEWORKS, REPOSITORY_ROOT
 def tree_digest(paths: list[Path]) -> str:
     """A stable digest of a set of files.
 
+    The digest identifies the exact *source* tree that produced a result, which
+    is what the number is for. Installed dependencies are excluded: they are
+    not the source, they differ between a machine that installed them and one
+    that did not, and they would make two identical runs report two different
+    digests.
+
     The machine has no ``git`` binary, so the commit SHA cannot be read. The
     digest identifies the exact tree that produced a result, which is what the
     number is for.
@@ -35,7 +41,13 @@ def tree_digest(paths: list[Path]) -> str:
     files: list[Path] = []
     for path in paths:
         if path.is_dir():
-            files.extend(sorted(item for item in path.rglob("*") if item.is_file() and "__pycache__" not in item.parts))
+            files.extend(
+                sorted(
+                    item
+                    for item in path.rglob("*")
+                    if item.is_file() and "__pycache__" not in item.parts and "node_modules" not in item.parts
+                )
+            )
         elif path.is_file():
             files.append(path)
     for item in sorted(files):

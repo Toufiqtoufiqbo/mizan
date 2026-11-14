@@ -11,30 +11,30 @@ counts behind it.
 
 | Framework | Variant | Expected | Observed | TP | FP | FN | Precision | Recall | Requests (b/l/a) | Time | Peak memory | Replay |
 |---|---|---|---|---:|---:|---:|---|---|---|---:|---|---|
-| express | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 1.69 s | 49.2 MiB | n/a |
-| express | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.56 s | 49.2 MiB | 1/1 |
-| express | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.64 s | 49.2 MiB | 1/1 |
-| express | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.56 s | 49.3 MiB | 2/2 |
-| fastapi | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 2.28 s | 46.5 MiB | n/a |
-| fastapi | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.23 s | 46.4 MiB | 1/1 |
-| fastapi | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.23 s | 46.6 MiB | 1/1 |
-| fastapi | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.23 s | 46.7 MiB | 2/2 |
-| express | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 1.66 s | 49.1 MiB | n/a |
-| express | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.60 s | 49.4 MiB | 1/1 |
-| express | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.56 s | 49.2 MiB | 1/1 |
-| express | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.56 s | 49.2 MiB | 2/2 |
-| fastapi | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 2.11 s | 46.5 MiB | n/a |
-| fastapi | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.22 s | 46.8 MiB | 1/1 |
-| fastapi | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.24 s | 46.6 MiB | 1/1 |
-| fastapi | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.30 s | 46.8 MiB | 2/2 |
-| express | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 1.61 s | 49.3 MiB | n/a |
-| express | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.57 s | 49.2 MiB | 1/1 |
-| express | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.57 s | 49.1 MiB | 1/1 |
-| express | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.58 s | 49.1 MiB | 2/2 |
-| fastapi | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 2.22 s | 46.4 MiB | n/a |
-| fastapi | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.18 s | 46.6 MiB | 1/1 |
-| fastapi | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.22 s | 46.6 MiB | 1/1 |
-| fastapi | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.23 s | 46.7 MiB | 2/2 |
+| express | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 1.72 s | 49.2 MiB | n/a |
+| express | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.28 s | 49.0 MiB | 1/1 |
+| express | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.71 s | 49.3 MiB | 1/1 |
+| express | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.64 s | 49.2 MiB | 2/2 |
+| fastapi | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 2.35 s | 46.8 MiB | n/a |
+| fastapi | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.37 s | 46.6 MiB | 1/1 |
+| fastapi | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.42 s | 46.6 MiB | 1/1 |
+| fastapi | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.46 s | 46.9 MiB | 2/2 |
+| express | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 1.65 s | 49.1 MiB | n/a |
+| express | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.59 s | 49.1 MiB | 1/1 |
+| express | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.72 s | 49.1 MiB | 1/1 |
+| express | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.65 s | 49.0 MiB | 2/2 |
+| fastapi | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 2.38 s | 46.8 MiB | n/a |
+| fastapi | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.26 s | 46.6 MiB | 1/1 |
+| fastapi | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.49 s | 46.7 MiB | 1/1 |
+| fastapi | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.38 s | 46.5 MiB | 2/2 |
+| express | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 1.71 s | 49.1 MiB | n/a |
+| express | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.74 s | 49.4 MiB | 1/1 |
+| express | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.68 s | 49.2 MiB | 1/1 |
+| express | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 1.65 s | 49.1 MiB | 2/2 |
+| fastapi | clean | none | none | 0 | 0 | 0 | n/a | n/a | 14 (2/9/3) | 2.47 s | 46.7 MiB | n/a |
+| fastapi | read | L2 | L2 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.42 s | 46.8 MiB | 1/1 |
+| fastapi | write | L3 | L3 | 1 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.36 s | 46.6 MiB | 1/1 |
+| fastapi | both | L2, L3 | L2, L3 | 2 | 0 | 0 | 100.0% | 100.0% | 14 (2/9/3) | 2.39 s | 46.9 MiB | 2/2 |
 
 ## Totals
 
@@ -64,10 +64,10 @@ None. Every finding was reproduced against the state the scan left behind.
 | SQLite | `3.49.1` |
 | FastAPI | `0.162.4` |
 | uvicorn | `0.54.0` |
-| Mīzān commit | `unavailable` (git is not installed on this machine) |
-| Mīzān tree digest | `2d2a5e750ab2a49d` |
+| Mīzān commit | `59d47675958643d82df0e7fc6995e6e641eb89ca` (read from git) |
+| Mīzān tree digest | `1919893081ec1834` |
 | Fixture digest (fastapi) | `c812fdcc0270a3e3` |
-| Fixture digest (express) | `8395cee58b03bf04` |
+| Fixture digest (express) | `af78dca4c686f060` |
 
 ## What this is
 

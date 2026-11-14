@@ -25,12 +25,12 @@
     "fastapi": "0.162.4",
     "uvicorn": "0.54.0",
     "requests": "2.34.2",
-    "mizan_commit": null,
-    "mizan_commit_note": "git is not installed on this machine",
-    "mizan_tree_digest": "2d2a5e750ab2a49d",
+    "mizan_commit": "59d47675958643d82df0e7fc6995e6e641eb89ca",
+    "mizan_commit_note": "read from git",
+    "mizan_tree_digest": "1919893081ec1834",
     "fixture_digests": {
       "fastapi": "c812fdcc0270a3e3",
-      "express": "8395cee58b03bf04"
+      "express": "af78dca4c686f060"
     }
   },
   "scenarios": [
@@ -54,8 +54,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 1.689,
-      "peak_memory_bytes": 51576832,
+      "wall_clock_seconds": 1.723,
+      "peak_memory_bytes": 51580928,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -92,8 +92,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 1.558,
-      "peak_memory_bytes": 51585024,
+      "wall_clock_seconds": 2.284,
+      "peak_memory_bytes": 51408896,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -130,8 +130,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 1.641,
-      "peak_memory_bytes": 51560448,
+      "wall_clock_seconds": 1.711,
+      "peak_memory_bytes": 51687424,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -170,8 +170,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 1.557,
-      "peak_memory_bytes": 51728384,
+      "wall_clock_seconds": 1.64,
+      "peak_memory_bytes": 51552256,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -204,8 +204,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 2.281,
-      "peak_memory_bytes": 48758784,
+      "wall_clock_seconds": 2.351,
+      "peak_memory_bytes": 49037312,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -242,8 +242,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 2.228,
-      "peak_memory_bytes": 48640000,
+      "wall_clock_seconds": 2.365,
+      "peak_memory_bytes": 48910336,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -280,8 +280,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 2.234,
-      "peak_memory_bytes": 48885760,
+      "wall_clock_seconds": 2.415,
+      "peak_memory_bytes": 48812032,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -320,8 +320,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 2.232,
-      "peak_memory_bytes": 48934912,
+      "wall_clock_seconds": 2.464,
+      "peak_memory_bytes": 49205248,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -354,8 +354,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 1.657,
-      "peak_memory_bytes": 51527680,
+      "wall_clock_seconds": 1.649,
+      "peak_memory_bytes": 51507200,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -392,8 +392,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 1.6,
-      "peak_memory_bytes": 51826688,
+      "wall_clock_seconds": 1.595,
+      "peak_memory_bytes": 51478528,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -430,8 +430,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 1.561,
-      "peak_memory_bytes": 51605504,
+      "wall_clock_seconds": 1.715,
+      "peak_memory_bytes": 51515392,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -470,8 +470,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 1.565,
-      "peak_memory_bytes": 51625984,
+      "wall_clock_seconds": 1.646,
+      "peak_memory_bytes": 51367936,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -504,8 +504,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 2.11,
-      "peak_memory_bytes": 48787456,
+      "wall_clock_seconds": 2.379,
+      "peak_memory_bytes": 49102848,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -542,8 +542,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 2.22,
-      "peak_memory_bytes": 49033216,
+      "wall_clock_seconds": 2.257,
+      "peak_memory_bytes": 48840704,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -580,8 +580,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 2.243,
-      "peak_memory_bytes": 48844800,
+      "wall_clock_seconds": 2.494,
+      "peak_memory_bytes": 48963584,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -620,235 +620,235 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 2.299,
+      "wall_clock_seconds": 2.38,
+      "peak_memory_bytes": 48807936,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 2,
+        "succeeded": 2,
+        "requests": 2,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "clean",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [],
+      "observed_findings": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.71,
+      "peak_memory_bytes": 51507200,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 0,
+        "succeeded": 0,
+        "requests": 0,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "read",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2"
+      ],
+      "observed_findings": [
+        "L2"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.738,
+      "peak_memory_bytes": 51806208,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "write",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [
+        "L3"
+      ],
+      "observed_findings": [
+        "L3"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.675,
+      "peak_memory_bytes": 51638272,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 1,
+        "succeeded": 1,
+        "requests": 1,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "express",
+      "variant": "both",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2",
+        "L3"
+      ],
+      "observed_findings": [
+        "L2",
+        "L3"
+      ],
+      "true_positives": 2,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 1.652,
+      "peak_memory_bytes": 51490816,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 2,
+        "succeeded": 2,
+        "requests": 2,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "clean",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [],
+      "observed_findings": [],
+      "true_positives": 0,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": null,
+      "recall": null,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.47,
+      "peak_memory_bytes": 49004544,
+      "peak_memory_note": "the peak working set reported by the Windows kernel",
+      "setup_errors": [],
+      "errors": [],
+      "missing_identities": [],
+      "reproduction": {
+        "attempted": 0,
+        "succeeded": 0,
+        "requests": 0,
+        "failures": []
+      },
+      "evidence_complete": true
+    },
+    {
+      "framework": "fastapi",
+      "variant": "read",
+      "repetition": 3,
+      "outcome": "expected",
+      "expected_findings": [
+        "L2"
+      ],
+      "observed_findings": [
+        "L2"
+      ],
+      "true_positives": 1,
+      "false_positives": 0,
+      "false_negatives": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 9,
+        "attack": 3,
+        "total": 14,
+        "budget": 60
+      },
+      "budget_exhausted": false,
+      "wall_clock_seconds": 2.416,
       "peak_memory_bytes": 49070080,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
       "missing_identities": [],
       "reproduction": {
-        "attempted": 2,
-        "succeeded": 2,
-        "requests": 2,
-        "failures": []
-      },
-      "evidence_complete": true
-    },
-    {
-      "framework": "express",
-      "variant": "clean",
-      "repetition": 3,
-      "outcome": "expected",
-      "expected_findings": [],
-      "observed_findings": [],
-      "true_positives": 0,
-      "false_positives": 0,
-      "false_negatives": 0,
-      "precision": null,
-      "recall": null,
-      "requests": {
-        "bootstrap": 2,
-        "learning": 9,
-        "attack": 3,
-        "total": 14,
-        "budget": 60
-      },
-      "budget_exhausted": false,
-      "wall_clock_seconds": 1.606,
-      "peak_memory_bytes": 51671040,
-      "peak_memory_note": "the peak working set reported by the Windows kernel",
-      "setup_errors": [],
-      "errors": [],
-      "missing_identities": [],
-      "reproduction": {
-        "attempted": 0,
-        "succeeded": 0,
-        "requests": 0,
-        "failures": []
-      },
-      "evidence_complete": true
-    },
-    {
-      "framework": "express",
-      "variant": "read",
-      "repetition": 3,
-      "outcome": "expected",
-      "expected_findings": [
-        "L2"
-      ],
-      "observed_findings": [
-        "L2"
-      ],
-      "true_positives": 1,
-      "false_positives": 0,
-      "false_negatives": 0,
-      "precision": 1.0,
-      "recall": 1.0,
-      "requests": {
-        "bootstrap": 2,
-        "learning": 9,
-        "attack": 3,
-        "total": 14,
-        "budget": 60
-      },
-      "budget_exhausted": false,
-      "wall_clock_seconds": 1.567,
-      "peak_memory_bytes": 51568640,
-      "peak_memory_note": "the peak working set reported by the Windows kernel",
-      "setup_errors": [],
-      "errors": [],
-      "missing_identities": [],
-      "reproduction": {
-        "attempted": 1,
-        "succeeded": 1,
-        "requests": 1,
-        "failures": []
-      },
-      "evidence_complete": true
-    },
-    {
-      "framework": "express",
-      "variant": "write",
-      "repetition": 3,
-      "outcome": "expected",
-      "expected_findings": [
-        "L3"
-      ],
-      "observed_findings": [
-        "L3"
-      ],
-      "true_positives": 1,
-      "false_positives": 0,
-      "false_negatives": 0,
-      "precision": 1.0,
-      "recall": 1.0,
-      "requests": {
-        "bootstrap": 2,
-        "learning": 9,
-        "attack": 3,
-        "total": 14,
-        "budget": 60
-      },
-      "budget_exhausted": false,
-      "wall_clock_seconds": 1.575,
-      "peak_memory_bytes": 51453952,
-      "peak_memory_note": "the peak working set reported by the Windows kernel",
-      "setup_errors": [],
-      "errors": [],
-      "missing_identities": [],
-      "reproduction": {
-        "attempted": 1,
-        "succeeded": 1,
-        "requests": 1,
-        "failures": []
-      },
-      "evidence_complete": true
-    },
-    {
-      "framework": "express",
-      "variant": "both",
-      "repetition": 3,
-      "outcome": "expected",
-      "expected_findings": [
-        "L2",
-        "L3"
-      ],
-      "observed_findings": [
-        "L2",
-        "L3"
-      ],
-      "true_positives": 2,
-      "false_positives": 0,
-      "false_negatives": 0,
-      "precision": 1.0,
-      "recall": 1.0,
-      "requests": {
-        "bootstrap": 2,
-        "learning": 9,
-        "attack": 3,
-        "total": 14,
-        "budget": 60
-      },
-      "budget_exhausted": false,
-      "wall_clock_seconds": 1.582,
-      "peak_memory_bytes": 51470336,
-      "peak_memory_note": "the peak working set reported by the Windows kernel",
-      "setup_errors": [],
-      "errors": [],
-      "missing_identities": [],
-      "reproduction": {
-        "attempted": 2,
-        "succeeded": 2,
-        "requests": 2,
-        "failures": []
-      },
-      "evidence_complete": true
-    },
-    {
-      "framework": "fastapi",
-      "variant": "clean",
-      "repetition": 3,
-      "outcome": "expected",
-      "expected_findings": [],
-      "observed_findings": [],
-      "true_positives": 0,
-      "false_positives": 0,
-      "false_negatives": 0,
-      "precision": null,
-      "recall": null,
-      "requests": {
-        "bootstrap": 2,
-        "learning": 9,
-        "attack": 3,
-        "total": 14,
-        "budget": 60
-      },
-      "budget_exhausted": false,
-      "wall_clock_seconds": 2.224,
-      "peak_memory_bytes": 48664576,
-      "peak_memory_note": "the peak working set reported by the Windows kernel",
-      "setup_errors": [],
-      "errors": [],
-      "missing_identities": [],
-      "reproduction": {
-        "attempted": 0,
-        "succeeded": 0,
-        "requests": 0,
-        "failures": []
-      },
-      "evidence_complete": true
-    },
-    {
-      "framework": "fastapi",
-      "variant": "read",
-      "repetition": 3,
-      "outcome": "expected",
-      "expected_findings": [
-        "L2"
-      ],
-      "observed_findings": [
-        "L2"
-      ],
-      "true_positives": 1,
-      "false_positives": 0,
-      "false_negatives": 0,
-      "precision": 1.0,
-      "recall": 1.0,
-      "requests": {
-        "bootstrap": 2,
-        "learning": 9,
-        "attack": 3,
-        "total": 14,
-        "budget": 60
-      },
-      "budget_exhausted": false,
-      "wall_clock_seconds": 2.178,
-      "peak_memory_bytes": 48869376,
-      "peak_memory_note": "the peak working set reported by the Windows kernel",
-      "setup_errors": [],
-      "errors": [],
-      "missing_identities": [],
-      "reproduction": {
         "attempted": 1,
         "succeeded": 1,
         "requests": 1,
@@ -880,8 +880,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 2.218,
-      "peak_memory_bytes": 48836608,
+      "wall_clock_seconds": 2.358,
+      "peak_memory_bytes": 48873472,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -920,8 +920,8 @@
         "budget": 60
       },
       "budget_exhausted": false,
-      "wall_clock_seconds": 2.232,
-      "peak_memory_bytes": 48996352,
+      "wall_clock_seconds": 2.389,
+      "peak_memory_bytes": 49160192,
       "peak_memory_note": "the peak working set reported by the Windows kernel",
       "setup_errors": [],
       "errors": [],
@@ -949,11 +949,11 @@
     "requests_bootstrap": 48,
     "requests_learning": 216,
     "requests_attack": 72,
-    "wall_clock_seconds": 45.857,
+    "wall_clock_seconds": 49.476,
     "budget_exhausted": 0,
     "setup_errors": 0,
     "reproduction_attempted": 24,
     "reproduction_succeeded": 24,
-    "peak_memory_bytes": 51826688
+    "peak_memory_bytes": 51806208
   }
 }
