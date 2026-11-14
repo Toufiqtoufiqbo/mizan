@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from mizan.core import Principal
+from mizan.core import Principal, ScanCoverage, Verdict
 from mizan.engine import Mizan, Target
 from mizan.learning import learn_from_spec
 from mizan.proxy import RecordingProxy
@@ -130,7 +130,7 @@ def resolve_spec(
         # No configured source: fall back to a static file next to the code,
         # which is the convention the Flask and Express fixtures follow.
         if fallback_path is not None and fallback_path.exists():
-            source = SpecSource.file(str(fallback_path))
+            source = SpecSource.from_file(str(fallback_path))
         else:
             raise SpecResolutionError(f"the application has no OpenAPI document at {fallback_path}")
 
@@ -359,22 +359,42 @@ class ValidationResult:
     missing_identities: list[str] = field(default_factory=list)
     workspace: str | None = None
     requests: RequestAccounting = field(default_factory=RequestAccounting)
+    coverage: ScanCoverage = field(default_factory=ScanCoverage)
+
+    @property
+    def verdict(self) -> Verdict:
+        """What the scan concluded.
+
+        The order matters. A failed setup is ``ERROR`` even when nothing was
+        found, because a scan that could not start proved nothing. A proven
+        finding is ``FINDINGS`` even when the coverage was incomplete - the
+        finding is real, and the missing coverage stays visible in
+        ``coverage``. Only a scan that both ran its checks *and* found nothing
+        is ``CLEAN``; anything else is ``INCONCLUSIVE``.
+        """
+        if self.error is not None or self.setup_error is not None:
+            return Verdict.ERROR
+        if self.finding_count > 0:
+            return Verdict.FINDINGS
+        if self.coverage.meaningful:
+            return Verdict.CLEAN
+        return Verdict.INCONCLUSIVE
 
     @property
     def clean(self) -> bool:
-        """A clean result: the scan ran completely, sent requests and found nothing.
+        """Whether the scan is entitled to say it found nothing.
 
-        A scan that was truncated by its budget - one that never learned and
-        never attacked - is **not** clean: it did not look, so it cannot say
-        nothing was there.
+        This is deliberately **not** "the scan found no findings". A scan that
+        never learned anything, never discovered a resource, never identified a
+        check or never ran one has no standing to make that claim - it must
+        report ``INCONCLUSIVE``, and this property says so by staying False.
         """
-        return (
-            self.error is None
-            and self.setup_error is None
-            and self.finding_count == 0
-            and self.requests.total > 0
-            and not self.requests.budget_exhausted
-        )
+        return self.verdict is Verdict.CLEAN
+
+    @property
+    def inconclusive(self) -> bool:
+        """Whether the scan could not establish enough coverage."""
+        return self.verdict is Verdict.INCONCLUSIVE
 
     @property
     def evidence_complete(self) -> bool:
@@ -397,7 +417,10 @@ class ValidationResult:
             "findings": self.findings,
             "error": self.error,
             "setup_error": self.setup_error,
+            "verdict": self.verdict.value,
             "clean": self.clean,
+            "inconclusive": self.inconclusive,
+            "coverage": self.coverage.to_dict(),
             "evidence_complete": self.evidence_complete,
             "traffic_lines": self.traffic_lines,
             "missing_identities": list(self.missing_identities),
@@ -621,6 +644,14 @@ def scan_application(
         violations = engine.attack()
         accounting.attack = engine.requests
         accounting.budget_exhausted = accounting.budget_exhausted or engine.budget_exhausted
+
+        # The coverage counters are what a clean claim is made of. They come
+        # from the engine's own view of the attack - not from the request
+        # total, which a login and a health check can satisfy on their own.
+        coverage = engine.coverage()
+        coverage.learning_operations = len(learned)
+        coverage.budget_exhausted = accounting.budget_exhausted
+        result.coverage = coverage
 
         result.finding_count = len(violations)
         result.law_types = sorted({violation.law for violation in violations})

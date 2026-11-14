@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 # --------------------------------------------------------------------------- #
@@ -134,6 +135,82 @@ class RequestBudgetExhausted(RuntimeError):
 #: The principal used when the identity of a write is missing or malformed.
 #: A write with this principal is never reported as a confirmed breach.
 UNKNOWN_PRINCIPAL = "unknown"
+
+
+class Verdict(StrEnum):
+    """What a scan concluded.
+
+    A scan that cannot make a clean claim says so. The verdict is deliberately
+    not a boolean: "nothing was found" and "nothing could be found" are
+    different answers, and only the first one is a security result.
+    """
+
+    CLEAN = "CLEAN"
+    """Meaningful eligible checks ran to completion and produced no finding."""
+
+    FINDINGS = "FINDINGS"
+    """At least one finding was proven."""
+
+    INCONCLUSIVE = "INCONCLUSIVE"
+    """The scan could not establish enough coverage to make a clean claim."""
+
+    ERROR = "ERROR"
+    """The setup or the execution failed."""
+
+
+@dataclass
+class ScanCoverage:
+    """What the scan actually managed to look at.
+
+    Request traffic is not evidence of security coverage: a login request, a
+    health request and a set of unsuccessful learning requests all produce
+    traffic while proving nothing. These counters are what a clean claim has
+    to be made of.
+    """
+
+    learning_operations: int = 0
+    """The learning requests that succeeded."""
+
+    resources_discovered: int = 0
+    """The resources the learning phase identified."""
+
+    resources_owned: int = 0
+    """The discovered resources whose owner is known.
+
+    A resource without an owner cannot take part in an ownership check, so it
+    is not a candidate for anything.
+    """
+
+    probe_candidates: int = 0
+    """The eligible security checks the scan identified."""
+
+    probes_executed: int = 0
+    """The eligible security checks that actually ran to completion."""
+
+    budget_exhausted: bool = False
+    """Whether the request budget cut the scan short."""
+
+    @property
+    def meaningful(self) -> bool:
+        """Whether the scan established enough coverage to make a clean claim."""
+        return (
+            self.learning_operations > 0
+            and self.resources_discovered > 0
+            and self.probe_candidates > 0
+            and self.probes_executed > 0
+            and not self.budget_exhausted
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "learning_operations": self.learning_operations,
+            "resources_discovered": self.resources_discovered,
+            "resources_owned": self.resources_owned,
+            "probe_candidates": self.probe_candidates,
+            "probes_executed": self.probes_executed,
+            "budget_exhausted": self.budget_exhausted,
+            "meaningful": self.meaningful,
+        }
 
 
 @dataclass(frozen=True)

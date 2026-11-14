@@ -30,6 +30,7 @@ from mizan.core import (
     RequestBudgetExhausted,
     Resource,
     Rule,
+    ScanCoverage,
     Step,
     Violation,
     is_authority_field,
@@ -115,6 +116,10 @@ class Mizan:
         self.request_budget = request_budget
         #: Whether the last attack stopped because the budget ran out.
         self.budget_exhausted = False
+        #: How many eligible security checks the attack identified.
+        self.probe_candidates = 0
+        #: How many probe groups actually issued a check during the attack.
+        self.probes_executed = 0
 
     # -- learning ---------------------------------------------------------- #
 
@@ -219,11 +224,21 @@ class Mizan:
     # -- attacking --------------------------------------------------------- #
 
     def attack(self, *, groups: list[str] | None = None) -> list[Violation]:
-        """Probe the learned policy and return the proven violations."""
+        """Probe the learned policy and return the proven violations.
+
+        The coverage counters are reset here, so they describe the attack that
+        just ran. They are what a clean claim is made of: a probe that never
+        had an eligible target proves nothing, and one that never ran proves
+        even less.
+        """
         violations: list[Violation] = []
+        candidates = self._eligible_probe_targets()
+        self.probe_candidates = sum(candidates.values())
+        self.probes_executed = 0
         for name, probe in self.probe_groups():
             if groups is not None and name not in groups:
                 continue
+            issued_before = self.requests
             try:
                 violations.extend(probe())
             except RequestBudgetExhausted:
@@ -231,11 +246,104 @@ class Mizan:
                 # so, because a truncated scan is not a complete one.
                 self.budget_exhausted = True
                 break
+            if self.requests > issued_before:
+                self.probes_executed += 1
         return _dedupe(violations)
+
+    def _eligible_probe_targets(self) -> dict[str, int]:
+        """How many checks each probe could legitimately run, before it runs.
+
+        This mirrors the guards the probes themselves apply, counted rather
+        than sent. It answers the question a clean claim has to answer: was
+        there anything worth probing at all?
+
+        The count is deliberately conservative in one direction only - a check
+        that could not have happened is not counted. Counting something that
+        cannot happen would make a scan look better than it was; not counting
+        something that could have happened only makes the scan more cautious,
+        and a finding overrides the verdict anyway.
+        """
+        examples = self._examples()
+        attackers = [p for p in self.target.principals if self._is_testable(p)]
+        testable_ids = {a.id for a in attackers}
+
+        owned = {
+            resource.key
+            for record in self.traffic
+            if (resource := record.resource) is not None and resource.owner
+        }
+
+        counts: dict[str, int] = {}
+
+        # L5 / L6 - a mutating operation on an object somebody owns.
+        counts["L5"] = sum(
+            1
+            for (method, _template), records in examples.items()
+            if method in {"POST", "PUT", "PATCH", "DELETE"}
+            and any(record.resource is not None and record.resource.key in owned for record in records)
+        )
+
+        # L1 - an identity endpoint per testable principal.
+        counts["L1"] = len(self._identity_endpoints()) * len(attackers)
+
+        # L2 - a read of an owned object by somebody who does not own it.
+        reads = 0
+        for (method, _template), records in examples.items():
+            if method not in {"GET", "HEAD"}:
+                continue
+            for key in {r.resource.key for r in records if r.resource is not None and r.resource.key in owned}:
+                owner = self.policy.resource(key).owner if self.policy.resource(key) else None
+                if owner and testable_ids - {owner}:
+                    reads += 1
+        counts["L2"] = reads
+
+        # L3 - a write into an owned object by somebody who does not own it.
+        writes = 0
+        for (method, _template), records in examples.items():
+            if method not in {"POST", "PUT", "PATCH"}:
+                continue
+            for record in records:
+                if not isinstance(record.body, dict):
+                    continue
+                if record.resource is not None and record.resource.key in owned:
+                    writes += 1
+                    break
+        counts["L3"] = writes
+
+        # L4 - an authority-carrying field to try writing.
+        fields = sorted(self._authority_fields())
+        counts["L4"] = len(fields) * len(attackers) if fields else 0
+
+        # T - the data-level view needs attributed writes to compare.
+        counts["T"] = 1 if self._ledger_events() or owned else 0
+
+        return counts
 
     def probe_names(self) -> list[str]:
         """The names of the probes, in the order they run."""
         return [name for name, _probe in self.probe_groups()]
+
+    def coverage(self) -> ScanCoverage:
+        """What the last attack actually looked at.
+
+        The counters are deliberately about *coverage*, not about traffic: a
+        login request, a health request and an unsuccessful learning request all
+        produce traffic while proving nothing. A clean claim has to be made of
+        checks that existed and checks that ran.
+        """
+        resources = list(self.policy.resources.values())
+        owned = [resource for resource in resources if resource.owner]
+        # A resource counts as usable when somebody other than its owner can act
+        # on it - otherwise there is no cross-identity check to perform.
+        testable = {principal.id for principal in self.target.principals if self._is_testable(principal)}
+        usable = [resource for resource in owned if testable - {resource.owner}]
+        return ScanCoverage(
+            resources_discovered=len(resources),
+            resources_owned=len(usable),
+            probe_candidates=self.probe_candidates,
+            probes_executed=self.probes_executed,
+            budget_exhausted=self.budget_exhausted,
+        )
 
     def attack_groups(self, groups: list[str]) -> list[Violation]:
         """Run only the named probes."""
