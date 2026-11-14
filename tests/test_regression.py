@@ -106,7 +106,14 @@ def test_generated_test_fails_on_vulnerable_and_passes_on_fixed(tmp_path) -> Non
 
     test_file = tmp_path / "test_mizan_l4.py"
 
-    def write_and_run(app, port) -> int:
+    # The child pytest must not depend on where it happens to be started: the
+    # repository's own ini file would otherwise decide its rootdir, its
+    # testpaths and its plugins. An isolated configuration makes the child's
+    # behaviour the same everywhere.
+    child_ini = tmp_path / "pytest.ini"
+    child_ini.write_text("[pytest]\n", encoding="utf-8")
+
+    def write_and_run(app, port) -> tuple[int, str]:
         violation = Violation(
             law="L4",
             title="alice created authority by writing `role`",
@@ -130,25 +137,48 @@ def test_generated_test_fails_on_vulnerable_and_passes_on_fixed(tmp_path) -> Non
         env["MIZAN_TARGET"] = f"http://127.0.0.1:{port}"
         env["MIZAN_TOKEN_ALICE"] = app.tokens()["alice"]
         result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(test_file), "-q", "-p", "no:cacheprovider"],
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(test_file),
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                "-c",
+                str(child_ini),
+                "--rootdir",
+                str(tmp_path),
+            ],
             env=env,
             capture_output=True,
             text=True,
             timeout=120,
         )
-        return result.returncode
+        return result.returncode, (result.stdout or "") + (result.stderr or "")
 
     vulnerable = BenchmarkApp(tmp_path / "vulnerable.sqlite", bugs=("mass_assignment",))
     server, port, _ = serve(vulnerable)
     try:
-        assert write_and_run(vulnerable, port) != 0, "the test must fail while the vulnerability is present"
+        code, output = write_and_run(vulnerable, port)
+        # Pytest exit code 1 means "the tests ran and one of them failed".
+        # Any other non-zero code means the harness itself broke - a usage
+        # error, a collection error, no tests collected - and that must not be
+        # mistaken for "the generated test correctly detected the bug".
+        assert code == 1, (
+            f"the generated test must FAIL while the vulnerability is present "
+            f"(pytest exit code 1), got {code}:\n{output}"
+        )
     finally:
         server.shutdown()
 
     fixed = BenchmarkApp(tmp_path / "fixed.sqlite", bugs=())
     server, port, _ = serve(fixed)
     try:
-        assert write_and_run(fixed, port) == 0, "the test must pass once the vulnerability is fixed"
+        code, output = write_and_run(fixed, port)
+        assert code == 0, (
+            f"the generated test must PASS once the vulnerability is fixed (pytest exit code 0), got {code}:\n{output}"
+        )
     finally:
         server.shutdown()
 
