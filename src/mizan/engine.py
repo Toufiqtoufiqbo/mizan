@@ -83,6 +83,7 @@ class Mizan:
         traffic_path: str | Path | None = None,
         ledger_path: str | Path | None = None,
         spec_path: str | Path | None = None,
+        spec_document: dict[str, Any] | None = None,
         twin: Any | None = None,
         attributor: Any | None = None,
         request_budget: int | None = None,
@@ -92,6 +93,10 @@ class Mizan:
         self.traffic_path = Path(traffic_path) if traffic_path else None
         self.ledger_path = Path(ledger_path) if ledger_path else None
         self.spec_path = Path(spec_path) if spec_path else None
+        #: The OpenAPI document itself.  A document that was fetched at runtime
+        #: (a FastAPI application serves ``/openapi.json``) has no file, so the
+        #: document is what the engine needs - the path is only a fallback.
+        self.spec_document = spec_document
         #: An optional twin: a disposable copy of the application with a
         #: restorable state. Every probe starts from the same state.
         self.twin = twin
@@ -881,12 +886,14 @@ class Mizan:
 
     def _spec_authority_fields(self) -> set[str]:
         """Read the OpenAPI document and list body properties that look like authority."""
-        if self.spec_path is None or not self.spec_path.exists():
-            return set()
-        try:
-            document = json.loads(self.spec_path.read_text(encoding="utf-8"))
-        except Exception:
-            return set()
+        document = self.spec_document
+        if document is None:
+            if self.spec_path is None or not self.spec_path.exists():
+                return set()
+            try:
+                document = json.loads(self.spec_path.read_text(encoding="utf-8"))
+            except Exception:
+                return set()
         schemas = document.get("components", {}).get("schemas", {})
         found: set[str] = set()
         for path_item in document.get("paths", {}).values():

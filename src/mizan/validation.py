@@ -16,10 +16,18 @@ The validation is **fail-closed**:
 * the request budget covers the learning traffic *and* the attack traffic, and
   the accounting says which is which;
 * a finding is only counted when its evidence is complete and consistent.
+
+The launch is **framework-neutral**. A ``LaunchSpec`` is the single source of
+truth for how an application starts: which executable, which entry point,
+which arguments, which database, which port, which health endpoint, which
+startup timeout and where the OpenAPI document comes from. The same engine
+starts Flask, FastAPI and Express with it - no framework branch exists in the
+engine itself.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -42,38 +50,212 @@ VARIANTS: dict[str, tuple[str, ...]] = {
     "both": ("L2", "L3"),
 }
 
+#: The principals that L2 and L3 validation require. Cross-user testing is
+#: meaningless with fewer than two unprivileged identities, so a scan that
+#: cannot authenticate both of them is a setup error - never a clean result.
+REQUIRED_IDENTITIES: tuple[str, ...] = ("alice", "bob")
+
+
+# --------------------------------------------------------------------------- #
+# The OpenAPI source
+# --------------------------------------------------------------------------- #
+
+
+class SpecResolutionError(RuntimeError):
+    """The OpenAPI document could not be resolved - never a clean result."""
+
+
+@dataclass(frozen=True)
+class SpecSource:
+    """Where an application's OpenAPI document comes from.
+
+    Applications differ:
+
+    * a Flask fixture commits its document to disk;
+    * a FastAPI application generates it at runtime and serves it on
+      ``/openapi.json``;
+    * an Express fixture commits its document to disk.
+
+    The engine must not assume that every target has a physical
+    ``openapi.json`` file. The document is resolved through the configured
+    source, validated, and only then handed to the engine.
+    """
+
+    kind: str
+    """``"file"`` - a document on disk.  ``"url"`` - a document served at runtime."""
+
+    path: str | None = None
+    """For ``kind="file"``: the file path. ``{fixture}`` resolves to the fixture directory."""
+
+    url: str | None = None
+    """For ``kind="url"``: an absolute URL, or a path relative to the base URL."""
+
+    timeout: float = 15.0
+    """How long to wait for the document (also retries while the app starts)."""
+
+    @classmethod
+    def from_file(cls, path: str, timeout: float = 15.0) -> SpecSource:
+        return cls(kind="file", path=path)
+
+    @classmethod
+    def from_url(cls, url: str, timeout: float = 15.0) -> SpecSource:
+        return cls(kind="url", url=url)
+
+
+def _resolve_fixture(part: str, fixture_dir: Path) -> str:
+    """Replace the ``{fixture}`` placeholder and normalize the separators."""
+    if "{fixture}" not in part:
+        return part
+    tail = part.split("{fixture}", 1)[1].lstrip("/\\")
+    if not tail:
+        return str(fixture_dir)
+    return str(fixture_dir / tail)
+
+
+def resolve_spec(
+    source: SpecSource | None,
+    *,
+    fixture_dir: Path | None = None,
+    base_url: str | None = None,
+    fallback_path: Path | None = None,
+) -> dict[str, Any]:
+    """Fetch, parse and validate the OpenAPI document of a configured source.
+
+    Raises ``SpecResolutionError`` for every failure mode: a missing file, an
+    unreachable endpoint, invalid JSON, a document that is not OpenAPI. A
+    missing document is a **setup error** - it must never be reported as a
+    clean security result.
+    """
+    if source is None:
+        # No configured source: fall back to a static file next to the code,
+        # which is the convention the Flask and Express fixtures follow.
+        if fallback_path is not None and fallback_path.exists():
+            source = SpecSource.file(str(fallback_path))
+        else:
+            raise SpecResolutionError(f"the application has no OpenAPI document at {fallback_path}")
+
+    if source.kind == "file":
+        if source.path is None:
+            raise SpecResolutionError("the file source does not name a path")
+        path = Path(_resolve_fixture(source.path, fixture_dir)) if fixture_dir else Path(source.path)
+        if not path.exists():
+            raise SpecResolutionError(f"the application has no OpenAPI document at {path}")
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise SpecResolutionError(f"the OpenAPI document at {path} is not valid JSON: {exc}") from exc
+        return _validate_document(document, path)
+
+    if source.kind == "url":
+        import time as _time
+        import urllib.error
+        import urllib.request
+
+        if source.url is None:
+            raise SpecResolutionError("the url source does not name a URL")
+        url = (
+            source.url if source.url.startswith("http") else f"{(base_url or '').rstrip('/')}/{source.url.lstrip('/')}"
+        )
+        if not url.startswith("http"):
+            raise SpecResolutionError(f"no base URL is available to resolve {source.url!r}")
+
+        deadline = _time.time() + source.timeout
+        last_error: Exception | None = None
+        while _time.time() < deadline:
+            try:
+                with urllib.request.urlopen(url, timeout=5) as response:
+                    body = response.read().decode("utf-8", errors="replace")
+                try:
+                    document = json.loads(body)
+                except ValueError as exc:
+                    raise SpecResolutionError(f"the OpenAPI document at {url} is not valid JSON: {exc}") from exc
+                return _validate_document(document, url)
+            except SpecResolutionError:
+                raise
+            except (urllib.error.URLError, OSError) as exc:
+                last_error = exc
+            _time.sleep(0.2)
+        raise SpecResolutionError(
+            f"the OpenAPI document at {url} was not reachable within {source.timeout}s: {last_error}"
+        )
+
+    raise SpecResolutionError(f"unknown OpenAPI source kind: {source.kind!r}")
+
+
+def _validate_document(document: Any, origin: Any) -> dict[str, Any]:
+    """Whether a parsed document is a usable OpenAPI document."""
+    if not isinstance(document, dict):
+        raise SpecResolutionError(f"the document at {origin} is not a JSON object")
+    if "openapi" not in document and "swagger" not in document:
+        raise SpecResolutionError(f"the document at {origin} does not declare an OpenAPI version")
+    paths = document.get("paths")
+    if not isinstance(paths, dict) or not paths:
+        raise SpecResolutionError(f"the document at {origin} declares no paths")
+    return document
+
+
+# --------------------------------------------------------------------------- #
+# The launch contract
+# --------------------------------------------------------------------------- #
+
 
 @dataclass
 class LaunchSpec:
-    """Specification for launching an independent application under test."""
+    """How to start, wait for and describe an application under test.
+
+    This is the single source of truth for launching a target. It carries:
+
+    * ``command`` - the executable, entry point and static arguments. The
+      ``{fixture}`` placeholder resolves to the fixture directory, so the same
+      specification works from any working directory;
+    * ``environment`` - variables that override the ambient environment;
+    * ``health_path`` - the endpoint that answers when the app is ready;
+    * ``health_timeout`` - how long to wait for that endpoint;
+    * ``database`` - the database *file name* inside the workspace, so replay
+      can reopen the state a scan left behind;
+    * ``spec_source`` - where the OpenAPI document comes from.
+
+    Nothing here is framework-specific. Flask, FastAPI and Express are three
+    values of this one contract, not three code paths.
+    """
 
     command: list[str]
     environment: dict[str, str] | None = None
+    health_path: str = "/health"
+    health_timeout: float = 60.0
+    database: str = "application.sqlite"
+    spec_source: SpecSource | None = None
 
     def with_environment(self, extra: dict[str, str]) -> LaunchSpec:
         """Return a new ``LaunchSpec`` with extra environment variables merged in."""
         return LaunchSpec(
             command=self.command,
             environment={**(self.environment or {}), **extra},
+            health_path=self.health_path,
+            health_timeout=self.health_timeout,
+            database=self.database,
+            spec_source=self.spec_source,
         )
 
 
-#: The launch specification for the FastAPI fixture.
+#: The launch specification for the FastAPI fixture. FastAPI generates its
+#: OpenAPI document at runtime and serves it on ``/openapi.json``.
 LAUNCH_FASTAPI = LaunchSpec(
-    command=[sys.executable, "app.py"],
-    environment=None,
+    command=[sys.executable, "{fixture}/app.py"],
+    spec_source=SpecSource.from_url("/openapi.json"),
 )
 
-#: The launch specification for the Express fixture.
+#: The launch specification for the Express fixture. The document is committed
+#: to disk; the application runs on Node.js.
 LAUNCH_EXPRESS = LaunchSpec(
-    command=["node", "server.js"],
-    environment=None,
+    command=["node", "{fixture}/server.js"],
+    spec_source=SpecSource.from_file("{fixture}/openapi.json"),
 )
 
 #: The launch specification for the Flask fixture.
 LAUNCH_FLASK = LaunchSpec(
-    command=[sys.executable, "app.py"],
-    environment=None,
+    command=[sys.executable, "{fixture}/app.py"],
+    spec_source=SpecSource.from_file("{fixture}/openapi.json"),
 )
 
 
@@ -96,15 +278,15 @@ def resolve_launch(fixture_dir: Path, explicit: LaunchSpec | None = None) -> Lau
     """
     if explicit is not None:
         return explicit
-    result = launch_for(fixture_dir)
-    return result
+    return launch_for(fixture_dir)
 
 
 def environment_for(launch: LaunchSpec) -> dict[str, str]:
-    """Return the environment dict from a ``LaunchSpec`` (defaulting to ``{}), merged with os.environ.
+    """The environment a launch runs in: ambient variables, overridden by the spec.
 
     The ``LaunchSpec``'s environment takes precedence over ambient variables,
-    but ambient variables fill in any gaps where the specification does not set a value.
+    but ambient variables fill in any gaps where the specification does not set
+    a value.
     """
     result = dict(os.environ)
     result.update(launch.environment or {})
@@ -117,18 +299,21 @@ def build_command(
     db_path: Path,
     variant: str,
 ) -> list[str]:
-    """Build the launch command for a fixture with the given vulnerability variant."""
-    cmd: list[str] = list(launch.command)
+    """Build the launch command for a fixture with the given vulnerability variant.
 
-    entry_point = "server.js" if fixture_dir.name == "express_store" else "app.py"
-    cmd = [str(fixture_dir / part) if Path(part).name == entry_point else part for part in cmd]
-    if not any(Path(part).name == entry_point for part in cmd):
-        cmd.append(str(fixture_dir / entry_point))
+    The ``{fixture}`` placeholder in the specification's command resolves to
+    the fixture directory - the entry point comes from the specification, never
+    from a guess about which framework the directory belongs to.
+    """
+    command: list[str] = [_resolve_fixture(part, fixture_dir) for part in launch.command]
+    # The standard contract every fixture implements.
+    command += ["--db", str(db_path), "--port", "{port}", "--vulnerability", variant]
+    return command
 
-    # Common placeholders: ``{port}`` and ``{workspace}``.
-    cmd += ["--db", str(db_path), "--port", "{port}", "--vulnerability", variant]
 
-    return cmd
+# --------------------------------------------------------------------------- #
+# Accounting and results
+# --------------------------------------------------------------------------- #
 
 
 @dataclass
@@ -167,18 +352,29 @@ class ValidationResult:
     variant: str
     finding_count: int = 0
     law_types: list[str] = field(default_factory=list)
-    requests: RequestAccounting = field(default_factory=RequestAccounting)
     findings: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
     setup_error: str | None = None
     traffic_lines: int = 0
     missing_identities: list[str] = field(default_factory=list)
     workspace: str | None = None
+    requests: RequestAccounting = field(default_factory=RequestAccounting)
 
     @property
     def clean(self) -> bool:
-        """A clean result: the scan ran, it sent requests, and it found nothing."""
-        return self.error is None and self.setup_error is None and self.finding_count == 0 and self.requests.total > 0
+        """A clean result: the scan ran completely, sent requests and found nothing.
+
+        A scan that was truncated by its budget - one that never learned and
+        never attacked - is **not** clean: it did not look, so it cannot say
+        nothing was there.
+        """
+        return (
+            self.error is None
+            and self.setup_error is None
+            and self.finding_count == 0
+            and self.requests.total > 0
+            and not self.requests.budget_exhausted
+        )
 
     @property
     def evidence_complete(self) -> bool:
@@ -209,6 +405,11 @@ class ValidationResult:
         }
 
 
+# --------------------------------------------------------------------------- #
+# Authentication
+# --------------------------------------------------------------------------- #
+
+
 def _login(base_url: str, username: str, password: str) -> str | None:
     """Get a token from the application's own login endpoint."""
     import requests
@@ -230,26 +431,36 @@ def _login(base_url: str, username: str, password: str) -> str | None:
 
 def _authenticate(
     base_url: str, credentials: dict[str, tuple[str, str]], required: list[str]
-) -> tuple[dict[str, str], list[str]]:
+) -> tuple[dict[str, str], list[str], int]:
     """Log in as every expected identity.
 
-    Returns the tokens and the identities that could not be authenticated. A
-    missing identity is a setup error, not a result.
+    Returns the tokens, the identities that could not be authenticated, and
+    the number of login requests that were actually sent. A missing identity is
+    a setup error, not a result - and the accounting counts the requests that
+    were really made, not the ones that were planned.
     """
     tokens: dict[str, str] = {}
     missing: list[str] = []
+    attempted = 0
     for principal in required:
         entry = credentials.get(principal)
         if entry is None:
+            # No credentials were configured: no request was made.
             missing.append(principal)
             continue
         username, password = entry
+        attempted += 1
         token = _login(base_url, username, password)
         if not token:
             missing.append(principal)
             continue
         tokens[principal] = token
-    return tokens, missing
+    return tokens, missing, attempted
+
+
+# --------------------------------------------------------------------------- #
+# The scan
+# --------------------------------------------------------------------------- #
 
 
 def scan_application(
@@ -261,7 +472,7 @@ def scan_application(
     keep_workspace: bool | None = None,
     budget: int = 60,
     credentials: dict[str, tuple[str, str]] | None = None,
-    spec_name: str = "openapi.json",
+    required_identities: list[str] | None = None,
     observer: Any | None = None,
     launch: LaunchSpec | None = None,
 ) -> ValidationResult:
@@ -270,13 +481,18 @@ def scan_application(
     ``credentials`` maps a principal to ``(username, password)``. The
     application issues the tokens; Mīzān never invents them.
 
+    ``required_identities`` names the principals the scan must be able to
+    authenticate. It defaults to ``REQUIRED_IDENTITIES`` - the two unprivileged
+    identities that L2 and L3 need. A scan that cannot authenticate all of
+    them is a setup error.
+
     ``keep_workspace``: if True, the temporary workspace directory is retained
     after the scan for replay purposes.
 
     ``observer``: an optional callable that is called with the running Twin.
 
-    ``launch``: an optional LaunchSpec whose environment overrides the
-    ambient environment variables.
+    ``launch``: the launch contract. When given, it overrides the fixture
+    convention entirely.
     """
     if variant not in VARIANTS:
         raise ValueError(f"unknown variant {variant!r}; expected one of {sorted(VARIANTS)}")
@@ -284,6 +500,7 @@ def scan_application(
     root = Path(workspace) if workspace else Path(tempfile.mkdtemp(prefix=f"mizan-validate-{variant}-"))
     root.mkdir(parents=True, exist_ok=True)
 
+    required = list(required_identities) if required_identities else list(REQUIRED_IDENTITIES)
     database = root / "application.sqlite"
     traffic_path = root / "traffic.jsonl"
     traffic_path.unlink(missing_ok=True)
@@ -291,8 +508,8 @@ def scan_application(
     # Build the environment, merging the LaunchSpec environment with os.environ.
     env = dict(os.environ)
     if launch is not None:
-        env.update(environment_for(launch))
-    elif launch is None and vulnerable:
+        env.update(launch.environment or {})
+    elif vulnerable:
         env["STORE_VULNERABLE"] = "1"
     else:
         env.pop("STORE_VULNERABLE", None)
@@ -301,16 +518,21 @@ def scan_application(
     if resolved_launch is not None:
         command = build_command(resolved_launch, app_dir, database, variant)
     else:
+        # No specification at all: the fallback is the Python convention, and
+        # it is explicit here so a Node.js target without a specification fails
+        # loudly instead of being started with the wrong interpreter.
         command = script_command(
             app_dir / "app.py", "--db", str(database), "--port", "{port}", "--vulnerability", variant
         )
+    health_path = resolved_launch.health_path if resolved_launch else "/health"
+    health_timeout = resolved_launch.health_timeout if resolved_launch else 60.0
     spec = TwinSpec(
         command=command,
         workdir=root,
         env=env,
         data_paths=[database],
-        health_path="/health",
-        health_timeout=60.0,
+        health_path=health_path,
+        health_timeout=health_timeout,
     )
 
     twin = Twin(spec, workspace=root / "twin")
@@ -341,17 +563,11 @@ def scan_application(
             "root": ("root", "root-secret"),
         }
 
-        required = ["alice", "bob"]
-        tokens, missing = _authenticate(twin.base_url, credentials, required)
-        accounting.bootstrap = len(required)
+        tokens, missing, bootstrap_requests = _authenticate(twin.base_url, credentials, required)
+        accounting.bootstrap = bootstrap_requests
         result.missing_identities = missing
         if missing:
             result.setup_error = f"could not authenticate: {', '.join(missing)}"
-            return result
-
-        spec_path = app_dir / spec_name
-        if not spec_path.exists():
-            result.setup_error = f"the application has no OpenAPI document at {spec_path}"
             return result
 
         # The application issued opaque tokens: the proxy is told who owns what
@@ -359,10 +575,26 @@ def scan_application(
         # produce anonymous requests.
         proxy.identity_map = {token: name for name, token in tokens.items()}
 
+        # Resolve the OpenAPI document through the configured source. A missing
+        # or malformed document is a setup error - never a clean result.
+        try:
+            document = resolve_spec(
+                resolved_launch.spec_source if resolved_launch else None,
+                fixture_dir=app_dir,
+                base_url=twin.base_url,
+                fallback_path=app_dir / "openapi.json",
+            )
+        except SpecResolutionError as exc:
+            result.setup_error = str(exc)
+            return result
+
         learning_budget = max(0, budget - accounting.bootstrap)
-        learned = learn_from_spec(spec_path, proxy.base_url, identities=tokens, max_requests=learning_budget)
+        if learning_budget == 0 and budget > 0:
+            # The bootstrap used the whole budget: the learning phase cannot run.
+            accounting.budget_exhausted = True
+        learned = learn_from_spec(document, proxy.base_url, identities=tokens, max_requests=learning_budget)
         accounting.learning = len(learned)
-        if accounting.learning >= learning_budget and learning_budget > 0:
+        if learning_budget > 0 and accounting.learning >= learning_budget:
             accounting.budget_exhausted = True
 
         principals = [
@@ -375,7 +607,7 @@ def scan_application(
         engine = Mizan(
             Target(base_url=proxy.base_url, principals=principals),
             traffic_path=traffic_path,
-            spec_path=spec_path,
+            spec_document=document,
             twin=twin,
             attributor=SqliteAttributor(database),
             request_budget=max(0, budget - accounting.bootstrap - accounting.learning),
@@ -410,6 +642,7 @@ def validate_application(
     budget: int = 60,
     expected: dict[str, tuple[str, ...]] | None = None,
     credentials: dict[str, tuple[str, str]] | None = None,
+    launch: LaunchSpec | None = None,
 ) -> dict[str, Any]:
     """Scan every variant of an application and judge the results.
 
@@ -429,6 +662,7 @@ def validate_application(
                 variant=variant,
                 budget=budget,
                 credentials=credentials,
+                launch=launch,
             )
             variants[variant] = result.to_dict()
 
@@ -490,7 +724,9 @@ def validate_finding(finding: dict[str, Any]) -> list[str]:
     evidence = finding.get("evidence") or {}
     if not evidence:
         problems.append("the finding has no evidence")
-    # The laws that are about ownership must say whose object it was.
+    # The laws that are about ownership must say whose object it was, and the
+    # owner must not be the attacker: an ownership finding against the owner's
+    # own object is not a breach, it is a detector defect.
     if law in {"L2", "L3"}:
         owner = evidence.get("owner") or evidence.get("row_owner")
         if not owner:
