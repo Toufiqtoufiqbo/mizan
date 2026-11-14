@@ -268,9 +268,7 @@ class Mizan:
         testable_ids = {a.id for a in attackers}
 
         owned = {
-            resource.key
-            for record in self.traffic
-            if (resource := record.resource) is not None and resource.owner
+            resource.key for record in self.traffic if (resource := record.resource) is not None and resource.owner
         }
 
         counts: dict[str, int] = {}
