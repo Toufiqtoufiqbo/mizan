@@ -81,7 +81,17 @@ def test_qualified_name_is_schema_qualified() -> None:
 def test_trigger_sql_uses_quoted_identifiers(auditor: PostgresAuditor) -> None:
     sql = auditor.trigger_sql("shop", 'we"ird')
     assert '"shop"."we""ird"' in sql
-    assert "we'ird" not in sql or "we''ird" in sql or True  # the name is quoted, not interpolated
+
+
+def test_trigger_sql_escapes_a_single_quote_in_the_identifier(auditor: PostgresAuditor) -> None:
+    """A quote character in the name must never break out of the identifier."""
+    sql = auditor.trigger_sql("shop", "it's")
+    # Identifiers are quoted with double quotes, and a single quote is legal
+    # inside them - the name may only appear inside a quoted identifier.
+    assert '"shop"."it\'s"' in sql
+    stripped = sql.replace('"shop"."it\'s"', "").replace("mizan_write_audit_trg_it's", "")
+    # What remains must not contain the raw name - it was never interpolated.
+    assert "it's" not in stripped
 
 
 def test_trigger_sql_cannot_be_hijacked_by_a_table_name(auditor: PostgresAuditor) -> None:

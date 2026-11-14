@@ -66,11 +66,14 @@ def test_an_empty_token_response_is_refused() -> None:
 
 
 def test_the_authentication_reports_every_missing_identity() -> None:
-    tokens, missing = _authenticate(
+    tokens, missing, attempted = _authenticate(
         "http://127.0.0.1:1", {"alice": ("alice", "x"), "bob": ("bob", "y")}, ["alice", "bob", "root"]
     )
     assert tokens == {}, "an unreachable application produced tokens"
     assert missing == ["alice", "bob", "root"]
+    # Exactly two login requests were attempted: ``root`` has no credentials at
+    # all, so no request was made for it - the accounting must not invent one.
+    assert attempted == 2, attempted
 
 
 def test_an_incomplete_identity_map_is_not_a_clean_result() -> None:

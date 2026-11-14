@@ -49,6 +49,16 @@ def test_free_port_is_usable() -> None:
     assert 1024 < port < 65536
 
 
+def test_a_stopped_twin_records_no_cleanup_errors(workspace: Path) -> None:
+    """A normal stop is quiet - the error list exists so failures can speak."""
+    db_path = workspace / "demo.sqlite"
+    twin = Twin(_twin_spec(db_path, workspace), workspace=workspace / "twin")
+    twin.start()
+    twin.stop()
+    assert twin.cleanup_errors == [], twin.cleanup_errors
+    assert twin.process is None
+
+
 def test_twin_starts_and_stops_a_process(workspace: Path) -> None:
     db_path = workspace / "demo.sqlite"
     twin = Twin(_twin_spec(db_path, workspace), workspace=workspace / "twin")

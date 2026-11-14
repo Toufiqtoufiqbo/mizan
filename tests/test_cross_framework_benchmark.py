@@ -223,6 +223,59 @@ def test_the_checker_rejects_an_empty_result() -> None:
     assert check_results({"scenarios": []}) == ["the result contains no scenario at all"]
 
 
+def test_the_checker_rejects_a_missing_scenario() -> None:
+    """A scenario that never ran must be named, not silently accepted."""
+    results = _results([_scenario()])
+    results["variants"] = ["clean", "write"]
+    problems = check_results(results)
+    assert any("fastapi/write/repetition 1 ran 0 times" in problem for problem in problems)
+
+
+def test_the_checker_rejects_a_duplicate_scenario() -> None:
+    """The same cell of the matrix must not run twice."""
+    results = _results([_scenario(), _scenario()])
+    problems = check_results(results)
+    assert any("ran 2 times, expected once" in problem for problem in problems)
+
+
+def test_the_checker_rejects_incomplete_evidence() -> None:
+    """A finding without its evidence is not a result the checker may accept."""
+    problems = check_results(_results([_scenario(evidence_complete=False)]))
+    assert any("does not carry its evidence" in problem for problem in problems)
+
+
+def test_the_checker_rejects_incorrect_aggregate_totals() -> None:
+    """The totals must match the scenarios - a doctored summary is rejected."""
+    results = _results([_scenario()])
+    results["totals"]["scenarios_expected"] = 99
+    problems = check_results(results)
+    assert any("99 of 1" in problem for problem in problems)
+
+
+def test_the_checker_rejects_reported_false_positives() -> None:
+    """A benchmark that says it produced false positives is not consistent."""
+    results = _results([_scenario()])
+    results["totals"]["false_positives"] = 2
+    problems = check_results(results)
+    assert any("2 false positives" in problem for problem in problems)
+
+
+def test_the_checker_rejects_reported_false_negatives() -> None:
+    """A benchmark that says it missed findings is not consistent."""
+    results = _results([_scenario()])
+    results["totals"]["false_negatives"] = 3
+    problems = check_results(results)
+    assert any("3 false negatives" in problem for problem in problems)
+
+
+def test_the_checker_rejects_zero_repetitions() -> None:
+    """A claim of zero repetitions describes no experiment at all."""
+    results = _results([_scenario()])
+    results["repetitions"] = 0
+    problems = check_results(results)
+    assert any("zero repetitions" in problem for problem in problems)
+
+
 # --------------------------------------------------------------------------- #
 # One live scenario
 # --------------------------------------------------------------------------- #
