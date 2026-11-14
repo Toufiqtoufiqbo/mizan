@@ -79,6 +79,10 @@ class Twin:
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.snapshot_dir = self.workspace / "snapshots"
         self.process: subprocess.Popen[bytes] | None = None
+        #: Failures met while stopping or cleaning up. A cleanup error is
+        #: recorded, never silently swallowed - a scan that could not clean up
+        #: after itself must be able to say so.
+        self.cleanup_errors: list[str] = []
         self._port: int = spec.port
         self._snapshot_index = 0
         self._log = (self.workspace / "twin.log").open("ab")
@@ -143,6 +147,7 @@ class Twin:
         raise TimeoutError(f"the application did not answer on {url} within {self.spec.health_timeout}s: {last_error}")
 
     def stop(self) -> None:
+        """Stop the application, recording - not swallowing - cleanup failures."""
         if self.process is None:
             return
         if self.process.poll() is None:
@@ -155,17 +160,22 @@ class Twin:
                     )
                 else:
                     os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-            except Exception:
-                self.process.terminate()
+            except Exception as exc:
+                self.cleanup_errors.append(f"the graceful stop failed: {exc}")
+                try:
+                    self.process.terminate()
+                except Exception as exc2:
+                    self.cleanup_errors.append(f"terminating the process failed: {exc2}")
             try:
                 self.process.wait(timeout=10)
-            except Exception:
+            except Exception as exc:
+                self.cleanup_errors.append(f"the process did not exit within 10s: {exc}")
                 self.process.kill()
         self.process = None
         try:
             self._log.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            self.cleanup_errors.append(f"closing the process log failed: {exc}")
 
     def __enter__(self) -> Twin:
         self.start()

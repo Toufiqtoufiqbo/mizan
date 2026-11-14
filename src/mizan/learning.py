@@ -113,7 +113,7 @@ def operations(document: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]
 
 
 def learn_from_spec(
-    spec_path: str | Path,
+    spec: str | Path | dict[str, Any],
     base_url: str,
     *,
     tokens: list[str] | None = None,
@@ -126,6 +126,11 @@ def learn_from_spec(
     max_requests: int | None = None,
 ) -> list[dict[str, Any]]:
     """Send the smallest possible request for every operation.
+
+    ``spec`` is an OpenAPI document: either a path to a file or the document
+    itself.  A document that was fetched at runtime (a FastAPI application
+    serves ``/openapi.json``) is passed in directly - the learning phase must
+    not depend on the application having a specification *file*.
 
     The learning runs in two passes. The first one exercises the operations
     without path parameters - creates, listings, identity - and collects the
@@ -141,7 +146,7 @@ def learn_from_spec(
 
     ``max_requests`` bounds the number of requests the learning phase may send.
     """
-    document = load_spec(spec_path)
+    document = spec if isinstance(spec, dict) else load_spec(spec)
     session = session or requests.Session()
     results: list[dict[str, Any]] = []
     pending: list[tuple[str, str, dict[str, Any]]] = []

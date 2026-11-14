@@ -1,0 +1,274 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Store API",
+    "version": "1.0.0",
+    "description": "A standalone store API. It knows nothing about Mizan."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Liveness",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The application is up.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Health" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/login": {
+      "post": {
+        "summary": "Exchange test credentials for an opaque token",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A token was issued.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LoginResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "summary": "The authenticated identity",
+        "responses": {
+          "200": {
+            "description": "The caller's identity.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Me" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/orders": {
+      "get": {
+        "summary": "List the caller's orders",
+        "responses": {
+          "200": {
+            "description": "The orders owned by the caller.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OrdersResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "summary": "Create an order",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OrderCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The created order.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Order" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/orders/{order_id}": {
+      "get": {
+        "summary": "Read an order",
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The order.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Order" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "summary": "Update an order",
+        "parameters": [
+          {
+            "name": "order_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OrderUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated order.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Order" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request body is invalid.",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+        }
+      },
+      "Unauthorized": {
+        "description": "The token is missing or unknown.",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+        }
+      },
+      "Forbidden": {
+        "description": "The caller may not touch this order.",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+        }
+      },
+      "NotFound": {
+        "description": "No such order.",
+        "content": {
+          "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+        }
+      }
+    },
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "minLength": 1, "example": "alice" },
+          "password": { "type": "string", "minLength": 1, "example": "alice-secret" }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "token": { "type": "string" },
+          "user_id": { "type": "string" }
+        }
+      },
+      "Me": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "role": { "type": "string" },
+          "owner_id": { "type": "string" }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "owner_id": { "type": "string" },
+          "sku": { "type": "string" },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "status": { "type": "string" },
+          "created_at": { "type": "number" }
+        }
+      },
+      "OrderCreate": {
+        "type": "object",
+        "required": ["sku", "quantity"],
+        "properties": {
+          "sku": { "type": "string", "minLength": 1, "example": "SKU-1" },
+          "quantity": { "type": "integer", "minimum": 1, "example": 1 },
+          "note": { "type": "string", "maxLength": 200, "nullable": true }
+        }
+      },
+      "OrderUpdate": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "minLength": 1, "example": "cancelled" },
+          "reason": { "type": "string", "maxLength": 200, "nullable": true }
+        }
+      },
+      "OrdersResponse": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Order" }
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" }
+        }
+      }
+    }
+  }
+}
