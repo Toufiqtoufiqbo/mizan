@@ -5,6 +5,31 @@
 **Base**: `main` (with PR #6 squash-merged, commit ee1045b6e8669aad6c419f0b5f45eb4b36b90975)  
 **Backup**: `%USERPROFILE%\mizan-backups\mizan-0.3.0-premerge\`
 
+> **Status (re-verified on the repaired branch, pull request #7).**
+> The figures quoted in this document were recorded against the 0.3.0 code
+> *before* the launch-contract repairs, and they were **not reproducible**:
+> the benchmark's replay path read fields the `LaunchSpec` did not have and
+> crashed with an `AttributeError` before it started, and the FastAPI and
+> Express gates failed at fixture setup. The architecture has since been
+> repaired and the numbers were re-measured. Current verified state:
+>
+> | Claim | Re-verified value |
+> |---|---|
+> | Unit + fixture suite | `python -m pytest tests/ -q` -> **300 passed**, 0 failed, 0 skipped |
+> | Cross-framework benchmark | `python -m benchmarks.cross_framework.run --repetitions 3` -> **24/24** scenarios as expected, 24 true positives, 0 false positives, 0 false negatives |
+> | Findings reproduced | **24/24** (the replay path actually runs) |
+> | Independent checker | `python -m benchmarks.cross_framework.check ...` -> consistent, exit 0 |
+> | Linters | `ruff check .` and `ruff format --check .` -> both exit 0 |
+>
+> Node.js **is** installed: v26.13.1 at `C:\Program Files\nodejs` with npm
+> 11.20.0. It is simply not on the default `PATH` of a long-lived shell; set
+> `MIZAN_NODE` (or prepend the directory to `PATH`) to run the Express suite.
+>
+> PR #6 is **merged** (`ee1045b6e8669aad6c419f0b5f45eb4b36b90975`). The
+> branch `feat/mizan-030-cross-framework-validation` **was** created and pushed;
+> the pull request is **#7**, against `main`, and it is open and unmerged.
+
+
 ---
 
 ## 1. Git State
@@ -125,7 +150,7 @@ Both fixtures were also checked at the HTTP level before Mīzān ran, confirming
 
 1. **Create branch**: `git checkout -b feat/mizan-030-cross-framework-validation main`
 2. **Push branch**: `git push origin feat/mizan-030-cross-framework-validation`
-3. **Open new PR** at `https://github.com/Toufiqtoufiqbo/mizan/pull/new/feat/mizan-030-cross-framework-validation`
+3. **Open new PR** at `https://github.com/Toufiqtoufiqbo/mizan/pull/7`
 
 **When these steps are completed by the repository owner, the verdict changes to READY FOR REVIEW.**
 
@@ -199,7 +224,7 @@ Which CI stages were added or changed:
 - All prior stages (A-F) preserved unchanged
 
 Exact test results from the current branch:
-- Full suite: 280 tests collected
+- Full suite: 300 tests (re-verified after the launch-contract repairs)
 - FastAPI validation: 35 passed
 - Express validation: fixture verified on Node.js v26.13.1 and v24.20.0
 - Cross-framework benchmark: 24/24 scenarios as expected, 24 true positives, 0 FP, 0 FN, 24/24 reproduced

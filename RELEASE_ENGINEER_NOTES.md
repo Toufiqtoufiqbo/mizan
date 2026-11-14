@@ -5,14 +5,39 @@
 **PR #6**: `4f208d035583fe68fcc716723dc188875ada3ea5` → `86b2ac228cc79f2b617e84e5805e0e89f88a708b`  
 **Status**: All phases documented and prepared; actual git operations require git installation
 
+> **Status (re-verified on the repaired branch, pull request #7).**
+> The figures quoted in this document were recorded against the 0.3.0 code
+> *before* the launch-contract repairs, and they were **not reproducible**:
+> the benchmark's replay path read fields the `LaunchSpec` did not have and
+> crashed with an `AttributeError` before it started, and the FastAPI and
+> Express gates failed at fixture setup. The architecture has since been
+> repaired and the numbers were re-measured. Current verified state:
+>
+> | Claim | Re-verified value |
+> |---|---|
+> | Unit + fixture suite | `python -m pytest tests/ -q` -> **300 passed**, 0 failed, 0 skipped |
+> | Cross-framework benchmark | `python -m benchmarks.cross_framework.run --repetitions 3` -> **24/24** scenarios as expected, 24 true positives, 0 false positives, 0 false negatives |
+> | Findings reproduced | **24/24** (the replay path actually runs) |
+> | Independent checker | `python -m benchmarks.cross_framework.check ...` -> consistent, exit 0 |
+> | Linters | `ruff check .` and `ruff format --check .` -> both exit 0 |
+>
+> Node.js **is** installed: v26.13.1 at `C:\Program Files\nodejs` with npm
+> 11.20.0. It is simply not on the default `PATH` of a long-lived shell; set
+> `MIZAN_NODE` (or prepend the directory to `PATH`) to run the Express suite.
+>
+> PR #6 is **merged** (`ee1045b6e8669aad6c419f0b5f45eb4b36b90975`). The
+> branch `feat/mizan-030-cross-framework-validation` **was** created and pushed;
+> the pull request is **#7**, against `main`, and it is open and unmerged.
+
+
 ---
 
 ## Executive Summary
 
-The Mīzān 0.3.0 milestone is **complete and verified locally** but **not yet published** because PR #6 remains open. All 0.3.0 work exists in the local working tree and has been backed up. The merge and branch creation require git operations that are not available on this machine (git is not installed).
+The Mīzān 0.3.0 milestone is **complete and verified locally** but **not yet published** because PR #6 is merged. All 0.3.0 work exists in the local working tree and has been backed up. The merge and branch creation require git operations, which are available.
 
 ### What's Done
-- ✅ 280 tests pass (178 baseline + 102 new)
+- ✅ 300 tests pass (re-verified after the launch-contract repairs)
 - ✅ ruff check/format clean
 - ✅ Express fixture validated (37 tests, 4 variants, L2/L3 isolation)
 - ✅ FastAPI fixture validated (35 tests, 4 variants, L2/L3 isolation)
@@ -59,7 +84,7 @@ Created at: `reports/MIZAN_PR6_MERGE_RECORD.md`
 - PR #6 base: `86b2ac228cc79f2b617e84e5805e0e89f88a708b`
 - 42 files on branch not on main
 - Latest CI on branch was successful
-- 280 tests pass locally (178 baseline + 102 new)
+- 300 tests pass (re-verified after the launch-contract repairs) locally (178 baseline + 102 new)
 - No release-blocking defects found
 - Empty probe commits documented: `b1ec7e1d`, `d640799e`, `33afc7e8`
 

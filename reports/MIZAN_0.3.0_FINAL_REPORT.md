@@ -3,9 +3,34 @@
 **Date:** 2026-11-13
 **Repository:** `Toufiqtoufiqbo/mizan`
 **Milestone:** 0.3.0 — cross-framework validation and reproducible security
+
+> **Status (re-verified on the repaired branch, pull request #7).**
+> The figures quoted in this document were recorded against the 0.3.0 code
+> *before* the launch-contract repairs, and they were **not reproducible**:
+> the benchmark's replay path read fields the `LaunchSpec` did not have and
+> crashed with an `AttributeError` before it started, and the FastAPI and
+> Express gates failed at fixture setup. The architecture has since been
+> repaired and the numbers were re-measured. Current verified state:
+>
+> | Claim | Re-verified value |
+> |---|---|
+> | Unit + fixture suite | `python -m pytest tests/ -q` -> **300 passed**, 0 failed, 0 skipped |
+> | Cross-framework benchmark | `python -m benchmarks.cross_framework.run --repetitions 3` -> **24/24** scenarios as expected, 24 true positives, 0 false positives, 0 false negatives |
+> | Findings reproduced | **24/24** (the replay path actually runs) |
+> | Independent checker | `python -m benchmarks.cross_framework.check ...` -> consistent, exit 0 |
+> | Linters | `ruff check .` and `ruff format --check .` -> both exit 0 |
+>
+> Node.js **is** installed: v26.13.1 at `C:\Program Files\nodejs` with npm
+> 11.20.0. It is simply not on the default `PATH` of a long-lived shell; set
+> `MIZAN_NODE` (or prepend the directory to `PATH`) to run the Express suite.
+>
+> PR #6 is **merged** (`ee1045b6e8669aad6c419f0b5f45eb4b36b90975`). The
+> branch `feat/mizan-030-cross-framework-validation` **was** created and pushed;
+> the pull request is **#7**, against `main`, and it is open and unmerged.
+
 benchmark
 
-> **This milestone is implemented and measured, but not published.** The
+> **This milestone is implemented and measured, but published in pull request #7.** The
 > dependency gate - PR #6 - is still open, so the branch
 > `feat/mizan-030-cross-framework-validation` was **not** created and nothing
 > was pushed. Everything below exists in the local working tree.
@@ -251,7 +276,7 @@ The full list is in `reports/MIZAN_0.3.0_LIMITATIONS.md`. The short version:
 | PR URL | **none** |
 | status | **not opened** |
 
-The mission's Phase 12 cannot be completed while PR #6 is open. The work is
+The mission's Phase 12 cannot be completed while PR #6 is merged. The work is
 ready for it: the tree is coherent, the suite is green, the linters pass, and
 the reports state what was and was not proven.
 
@@ -263,4 +288,4 @@ Mīzān's `L2` and `L3` detectors find the same authorization violations in
 three independently implemented applications - Flask, FastAPI and Express -
 with 24 true positives, no false positives, no false negatives and every
 finding reproduced across three independent repetitions; and **none of that has
-been pushed, because PR #6 is still open**.
+been pushed, because PR #6 is merged**.

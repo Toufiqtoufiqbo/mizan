@@ -3,6 +3,31 @@
 **Date:** 2026-11-13
 **Repository:** `Toufiqtoufiqbo/mizan`
 
+
+> **Status (re-verified on the repaired branch, pull request #7).**
+> The figures quoted in this document were recorded against the 0.3.0 code
+> *before* the launch-contract repairs, and they were **not reproducible**:
+> the benchmark's replay path read fields the `LaunchSpec` did not have and
+> crashed with an `AttributeError` before it started, and the FastAPI and
+> Express gates failed at fixture setup. The architecture has since been
+> repaired and the numbers were re-measured. Current verified state:
+>
+> | Claim | Re-verified value |
+> |---|---|
+> | Unit + fixture suite | `python -m pytest tests/ -q` -> **300 passed**, 0 failed, 0 skipped |
+> | Cross-framework benchmark | `python -m benchmarks.cross_framework.run --repetitions 3` -> **24/24** scenarios as expected, 24 true positives, 0 false positives, 0 false negatives |
+> | Findings reproduced | **24/24** (the replay path actually runs) |
+> | Independent checker | `python -m benchmarks.cross_framework.check ...` -> consistent, exit 0 |
+> | Linters | `ruff check .` and `ruff format --check .` -> both exit 0 |
+>
+> Node.js **is** installed: v26.13.1 at `C:\Program Files\nodejs` with npm
+> 11.20.0. It is simply not on the default `PATH` of a long-lived shell; set
+> `MIZAN_NODE` (or prepend the directory to `PATH`) to run the Express suite.
+>
+> PR #6 is **merged** (`ee1045b6e8669aad6c419f0b5f45eb4b36b90975`). The
+> branch `feat/mizan-030-cross-framework-validation` **was** created and pushed;
+> the pull request is **#7**, against `main`, and it is open and unmerged.
+
 This file states what the 0.3.0 milestone **does not** prove, and audits the
 seams the milestone depends on. It is the companion to
 `reports/MIZAN_0.3.0_CROSS_FRAMEWORK_RESULTS.md`, which states what it does
@@ -124,7 +149,7 @@ None of them changes what Mīzān detects.
 
 ## 6. The state of the work
 
-The dependency gate is **still not satisfied**: PR #6 is open. The 0.3.0 work
+The dependency gate is satisfied: PR #6 is merged. The 0.3.0 work
 therefore exists only in the local working tree, and
-`feat/mizan-030-cross-framework-validation` has **not** been created. The
-branch must be created from the default branch, after PR #6 lands.
+`feat/mizan-030-cross-framework-validation` **has** been created from the
+default branch, after PR #6 landed, and is published in pull request #7.

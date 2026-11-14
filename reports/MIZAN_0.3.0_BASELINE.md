@@ -4,6 +4,31 @@
 **Repository:** `Toufiqtoufiqbo/mizan`
 **Baseline:** the PR #6 branch, `feat/mizan-022-independent-validation`
 
+
+> **Status (re-verified on the repaired branch, pull request #7).**
+> The figures quoted in this document were recorded against the 0.3.0 code
+> *before* the launch-contract repairs, and they were **not reproducible**:
+> the benchmark's replay path read fields the `LaunchSpec` did not have and
+> crashed with an `AttributeError` before it started, and the FastAPI and
+> Express gates failed at fixture setup. The architecture has since been
+> repaired and the numbers were re-measured. Current verified state:
+>
+> | Claim | Re-verified value |
+> |---|---|
+> | Unit + fixture suite | `python -m pytest tests/ -q` -> **300 passed**, 0 failed, 0 skipped |
+> | Cross-framework benchmark | `python -m benchmarks.cross_framework.run --repetitions 3` -> **24/24** scenarios as expected, 24 true positives, 0 false positives, 0 false negatives |
+> | Findings reproduced | **24/24** (the replay path actually runs) |
+> | Independent checker | `python -m benchmarks.cross_framework.check ...` -> consistent, exit 0 |
+> | Linters | `ruff check .` and `ruff format --check .` -> both exit 0 |
+>
+> Node.js **is** installed: v26.13.1 at `C:\Program Files\nodejs` with npm
+> 11.20.0. It is simply not on the default `PATH` of a long-lived shell; set
+> `MIZAN_NODE` (or prepend the directory to `PATH`) to run the Express suite.
+>
+> PR #6 is **merged** (`ee1045b6e8669aad6c419f0b5f45eb4b36b90975`). The
+> branch `feat/mizan-030-cross-framework-validation` **was** created and pushed;
+> the pull request is **#7**, against `main`, and it is open and unmerged.
+
 This is what Mīzān looked like before the cross-framework phase started, and
 what the phase is measured against.
 
@@ -47,7 +72,7 @@ validation.
 | Memory | 11.4 GiB |
 | Python | 3.12.10 |
 | PostgreSQL | 16.2 (via `pgserver`), 15 integration tests pass |
-| Node.js | **v26.13.1** at `C:\Program Files\nodejs` — installed on 2026-11-10, but not resolvable from the long-lived shell this phase ran in (a stale `PATH`). The Express fixture was additionally verified on v24.20.0. |
+| Node.js | **v26.13.1** at `C:\Program Files\nodejs` — installed on 2026-11-10, but resolvable at `C:\Program Files\nodejs`; set `MIZAN_NODE` or prepend it to `PATH`. The Express fixture was additionally verified on v24.20.0. |
 | SQLite | 3.49.1 (the Python binding) / Node's built-in `node:sqlite` |
 | FastAPI | 0.162.4 |
 | uvicorn | 0.54.0 |

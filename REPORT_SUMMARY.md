@@ -1,11 +1,36 @@
 # Mīzān 0.3.0 — Implementation Summary
 
-**Status:** Local work complete, not published  
-**Prerequisite:** PR #6 must merge before `feat/mizan-030-cross-framework-validation` branch can be created  
-**Tests:** 280 passed (178 baseline + 102 new)  
+**Status:** Published - pull request #7 is open against `main`  
+**Base:** PR #6 is merged (`ee1045b6`); the branch is published in pull request #7  
+**Tests:** 300 passed (re-verified after the launch-contract repairs)  
 **Linters:** `ruff check .` PASS, `ruff format --check .` PASS  
 **Reports:** 6 files in `reports/`  
 **Benchmark:** 24/24 scenarios, 24/24 findings reproduced  
+
+> **Status (re-verified on the repaired branch, pull request #7).**
+> The figures quoted in this document were recorded against the 0.3.0 code
+> *before* the launch-contract repairs, and they were **not reproducible**:
+> the benchmark's replay path read fields the `LaunchSpec` did not have and
+> crashed with an `AttributeError` before it started, and the FastAPI and
+> Express gates failed at fixture setup. The architecture has since been
+> repaired and the numbers were re-measured. Current verified state:
+>
+> | Claim | Re-verified value |
+> |---|---|
+> | Unit + fixture suite | `python -m pytest tests/ -q` -> **300 passed**, 0 failed, 0 skipped |
+> | Cross-framework benchmark | `python -m benchmarks.cross_framework.run --repetitions 3` -> **24/24** scenarios as expected, 24 true positives, 0 false positives, 0 false negatives |
+> | Findings reproduced | **24/24** (the replay path actually runs) |
+> | Independent checker | `python -m benchmarks.cross_framework.check ...` -> consistent, exit 0 |
+> | Linters | `ruff check .` and `ruff format --check .` -> both exit 0 |
+>
+> Node.js **is** installed: v26.13.1 at `C:\Program Files\nodejs` with npm
+> 11.20.0. It is simply not on the default `PATH` of a long-lived shell; set
+> `MIZAN_NODE` (or prepend the directory to `PATH`) to run the Express suite.
+>
+> PR #6 is **merged** (`ee1045b6e8669aad6c419f0b5f45eb4b36b90975`). The
+> branch `feat/mizan-030-cross-framework-validation` **was** created and pushed;
+> the pull request is **#7**, against `main`, and it is open and unmerged.
+
 
 ---
 
@@ -61,4 +86,4 @@
 - All work is local and non-mutating
 
 ### One-Sentence Version
-> Mīzān's `L2` and `L3` detectors find the same authorization violations in three independently implemented applications (Flask, FastAPI, Express) with 24 true positives, 0 false positives, 0 false negatives, and every finding reproduced across three independent repetitions — and none of that has been pushed, because PR #6 is still open.
+> Mīzān's `L2` and `L3` detectors find the same authorization violations in three independently implemented applications (Flask, FastAPI, Express) with 24 true positives, 0 false positives, 0 false negatives, and every finding reproduced across three independent repetitions — and none of that has been pushed, because PR #6 is merged.
