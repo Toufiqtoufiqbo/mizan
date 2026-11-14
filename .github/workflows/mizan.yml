@@ -236,6 +236,68 @@ jobs:
           fi
 
   # --------------------------------------------------------------------------
+  # Stage G - cross-framework validation gate
+  # One validation engine, three independently implemented fixtures.
+  # The launch contract, the FastAPI and Express suites, the benchmark and
+  # its independent checker all run here. A skipped mandatory suite fails
+  # the job; an environment failure is never reported as a passing test.
+  # --------------------------------------------------------------------------
+  cross-framework:
+    name: "G - cross-framework gate"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Record the runtimes
+        run: |
+          python --version
+          node --version
+          npm --version
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: The launch contract
+        run: python -m pytest -q tests/test_validation_launch.py tests/test_validation_fail_closed.py
+
+      - name: The FastAPI fixture suite
+        run: python -m pytest -q tests/test_fastapi_validation.py
+
+      - name: The Express fixture suite
+        run: python -m pytest -q tests/test_express_validation.py
+
+      - name: No skipped tests in the cross-framework gate
+        run: |
+          python -m pytest tests/test_validation_launch.py tests/test_validation_fail_closed.py tests/test_fastapi_validation.py tests/test_express_validation.py -rs --tb=no -q | tee cross.txt
+          if grep -q "skipped" cross.txt; then
+            echo "::error::a cross-framework suite was skipped"
+            exit 1
+          fi
+
+      - name: The cross-framework benchmark (2 frameworks x 4 variants x 3 repetitions)
+        run: python -m benchmarks.cross_framework.run --repetitions 3 --out benchmarks/cross_framework/results/results.json
+
+      - name: The independent checker rejects nothing less than the expected matrix
+        run: python -m benchmarks.cross_framework.check benchmarks/cross_framework/results/results.json
+
+      - name: Upload the benchmark results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-framework-results
+          path: benchmarks/cross_framework/results/
+
+  # --------------------------------------------------------------------------
   # Opt-in: an external target.
   # Never part of ordinary CI: it needs an explicit variable and its own tokens.
   # --------------------------------------------------------------------------
