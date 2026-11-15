@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from mizan.identity import decode_token
+from mizan.identity import IdentityMapError, resolve_principal
 from mizan.traffic import TrafficRecord, infer_resource, to_template
 
 HOP_BY_HOP = {
@@ -216,7 +216,16 @@ class RecordingProxy:
 
 
 def _identity_map_from_env() -> dict[str, str]:
-    """The identity map from the environment, if there is one."""
+    """The identity map from the environment, if there is one.
+
+    ``MIZAN_IDENTITY_MAP`` is a JSON object mapping **token values** to
+    principal names - the same shape :meth:`validation` passes to the proxy.
+    Configuration travels as names, never as secrets in a file.
+
+    Fail closed: a set-but-unparseable variable is an error, not an empty
+    map - a silently dropped identity map would attribute nothing and could
+    turn a misconfiguration into a quietly useless scan.
+    """
     import json
     import os
 
@@ -225,23 +234,34 @@ def _identity_map_from_env() -> dict[str, str]:
         return {}
     try:
         loaded = json.loads(raw)
-    except ValueError:
-        return {}
+    except ValueError as exc:
+        raise IdentityMapError(f"{IDENTITY_MAP_ENV} is not valid JSON: {exc.__class__.__name__}") from exc
     if not isinstance(loaded, dict):
-        return {}
+        raise IdentityMapError(f"{IDENTITY_MAP_ENV} must be a JSON object mapping tokens to principal names")
     return {str(token): str(principal) for token, principal in loaded.items()}
 
 
 def _principal(headers: Any, identity_map: dict[str, str] | None = None) -> str | None:
-    """The identity behind a request, as far as it can be told."""
+    """The identity behind a request, as far as it can be told.
+
+    Resolution order - the same rules the WSGI recorder and the MITM addon
+    follow:
+
+    1. the Bearer token is listed in ``identity_map`` - return the configured
+       principal. Explicit configuration wins;
+    2. the token is a readable JWT - return its subject. This is what the
+       token *claims*, extracted without signature verification;
+    3. an unknown opaque token returns ``None`` and stays unknown - the
+       user-id header is never consulted to rescue an authentication
+       attempt, because a forged header must not attribute traffic;
+    4. with no Authorization header at all, ``X-User-Id`` is honoured as the
+       deployment's own caller signal - it can never override an
+       authenticated identity.
+    """
     value = headers.get("Authorization") or headers.get("authorization")
     if value and value.startswith("Bearer "):
         token = value[len("Bearer ") :].strip()
-        if identity_map and token in identity_map:
-            return identity_map[token]
-        claims = decode_token(token)
-        if claims:
-            return claims.subject
+        return resolve_principal(token, identity_map)
     fallback = headers.get("X-User-Id") or headers.get("x-user-id")
     return fallback if fallback else None
 

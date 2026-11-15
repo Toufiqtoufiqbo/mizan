@@ -25,18 +25,19 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from mizan.identity import decode_token
+from mizan.identity import resolve_principal
 from mizan.traffic import TrafficRecord, infer_resource, to_template
 
 
-def principal_from_token(token: str | None) -> str | None:
-    """The subject a bearer token claims, if it is readable."""
-    if not token:
-        return None
-    claims = decode_token(token)
-    if claims is None or claims.subject is None:
-        return None
-    return claims.subject
+def principal_from_token(token: str | None, identity_map: dict[str, str] | None = None) -> str | None:
+    """The identity behind a bearer token, if it can be attributed.
+
+    Resolution order: an entry in ``identity_map`` (a ``{token: principal}``
+    mapping) wins; a readable JWT yields its subject; anything else - notably
+    an opaque token nobody configured - is unattributable and yields ``None``.
+    No identity is ever invented here.
+    """
+    return resolve_principal(token, identity_map)
 
 
 class Recorder:
@@ -53,12 +54,16 @@ class Recorder:
         principal_header: str = "HTTP_AUTHORIZATION",
         principal_header_prefix: str = "Bearer ",
         user_id_header: str | None = "HTTP_X_USER_ID",
+        identity_map: dict[str, str] | None = None,
     ) -> None:
         self.app = app
         self.path = Path(traffic_path)
         self.principal_header = principal_header
         self.principal_header_prefix = principal_header_prefix
         self.user_id_header = user_id_header
+        #: ``{token value: principal id}`` for opaque tokens the operator
+        #: identified in advance. Same meaning as on :class:`RecordingProxy`.
+        self.identity_map = dict(identity_map or {})
         self._lock = threading.Lock()
 
     def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
@@ -95,12 +100,17 @@ class Recorder:
     def _principal(self, environ: dict[str, Any]) -> str | None:
         header = environ.get(self.principal_header)
         if header and header.startswith(self.principal_header_prefix):
-            subject = principal_from_token(header[len(self.principal_header_prefix) :].strip())
-            if subject:
-                return subject
+            # A presented token decides the identity - or decides that there
+            # is none. An unknown opaque token stays unknown: the user-id
+            # header is never consulted to rescue an authentication attempt,
+            # because a forged header must not attribute traffic to someone.
+            return principal_from_token(header[len(self.principal_header_prefix) :].strip(), self.identity_map)
         if self.user_id_header:
             value = environ.get(self.user_id_header)
             if value:
+                # Only reached when no Authorization header was presented.
+                # This is the deployment's own signal about the caller, not
+                # an authenticated identity, and it can never override one.
                 return value
         return None
 
@@ -138,6 +148,12 @@ def _decode(response: Any) -> Any:
 MITM_ADDON = '''"""mitmproxy addon that writes a Mizan traffic log.
 
     mitmdump -s mitm_recorder.py --set mizan_traffic=traffic.jsonl
+
+The identity map is read from MIZAN_IDENTITY_MAP as a JSON object mapping
+*token values* to principal names - the same format the RecordingProxy uses,
+and the shape the identity-map file resolves to. Only variable names and
+principal names travel through configuration; the tokens come from the
+environment or the traffic itself.
 """
 
 import json
@@ -148,18 +164,40 @@ from mizan.identity import decode_token
 TRAFFIC = os.environ.get("MIZAN_TRAFFIC", "traffic.jsonl")
 
 
+def _identity_map():
+    raw = os.environ.get("MIZAN_IDENTITY_MAP", "")
+    if not raw:
+        return {}
+    try:
+        loaded = json.loads(raw)
+    except ValueError:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return {str(token): str(principal) for token, principal in loaded.items()}
+
+
+def _principal(headers, identity_map):
+    """Same resolution rules as the WSGI recorder and the proxy."""
+    header = headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        token = header[len("Bearer "):].strip()
+        if token in identity_map:
+            return identity_map[token]
+        claims = decode_token(token)
+        if claims and claims.subject:
+            return claims.subject
+        # An unknown opaque token stays unknown - the user-id header is
+        # never consulted to rescue an authentication attempt.
+        return None
+    return headers.get("X-User-Id")
+
+
 def response(flow):
     request = flow.request
     if request.method == "CONNECT":
         return
-    principal = None
-    header = request.headers.get("Authorization", "")
-    if header.startswith("Bearer "):
-        claims = decode_token(header[len("Bearer "):].strip())
-        if claims:
-            principal = claims.subject
-    if principal is None:
-        principal = request.headers.get("X-User-Id")
+    principal = _principal(request.headers, _identity_map())
     template = flow.request.path.split("?")[0]
     record = {
         "method": request.method,

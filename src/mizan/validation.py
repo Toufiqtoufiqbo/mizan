@@ -619,7 +619,11 @@ def scan_application(
         if learning_budget == 0 and budget > 0:
             # The bootstrap used the whole budget: the learning phase cannot run.
             accounting.budget_exhausted = True
-        learned = learn_from_spec(document, proxy.base_url, identities=tokens, max_requests=learning_budget)
+        # /login is how the identities were obtained; exercising it again
+        # would mint fresh tokens and write them into the traffic log.
+        learned = learn_from_spec(
+            document, proxy.base_url, identities=tokens, max_requests=learning_budget, exclude_paths=("/login",)
+        )
         accounting.learning = len(learned)
         if learning_budget > 0 and accounting.learning >= learning_budget:
             accounting.budget_exhausted = True

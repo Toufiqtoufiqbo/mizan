@@ -14,6 +14,7 @@ consumes.
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -124,6 +125,7 @@ def learn_from_spec(
     max_discovered_ids: int = 5,
     include_destructive: bool = False,
     max_requests: int | None = None,
+    exclude_paths: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """Send the smallest possible request for every operation.
 
@@ -144,6 +146,12 @@ def learn_from_spec(
     Destructive operations are skipped by default: a learning run must not
     destroy the objects the attack phase is going to look at.
 
+    ``exclude_paths`` names paths the learning phase must not touch at all -
+    typically the credential-exchange endpoint. Exercising it would mint
+    fresh tokens whose responses the traffic log would then contain: the
+    learning phase already holds the identities it needs, so it has no
+    business minting more.
+
     ``max_requests`` bounds the number of requests the learning phase may send.
     """
     document = spec if isinstance(spec, dict) else load_spec(spec)
@@ -157,6 +165,8 @@ def learn_from_spec(
         principals = [(f"identity-{index}", token) for index, token in enumerate(tokens or [])]
 
     for index, (method, path, operation) in enumerate(operations(document)):
+        if path in exclude_paths:
+            continue
         if method == "DELETE" and not include_destructive:
             continue
         if _has_required_path_parameter(operation):
