@@ -21,6 +21,7 @@ from click.testing import CliRunner
 from mizan.core import UNKNOWN_PRINCIPAL
 from mizan.identity import (
     IdentityMapError,
+    TrustedProxies,
     load_identity_map,
     parse_identity_map,
     resolve_identity_map,
@@ -316,8 +317,12 @@ def test_two_unattributed_tokens_are_never_conflated(tmp_path: Path) -> None:
         ({"HTTP_AUTHORIZATION": "Bearer tok-x", "HTTP_X_USER_ID": "alice"}, None),
         # 5. a readable JWT with a conflicting user header: the JWT wins
         ({"HTTP_AUTHORIZATION": f"Bearer {_jwt('alice')}", "HTTP_X_USER_ID": "bob"}, "alice"),
-        # 4. no Authorization at all: the deployment's own signal is honoured
-        ({"HTTP_X_USER_ID": "alice"}, "alice"),
+        # 6. an unsupported scheme with a forged user header: no identity
+        ({"HTTP_AUTHORIZATION": "Basic dXNlcjpwYXNz", "HTTP_X_USER_ID": "alice"}, None),
+        # 7. a malformed Authorization header with a forged user header: no identity
+        ({"HTTP_AUTHORIZATION": "Bearer", "HTTP_X_USER_ID": "alice"}, None),
+        # 4. no Authorization at all: an untrusted peer stays unattributed
+        ({"HTTP_X_USER_ID": "alice"}, None),
         # no headers at all: nothing is attributed
         ({}, None),
     ],
@@ -325,14 +330,16 @@ def test_two_unattributed_tokens_are_never_conflated(tmp_path: Path) -> None:
 def test_proxy_and_recorder_never_let_a_header_override_authentication(
     tmp_path: Path, headers: dict, expected: str | None
 ) -> None:
+    """The same matrix, run against the proxy and the WSGI recorder."""
     identity_map = {"tok-a": "alice", "tok-b": "bob"}
     http_headers = {name.replace("HTTP_", "").replace("_", "-").title(): value for name, value in headers.items()}
-    assert proxy_principal(_Headers(http_headers), identity_map) == expected
+    assert proxy_principal(_Headers(http_headers), identity_map, peer="203.0.113.7") == expected
     recorder = Recorder(_wsgi_app, tmp_path / "traffic.jsonl", identity_map=identity_map)
     environ = {
         "REQUEST_METHOD": "GET",
         "PATH_INFO": "/orders/o1",
         "CONTENT_LENGTH": "0",
+        "REMOTE_ADDR": "203.0.113.7",
         "wsgi.input": _Empty(),
         **headers,
     }
@@ -340,6 +347,32 @@ def test_proxy_and_recorder_never_let_a_header_override_authentication(
     from mizan.traffic import TrafficLog
 
     assert TrafficLog.load(tmp_path / "traffic.jsonl").records[-1].principal == expected
+
+
+def test_only_a_trusted_peer_may_assert_an_identity(tmp_path: Path) -> None:
+    """The proxy's assertion is believed only inside the trusted range."""
+    identity_map = {"tok-a": "alice", "tok-b": "bob"}
+    headers = _Headers({"X-User-Id": "alice"})
+    trusted = TrustedProxies.from_cidrs(["10.10.0.0/24"])
+    assert proxy_principal(headers, identity_map, peer="10.10.0.5", trusted_proxies=trusted) == "alice"
+    assert proxy_principal(headers, identity_map, peer="203.0.113.7", trusted_proxies=trusted) is None
+    assert proxy_principal(headers, identity_map, peer=None, trusted_proxies=trusted) is None
+
+    recorder = Recorder(
+        _wsgi_app, tmp_path / "traffic.jsonl", identity_map=identity_map, trusted_proxy_cidrs=["10.10.0.0/24"]
+    )
+    base = {
+        "REQUEST_METHOD": "GET",
+        "PATH_INFO": "/orders/o1",
+        "CONTENT_LENGTH": "0",
+        "HTTP_X_USER_ID": "alice",
+        "wsgi.input": _Empty(),
+    }
+    recorder({**base, "REMOTE_ADDR": "10.10.0.5"}, lambda *args, **kwargs: None)
+    recorder({**base, "REMOTE_ADDR": "203.0.113.7"}, lambda *args, **kwargs: None)
+    from mizan.traffic import TrafficLog
+
+    assert [record.principal for record in TrafficLog.load(tmp_path / "traffic.jsonl").records] == ["alice", None]
 
 
 class _Headers:
@@ -358,6 +391,7 @@ class _Headers:
 
 
 def test_the_mitm_addon_resolves_identities_the_same_way(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The addon follows the same rules: a token decides, a header does not."""
     from mizan.recorder import MITM_ADDON
 
     traffic = tmp_path / "traffic.jsonl"
@@ -367,7 +401,7 @@ def test_the_mitm_addon_resolves_identities_the_same_way(tmp_path: Path, monkeyp
     namespace: dict = {"__name__": "mitm_recorder"}
     exec(compile(MITM_ADDON, "mitm_recorder.py", "exec"), namespace)  # noqa: S102 - Mizan's own template
 
-    def flow_with(token: str | None, user_id: str | None = None):
+    def flow_with(token: str | None, user_id: str | None = None, peer: str | None = "203.0.113.7"):
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         if user_id:
             headers["X-User-Id"] = user_id
@@ -388,18 +422,95 @@ def test_the_mitm_addon_resolves_identities_the_same_way(tmp_path: Path, monkeyp
             def get_text(self, strict: bool = False) -> str:
                 return json.dumps({"id": "o1", "owner_id": "alice"})
 
+        class _Connection:
+            def __init__(self) -> None:
+                self.peername = (peer, 54321) if peer else None
+
         class _Flow:
             request = _Request()
             response = _Response()
+            client_conn = _Connection()
 
         return _Flow()
 
     namespace["response"](flow_with("tok-a"))
     namespace["response"](flow_with("tok-b", user_id="alice"))  # forged header on an unknown token
-    namespace["response"](flow_with(None, user_id="bob"))  # deployment signal, no auth presented
+    namespace["response"](flow_with(None, user_id="bob"))  # no auth presented: an untrusted peer stays unknown
 
     records = [json.loads(line) for line in traffic.read_text(encoding="utf-8").splitlines()]
-    assert [record["principal"] for record in records] == ["alice", None, "bob"]
+    assert [record["principal"] for record in records] == ["alice", None, None]
+
+
+def test_the_mitm_addon_believes_a_trusted_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With an explicit trusted range, the proxy's assertion is believed."""
+    from mizan.recorder import MITM_ADDON
+
+    traffic = tmp_path / "traffic.jsonl"
+    monkeypatch.setenv("MIZAN_TRAFFIC", str(traffic))
+    monkeypatch.setenv("MIZAN_TRUSTED_PROXY_CIDRS", "10.10.0.0/24")
+
+    namespace: dict = {"__name__": "mitm_recorder"}
+    exec(compile(MITM_ADDON, "mitm_recorder.py", "exec"), namespace)  # noqa: S102 - Mizan's own template
+
+    class _Request:
+        method = "GET"
+        path = "/orders/o1"
+
+        def __init__(self) -> None:
+            self.headers = {"X-User-Id": "bob"}
+
+        def get_text(self, strict: bool = False) -> str:
+            return ""
+
+    class _Response:
+        status_code = 200
+
+        def get_text(self, strict: bool = False) -> str:
+            return json.dumps({"id": "o1", "owner_id": "alice"})
+
+    class _Connection:
+        def __init__(self, peer: str | None) -> None:
+            self.peername = (peer, 54321) if peer else None
+
+    class _Flow:
+        request = _Request()
+        response = _Response()
+
+        def __init__(self, peer: str | None) -> None:
+            self.client_conn = _Connection(peer)
+
+    namespace["response"](_Flow("10.10.0.5"))  # inside the trusted range
+    namespace["response"](_Flow("203.0.113.7"))  # outside it
+    namespace["response"](_Flow(None))  # peer unknown: fail closed
+
+    records = [json.loads(line) for line in traffic.read_text(encoding="utf-8").splitlines()]
+    assert [record["principal"] for record in records] == ["bob", None, None]
+
+
+def test_the_mitm_addon_refuses_a_broken_identity_map(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A broken identity map is loud - never silently empty."""
+    from mizan.recorder import MITM_ADDON
+
+    monkeypatch.setenv("MIZAN_TRAFFIC", str(tmp_path / "traffic.jsonl"))
+    monkeypatch.setenv("MIZAN_IDENTITY_MAP", "{not json")
+
+    with pytest.raises(ValueError) as excinfo:
+        exec(compile(MITM_ADDON, "mitm_recorder.py", "exec"), {"__name__": "mitm_recorder"})  # noqa: S102
+    assert "MIZAN_IDENTITY_MAP" in str(excinfo.value)
+
+
+def test_the_mitm_addon_refuses_a_broken_trusted_proxy_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A broken trusted-proxy range is loud too."""
+    from mizan.recorder import MITM_ADDON
+
+    monkeypatch.setenv("MIZAN_TRAFFIC", str(tmp_path / "traffic.jsonl"))
+    monkeypatch.setenv("MIZAN_TRUSTED_PROXY_CIDRS", "not-a-cidr")
+
+    with pytest.raises(ValueError) as excinfo:
+        exec(compile(MITM_ADDON, "mitm_recorder.py", "exec"), {"__name__": "mitm_recorder"})  # noqa: S102
+    assert "not-a-cidr" in str(excinfo.value)
 
 
 # --------------------------------------------------------------------------- #

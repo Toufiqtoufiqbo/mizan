@@ -8,15 +8,23 @@ For opaque tokens there is nothing to read, so the operator must say who each
 token belongs to: that is the identity map. The configuration file holds only
 *names of environment variables* - the tokens themselves are read from the
 environment at run time and are never written to disk.
+
+A third source exists in some deployments: a trusted reverse proxy that
+authenticates the caller and asserts the identity in a header. That assertion
+is only believed when the request came from an explicitly configured proxy
+range - never because the header happens to exist. See
+:class:`TrustedProxies` and :func:`resolve_identity`.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
+import ipaddress
 import json
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -321,4 +329,114 @@ def resolve_principal(token: str | None, identity_map: dict[str, str] | None = N
     claims = decode_token(token)
     if claims is not None and claims.subject is not None:
         return claims.subject
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# The trusted identity boundary
+# --------------------------------------------------------------------------- #
+
+
+class TrustedProxyError(ValueError):
+    """A trusted-proxy configuration is invalid.
+
+    The message names the offending CIDR. It never contains a token, because
+    a CIDR is not a secret and a token never belongs in this configuration.
+    """
+
+
+@dataclass(frozen=True)
+class TrustedProxies:
+    """The reverse proxies whose asserted identity Mizan may believe.
+
+    An empty allowlist - the default - means *no* proxy is trusted: a
+    client-supplied ``X-User-Id`` header is then just a header, not an
+    identity. Trust is a property of the **immediate peer address**, never of
+    a forwarding header the client can write.
+
+    The reverse proxy in front of the application is responsible for
+    *stripping* any client-supplied ``X-User-Id`` and writing the
+    authenticated identity in its place. A proxy that forwards the client's
+    header unchanged turns every caller into whoever they please.
+    """
+
+    networks: tuple[Any, ...] = ()
+
+    @classmethod
+    def from_cidrs(cls, cidrs: Iterable[str] | None) -> TrustedProxies:
+        """Parse and validate a list of CIDR ranges.
+
+        Raises :class:`TrustedProxyError` for an invalid range - a broken
+        configuration is rejected at initialisation, never silently ignored.
+        """
+        networks: list[Any] = []
+        for raw in cidrs or ():
+            text = str(raw).strip()
+            if not text:
+                continue
+            try:
+                networks.append(ipaddress.ip_network(text, strict=False))
+            except ValueError as exc:
+                raise TrustedProxyError(f"invalid trusted proxy CIDR {text!r}: {exc.__class__.__name__}") from exc
+        return cls(networks=tuple(networks))
+
+    def trusts(self, peer: str | None) -> bool:
+        """Whether the immediate peer address is a trusted proxy.
+
+        Fails closed: an empty allowlist trusts nobody, and an address that
+        is missing or unparseable is never trusted.
+        """
+        if not self.networks or not peer:
+            return False
+        try:
+            address = ipaddress.ip_address(str(peer).strip())
+        except ValueError:
+            return False
+        return any(address in network for network in self.networks)
+
+    def __bool__(self) -> bool:
+        return bool(self.networks)
+
+
+def resolve_identity(
+    *,
+    authorization: str | None,
+    user_id: str | None = None,
+    peer: str | None = None,
+    identity_map: dict[str, str] | None = None,
+    trusted_proxies: TrustedProxies | None = None,
+    bearer_prefix: str = "Bearer ",
+) -> str | None:
+    """The identity behind one request - one rule for every recorder.
+
+    1. **An Authorization header was presented.** It alone decides, and no
+       other header can rescue it:
+
+       - a ``Bearer`` token resolves through the identity map, then through a
+         readable JWT subject (extracted, never verified);
+       - any other scheme - ``Basic``, an empty value, a malformed value, an
+         unsupported scheme - yields **no identity**. An unknown or broken
+         authentication attempt must not be rescued by a user-controlled
+         header.
+
+    2. **No Authorization header was presented.** The ``X-User-Id`` header is
+       believed only when the request came from an explicitly trusted proxy
+       (``trusted_proxies``) and the immediate peer address says so. Without
+       that configuration the request is unattributable.
+
+    The peer address is always the **immediate** one - the socket the request
+    arrived on. A forwarding header such as ``X-Forwarded-For`` is written by
+    the client and proves nothing about who is talking.
+    """
+    if authorization is not None:
+        if bearer_prefix and authorization.startswith(bearer_prefix):
+            token = authorization[len(bearer_prefix) :].strip()
+            return resolve_principal(token, identity_map)
+        # A presented but unusable Authorization header: no identity, and no
+        # fallback to a header the caller controls.
+        return None
+    if user_id:
+        asserted = user_id.strip()
+        if asserted and trusted_proxies is not None and trusted_proxies.trusts(peer):
+            return asserted
     return None

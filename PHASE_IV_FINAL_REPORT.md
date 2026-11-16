@@ -183,3 +183,125 @@ Every mandated gate is satisfied with evidence, not assertion:
 | Phase I — GitHub | branch pushed, one PR (#8) to `main`, Actions verified on the exact pushed SHA, **not merged** |
 
 The only deviations from the letter of the mission are documented and justified in §8 (line-ending normalization of three pre-existing CRLF files; GitHub network reachability from this machine; the 0.3.0 branch's npm dependency step). No engine rewrite, no new framework, no new database, no deleted or weakened test, no expansion of AuthzBugs, no scope creep into 0.5.0.
+
+---
+
+# Phase IV.1 — Trusted Identity Boundary Hardening
+
+**Scope:** eliminate the remaining trust-boundary weakness around `X-User-Id`
+and make identity attribution identical in all three recording components.
+Phase IV is not rebuilt; its functionality is preserved and re-verified.
+
+## A. Files modified
+
+| File | Change |
+|---|---|
+| `src/mizan/identity.py` | **new** `TrustedProxyError`, `TrustedProxies` (CIDR allowlist parsed with `ipaddress`, validated at construction, fails closed), and `resolve_identity()` - the **single** resolver used by all three recorders |
+| `src/mizan/recorder.py` | WSGI recorder uses `resolve_identity()` with the peer from `REMOTE_ADDR`; new `trusted_proxy_cidrs` argument; MITM addon template rewritten: strict identity-map parsing, strict CIDR parsing, peer from the client connection, shared resolver |
+| `src/mizan/proxy.py` | Peer taken from the handler's socket (`client_address[0]`); new `trusted_proxy_cidrs` argument; `MIZAN_TRUSTED_PROXY_CIDRS` parsed strictly; `_principal()` delegates to `resolve_identity()` |
+| `tests/test_trusted_identity.py` | **new** - the 14-scenario security matrix against all three components, configuration validation, and two end-to-end proxy attacks |
+| `tests/test_recorder.py` | The old "falls back to a user header" expectation is replaced by three stronger tests: untrusted by default, trusted proxy believed, forwarding header never proves trust |
+| `tests/test_identity_map.py` | Matrix extended (unsupported scheme, malformed header); new tests for the trusted peer, the MITM trusted proxy, and the addon's refusal of a broken configuration |
+| `README.md` | New "Who is the caller?" section: the three identity sources, the trusted-proxy configuration, and the proxy's duty to overwrite client headers |
+
+## B. Security behaviour, before and after
+
+| Situation | Phase IV (before) | Phase IV.1 (after) |
+|---|---|---|
+| No `Authorization`, `X-User-Id` present, untrusted peer | identity taken from the header | **no identity** |
+| No `Authorization`, `X-User-Id` present, trusted proxy | identity taken from the header | identity taken from the header (explicitly configured) |
+| `Authorization: Basic ...` + `X-User-Id` | identity taken from the header | **no identity** |
+| `Authorization: Bearer` (malformed) + `X-User-Id` | identity taken from the header | **no identity** |
+| `Authorization:` (present, empty) + `X-User-Id` | identity taken from the header | **no identity** |
+| `Authorization: Bearer <unknown>` + `X-User-Id` | no identity | no identity |
+| `X-Forwarded-For: <trusted ip>` + `X-User-Id` | header believed | **no identity** - a forwarding header is client-writable |
+| Peer address unavailable | header believed | **no identity** |
+| MITM addon with an unparseable `MIZAN_IDENTITY_MAP` | silently an empty map | **explicit failure at start-up** |
+| Invalid trusted-proxy CIDR | (did not exist) | **explicit failure at initialisation** |
+
+The invariant now: **an `Authorization` header that is present decides on its
+own, and `X-User-Id` is believed only from an explicitly trusted immediate
+peer.**
+
+## C. Trusted-proxy configuration (realistic example)
+
+```python
+# WSGI middleware
+from mizan.recorder import Recorder
+
+application = Recorder(app, "traffic.jsonl", trusted_proxy_cidrs=["10.10.0.0/24", "127.0.0.1/32"])
+```
+
+```bash
+# Recording proxy and MITM addon
+export MIZAN_TRUSTED_PROXY_CIDRS=10.10.0.0/24,127.0.0.1/32
+```
+
+```nginx
+# The trusted proxy must strip the client's header and write its own.
+location /api/ {
+    proxy_set_header X-User-Id $authenticated_user;   # overwrite, never append
+    proxy_set_header X-Forwarded-For "";              # the client may not choose its peer
+    proxy_pass http://127.0.0.1:8000;
+}
+```
+
+Default: **empty** - no proxy is trusted. An invalid range is rejected when the
+recorder is constructed, with a message that names the range and never a
+token.
+
+## D. The security matrix (14 scenarios × 3 components)
+
+Run identically against the WSGI recorder, the recording proxy and the MITM
+addon (`tests/test_trusted_identity.py`, plus the extended matrix in
+`tests/test_identity_map.py`):
+
+| Scenario | Expected | Result |
+|---|---|---|
+| No Authorization, no `X-User-Id` | `None` | pass |
+| No Authorization, untrusted peer, `X-User-Id` | `None` | pass |
+| No Authorization, trusted peer, `X-User-Id` | configured identity | pass |
+| `Authorization: Bearer <mapped token>` | mapped identity | pass |
+| `Authorization: Bearer <unknown opaque>` + `X-User-Id` | `None` | pass |
+| Malformed `Authorization` + `X-User-Id` | `None` | pass |
+| `Authorization: Basic ...` + `X-User-Id` | `None` | pass |
+| Empty but present `Authorization` + `X-User-Id` | `None` | pass |
+| JWT + conflicting `X-User-Id` | JWT subject | pass |
+| Trusted peer spoofed through `X-Forwarded-For` | `None` | pass |
+| Invalid CIDR configuration | explicit failure | pass |
+| Unavailable peer address | `None` | pass |
+| Invalid MITM identity-map JSON | explicit failure | pass |
+| Invalid MITM CIDR configuration | explicit failure | pass |
+
+Two end-to-end attacks are also proven against a running proxy: a plain
+`X-User-Id` header, a header plus a spoofed `X-Forwarded-For`, an unknown
+bearer token plus the header, and a `Basic` header plus the header - all four
+produce **no identity**.
+
+## E. Regression results
+
+- `pytest`: **416 passed, 0 failed, 0 skipped** (365 before this phase + 51
+  new/strengthened tests; the 15 PostgreSQL tests still run against a real
+  local PostgreSQL).
+- `ruff check src/mizan tests`: **All checks passed!**
+- `ruff format --check src/mizan tests`: **63 files already formatted**
+- `git diff --check`: clean.
+- No test was deleted, skipped or relaxed; the two expectations that the
+  mission changes (the default `X-User-Id` fallback and the MITM addon's
+  silent empty map) were replaced by **stronger** tests, not weakened ones.
+- Benchmark, independent-application validation, PostgreSQL and
+  cross-framework gates: unchanged and green locally.
+
+## F. Remaining limitations
+
+1. A JWT subject is still *extracted*, never verified - a trusted identity
+   requires a configured token mapping.
+2. Trust in a proxy's assertion is only as good as the proxy: it must strip
+   client-supplied `X-User-Id` and overwrite it. Mīzān cannot verify that.
+3. The trusted range is a CIDR list; a proxy reachable through a shared NAT or
+   a jump host widens the set of machines whose assertions are believed.
+4. Only the `Bearer` scheme is recognised; any other scheme yields no
+   identity (fail-closed), so an unusual scheme means unattributed traffic.
+5. The peer address is the immediate one - a proxy in front of Mīzān must be
+   the configured trusted proxy, or Mīzān sees the proxy's address.
+

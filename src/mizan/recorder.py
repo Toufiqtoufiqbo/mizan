@@ -21,11 +21,11 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from mizan.identity import resolve_principal
+from mizan.identity import TrustedProxies, resolve_identity, resolve_principal
 from mizan.traffic import TrafficRecord, infer_resource, to_template
 
 
@@ -55,6 +55,7 @@ class Recorder:
         principal_header_prefix: str = "Bearer ",
         user_id_header: str | None = "HTTP_X_USER_ID",
         identity_map: dict[str, str] | None = None,
+        trusted_proxy_cidrs: Sequence[str] = (),
     ) -> None:
         self.app = app
         self.path = Path(traffic_path)
@@ -64,6 +65,11 @@ class Recorder:
         #: ``{token value: principal id}`` for opaque tokens the operator
         #: identified in advance. Same meaning as on :class:`RecordingProxy`.
         self.identity_map = dict(identity_map or {})
+        #: The reverse proxies whose asserted identity may be believed.
+        #: Empty by default: an ``X-User-Id`` header is not an identity
+        #: unless the immediate peer is an explicitly trusted proxy.
+        #: An invalid CIDR is rejected here, at initialisation.
+        self.trusted_proxies = TrustedProxies.from_cidrs(trusted_proxy_cidrs)
         self._lock = threading.Lock()
 
     def __call__(self, environ: dict[str, Any], start_response: Any) -> list[bytes]:
@@ -98,21 +104,20 @@ class Recorder:
     # -- helpers ------------------------------------------------------------ #
 
     def _principal(self, environ: dict[str, Any]) -> str | None:
-        header = environ.get(self.principal_header)
-        if header and header.startswith(self.principal_header_prefix):
-            # A presented token decides the identity - or decides that there
-            # is none. An unknown opaque token stays unknown: the user-id
-            # header is never consulted to rescue an authentication attempt,
-            # because a forged header must not attribute traffic to someone.
-            return principal_from_token(header[len(self.principal_header_prefix) :].strip(), self.identity_map)
-        if self.user_id_header:
-            value = environ.get(self.user_id_header)
-            if value:
-                # Only reached when no Authorization header was presented.
-                # This is the deployment's own signal about the caller, not
-                # an authenticated identity, and it can never override one.
-                return value
-        return None
+        """The identity behind one request.
+
+        The peer address is ``REMOTE_ADDR`` - the address the request
+        arrived on. ``HTTP_X_FORWARDED_FOR`` is written by the client and is
+        never consulted.
+        """
+        return resolve_identity(
+            authorization=environ.get(self.principal_header),
+            user_id=environ.get(self.user_id_header) if self.user_id_header else None,
+            peer=environ.get("REMOTE_ADDR"),
+            identity_map=self.identity_map,
+            trusted_proxies=self.trusted_proxies,
+            bearer_prefix=self.principal_header_prefix,
+        )
 
     def _write(self, record: TrafficRecord) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -154,50 +159,83 @@ The identity map is read from MIZAN_IDENTITY_MAP as a JSON object mapping
 and the shape the identity-map file resolves to. Only variable names and
 principal names travel through configuration; the tokens come from the
 environment or the traffic itself.
+
+A broken configuration is an error, never an empty configuration: an
+identity map that cannot be parsed is loud, because a silently empty map
+would attribute nothing and look like a quiet scan.
+
+X-User-Id is only believed when the request came from an explicitly trusted
+proxy. Configure the ranges with MIZAN_TRUSTED_PROXY_CIDRS, a comma separated
+list of CIDR ranges (empty by default - no proxy is trusted). The trusted
+proxy must strip any client-supplied X-User-Id and overwrite it with the
+authenticated identity; Mizan compares the immediate peer address, never a
+forwarding header the client could write.
 """
 
 import json
 import os
 
-from mizan.identity import decode_token
+from mizan.identity import TrustedProxies, resolve_identity
 
 TRAFFIC = os.environ.get("MIZAN_TRAFFIC", "traffic.jsonl")
 
 
 def _identity_map():
+    """The identity map from the environment, or an explicit failure."""
     raw = os.environ.get("MIZAN_IDENTITY_MAP", "")
     if not raw:
         return {}
     try:
         loaded = json.loads(raw)
-    except ValueError:
-        return {}
+    except ValueError as exc:
+        raise ValueError(
+            "MIZAN_IDENTITY_MAP is not valid JSON: " + exc.__class__.__name__
+        ) from exc
     if not isinstance(loaded, dict):
-        return {}
+        raise ValueError("MIZAN_IDENTITY_MAP must be a JSON object mapping tokens to principal names")
     return {str(token): str(principal) for token, principal in loaded.items()}
 
 
-def _principal(headers, identity_map):
-    """Same resolution rules as the WSGI recorder and the proxy."""
-    header = headers.get("Authorization", "")
-    if header.startswith("Bearer "):
-        token = header[len("Bearer "):].strip()
-        if token in identity_map:
-            return identity_map[token]
-        claims = decode_token(token)
-        if claims and claims.subject:
-            return claims.subject
-        # An unknown opaque token stays unknown - the user-id header is
-        # never consulted to rescue an authentication attempt.
+def _trusted_proxies():
+    """The trusted proxy ranges from the environment, or an explicit failure."""
+    raw = os.environ.get("MIZAN_TRUSTED_PROXY_CIDRS", "")
+    cidrs = [part.strip() for part in raw.split(",") if part.strip()]
+    return TrustedProxies.from_cidrs(cidrs)
+
+
+def _peer(flow):
+    """The immediate peer address, or None when it is unavailable."""
+    try:
+        peer = flow.client_conn.peername
+    except AttributeError:
         return None
-    return headers.get("X-User-Id")
+    if isinstance(peer, (tuple, list)) and peer:
+        return str(peer[0])
+    return None
+
+
+def _principal(headers, identity_map, trusted_proxies, peer):
+    """The same rules as the WSGI recorder and the proxy - one implementation."""
+    return resolve_identity(
+        authorization=headers.get("Authorization"),
+        user_id=headers.get("X-User-Id"),
+        peer=peer,
+        identity_map=identity_map,
+        trusted_proxies=trusted_proxies,
+    )
+
+
+#: Read once, at start-up: a broken configuration must not wait for the
+#: first request to announce itself.
+IDENTITY_MAP = _identity_map()
+TRUSTED_PROXIES = _trusted_proxies()
 
 
 def response(flow):
     request = flow.request
     if request.method == "CONNECT":
         return
-    principal = _principal(request.headers, _identity_map())
+    principal = _principal(request.headers, IDENTITY_MAP, TRUSTED_PROXIES, _peer(flow))
     template = flow.request.path.split("?")[0]
     record = {
         "method": request.method,

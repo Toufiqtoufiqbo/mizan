@@ -400,6 +400,59 @@ proxy = RecordingProxy("http://127.0.0.1:8000", "traffic.jsonl")
 proxy.start()
 ```
 
+### Who is the caller?
+
+Mīzān attributes a request to an identity only when it can point at the source
+of that identity. There are exactly three sources:
+
+1. **A configured token mapping.** Opaque tokens carry no readable identity, so
+   the operator says who owns what - in a JSON file that holds only
+   *environment-variable names*, never token values:
+
+   ```json
+   {"version": 1, "principals": {"alice": {"token_env": "MIZAN_TOKEN_ALICE"}}}
+   ```
+
+   ```bash
+   export MIZAN_TOKEN_ALICE=...        # the token itself never touches a file
+   mizan twin --identity-map identity-map.json --command "python app.py --port {port}"
+   ```
+
+2. **A readable JWT subject.** The `sub` claim is *extracted*, not verified -
+   Mīzān never claims that a JWT signature was checked.
+
+3. **A trusted reverse proxy.** Some deployments authenticate the caller in a
+   proxy and assert the identity in a header. That assertion is believed only
+   when the request came from an explicitly trusted proxy range:
+
+   ```python
+   from mizan.recorder import Recorder
+
+   application = Recorder(app, "traffic.jsonl", trusted_proxy_cidrs=["10.10.0.0/24"])
+   ```
+
+   ```bash
+   export MIZAN_TRUSTED_PROXY_CIDRS=10.10.0.0/24   # for the proxy and the MITM addon
+   ```
+
+   The list is empty by default: **no proxy is trusted**, so an `X-User-Id`
+   header on its own is not an identity - any client can send one.
+
+The rules the recorders follow, identically:
+
+- An `Authorization` header that is present decides on its own. `Basic`, an
+  empty value, a malformed value or an unknown opaque token all yield **no**
+  identity - and never fall back to another header.
+- `X-User-Id` is believed only when the **immediate peer** (the socket the
+  request arrived on: `REMOTE_ADDR` for the middleware, the accepted socket
+  address for the proxy) is inside a trusted range. `X-Forwarded-For` is
+  written by the client and is never used as proof of trust.
+- If the peer address is unknown, Mīzān trusts nobody.
+
+> The trusted proxy **must** strip any client-supplied `X-User-Id` and
+> overwrite it with the authenticated identity. A proxy that forwards the
+> client's header unchanged lets every caller become whoever they please.
+
 ## Using the law checks inside Schemathesis
 
 ```bash
