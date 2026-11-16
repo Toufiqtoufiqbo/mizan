@@ -67,6 +67,7 @@ def expected_variants(application: str | Path) -> dict[str, tuple[str, ...]]:
         return dict(DEFAULT_EXPECTED)
     return {str(name): tuple(str(law) for law in laws) for name, laws in data.items()}
 
+
 #: The principals that L2 and L3 validation require. Cross-user testing is
 #: meaningless with fewer than two unprivileged identities, so a scan that
 #: cannot authenticate both of them is a setup error - never a clean result.

@@ -778,7 +778,11 @@ class Mizan:
                             }
                         )
                         continue
-                    self.observed.grant(attacker.id, row_key, "write")
+                    # The reported resource key stays compatible with the
+                    # ledger/proof conventions so the data-level view of the
+                    # same row deduplicates with this finding. The real PK
+                    # (``row_key``) is used above for graph resolution.
+                    self.observed.grant(attacker.id, event.resource_key, "write")
                     ownership_evidence = (
                         sorted(
                             {
@@ -802,7 +806,7 @@ class Mizan:
                             ),
                             severity="high",
                             principal=attacker.id,
-                            resource=row_key,
+                            resource=event.resource_key,
                             action="write",
                             evidence={
                                 "attacker_status": response.status_code,
