@@ -126,6 +126,13 @@ def attack(
 @click.option(
     "--token", "tokens", multiple=True, help="Bearer token of an identity, in the form name=token (repeatable)."
 )
+@click.option(
+    "--identity-map",
+    "identity_map_path",
+    default=None,
+    type=click.Path(exists=True),
+    help="JSON identity-map file for opaque tokens: environment-variable names, never tokens.",
+)
 @click.option("--workdir", default=".", type=click.Path(), help="Where the application runs.")
 @click.option("--out", "out_path", default="mizan-proofs", type=click.Path(), help="Directory for proof bundles.")
 @click.option(
@@ -146,6 +153,7 @@ def twin(
     data_paths: tuple[str, ...],
     spec_path: str,
     tokens: tuple[str, ...],
+    identity_map_path: str | None,
     workdir: str,
     out_path: str,
     traffic_path: str | None,
@@ -159,8 +167,13 @@ def twin(
     No Docker, no changes to the application: Mizan starts it, records the
     traffic through a proxy, learns the laws from the database itself, and
     attacks them - restoring the state between probes.
+
+    Identities come either from ``--token`` or from ``--identity-map``, never
+    from both: mixing two sources of truth about who a token belongs to is
+    an ambiguity Mizan refuses instead of resolving silently.
     """
     from mizan.attribution import SqliteAttributor
+    from mizan.identity import IdentityMapError, load_identity_map, resolve_identity_map
     from mizan.learning import learn_from_spec
     from mizan.proxy import RecordingProxy
     from mizan.twin import Twin, TwinSpec
@@ -171,6 +184,22 @@ def twin(
         name, _, token = entry.partition("=")
         identities.append(Principal(id=name, roles=("user",), token=token))
         token_values.append(token)
+
+    # The identity map resolves opaque tokens: the file names environment
+    # variables, the environment holds the tokens, and the proxy records who
+    # each token belongs to. A missing or empty variable is a setup error.
+    identity_map: dict[str, str] = {}
+    if identity_map_path:
+        if tokens:
+            raise click.UsageError("use --token or --identity-map, not both")
+        try:
+            config = load_identity_map(identity_map_path)
+            mapped_principals, identity_map = resolve_identity_map(config)
+        except IdentityMapError as exc:
+            click.echo(f"identity map error: {exc}", err=True)
+            raise SystemExit(2) from None
+        identities.extend(mapped_principals)
+        token_values.extend(identity_map)
 
     workspace = Path(workdir) / ".mizan-twin"
     resolved_data = [Path(workdir) / path if not Path(path).is_absolute() else Path(path) for path in data_paths]
@@ -194,11 +223,14 @@ def twin(
         # starts from the same place - including the ones that need an object
         # in a state that only exists before the first request.
         engine_instance.snapshot()
-        proxy = RecordingProxy(engine_instance.base_url, log_path)
+        proxy = RecordingProxy(engine_instance.base_url, log_path, identity_map=identity_map or None)
         proxy.start()
         try:
             if spec_path:
-                learn_from_spec(spec_path, proxy.base_url, tokens=token_values or None)
+                # /login is not exercised here even when the document lists
+                # it: the learning phase already holds the identities, and
+                # minting fresh tokens would write them into the traffic log.
+                learn_from_spec(spec_path, proxy.base_url, tokens=token_values or None, exclude_paths=("/login",))
             recorded = len(list(log_path.read_text(encoding="utf-8").splitlines())) if log_path.exists() else 0
             click.echo(f"recorded {recorded} requests")
             if not recorded:

@@ -23,12 +23,18 @@ The weaknesses are independent, so an experiment changes exactly one thing:
 
 The listing of orders is **always** scoped to the caller in every variant. A
 listing weakness would be a separate experiment, not a side effect.
+
+Bearer tokens can also be deployed out-of-band: when ``MIZAN_TOKEN_ALICE``
+or ``MIZAN_TOKEN_BOB`` are set at start-up, the application accepts exactly
+those opaque tokens for the matching user, the same way an operator would
+hand long-lived service tokens to a service.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import secrets
 import sqlite3
 import time
@@ -100,6 +106,17 @@ def create_app(database: str | Path, *, vulnerability: str = "clean") -> Flask:
                     "INSERT OR IGNORE INTO users (id, password_hash, role) VALUES (?, ?, ?)",
                     (user, hash_password(password, salt), role),
                 )
+            # Tokens deployed out-of-band: an operator may hand the
+            # application its bearer tokens through the environment instead
+            # of having every client log in. The values live only in the
+            # application's own database, exactly like login-issued tokens.
+            for env_name, user in (("MIZAN_TOKEN_ALICE", "alice"), ("MIZAN_TOKEN_BOB", "bob")):
+                token = os.environ.get(env_name)
+                if token:
+                    connection.execute(
+                        "INSERT OR REPLACE INTO tokens (token, user_id, created_at) VALUES (?, ?, ?)",
+                        (token, user, time.time()),
+                    )
         connection.close()
 
     initialise()

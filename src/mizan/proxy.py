@@ -20,11 +20,12 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from mizan.identity import decode_token
+from mizan.identity import IdentityMapError, TrustedProxies, resolve_identity
 from mizan.traffic import TrafficRecord, infer_resource, to_template
 
 HOP_BY_HOP = {
@@ -83,6 +84,7 @@ class _Handler(BaseHTTPRequestHandler):
             headers=self.headers,
             body=body,
             payload=payload,
+            peer=self.client_address[0],
         )
 
         self.send_response(status)
@@ -124,6 +126,11 @@ class _Handler(BaseHTTPRequestHandler):
 #: to say who it is - Mizan will not guess.
 IDENTITY_MAP_ENV = "MIZAN_IDENTITY_MAP"
 
+#: The environment variable that names the reverse proxies whose asserted
+#: identity Mizan may believe. A comma separated list of CIDR ranges; empty
+#: by default, which means no proxy is trusted.
+TRUSTED_PROXY_CIDRS_ENV = "MIZAN_TRUSTED_PROXY_CIDRS"
+
 
 class RecordingProxy:
     """A proxy that writes the traffic log.
@@ -131,6 +138,10 @@ class RecordingProxy:
     The identity of a request comes from the token's claims when the token is
     a JWT, and from `identity_map` otherwise. Without an identity the traffic is
     still recorded, but the engine cannot say who owns what.
+
+    ``X-User-Id`` is believed only when the immediate peer is an explicitly
+    trusted proxy (see ``trusted_proxy_cidrs``). The default is to trust
+    nobody: a header is not a proof of identity.
     """
 
     def __init__(
@@ -141,6 +152,7 @@ class RecordingProxy:
         host: str = "127.0.0.1",
         port: int = 0,
         identity_map: dict[str, str] | None = None,
+        trusted_proxy_cidrs: Sequence[str] | None = None,
     ) -> None:
         self.upstream = upstream
         self.path = Path(traffic_path)
@@ -149,6 +161,10 @@ class RecordingProxy:
         self.identity_map = dict(identity_map or {})
         if not self.identity_map:
             self.identity_map = _identity_map_from_env()
+        if trusted_proxy_cidrs is None:
+            self.trusted_proxies = _trusted_proxies_from_env()
+        else:
+            self.trusted_proxies = TrustedProxies.from_cidrs(trusted_proxy_cidrs)
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -194,6 +210,7 @@ class RecordingProxy:
         headers: Any,
         body: bytes,
         payload: bytes,
+        peer: str | None = None,
     ) -> None:
         template = to_template(path.split("?")[0])
         response_json = _json(payload)
@@ -203,7 +220,7 @@ class RecordingProxy:
             path=path.split("?")[0],
             template=template,
             status=status,
-            principal=_principal(headers, self.identity_map),
+            principal=_principal(headers, self.identity_map, peer=peer, trusted_proxies=self.trusted_proxies),
             body=_json(body),
             response=response_json,
             resource_type=resource_type,
@@ -216,7 +233,16 @@ class RecordingProxy:
 
 
 def _identity_map_from_env() -> dict[str, str]:
-    """The identity map from the environment, if there is one."""
+    """The identity map from the environment, if there is one.
+
+    ``MIZAN_IDENTITY_MAP`` is a JSON object mapping **token values** to
+    principal names - the same shape :meth:`validation` passes to the proxy.
+    Configuration travels as names, never as secrets in a file.
+
+    Fail closed: a set-but-unparseable variable is an error, not an empty
+    map - a silently dropped identity map would attribute nothing and could
+    turn a misconfiguration into a quietly useless scan.
+    """
     import json
     import os
 
@@ -225,25 +251,58 @@ def _identity_map_from_env() -> dict[str, str]:
         return {}
     try:
         loaded = json.loads(raw)
-    except ValueError:
-        return {}
+    except ValueError as exc:
+        raise IdentityMapError(f"{IDENTITY_MAP_ENV} is not valid JSON: {exc.__class__.__name__}") from exc
     if not isinstance(loaded, dict):
-        return {}
+        raise IdentityMapError(f"{IDENTITY_MAP_ENV} must be a JSON object mapping tokens to principal names")
     return {str(token): str(principal) for token, principal in loaded.items()}
 
 
-def _principal(headers: Any, identity_map: dict[str, str] | None = None) -> str | None:
-    """The identity behind a request, as far as it can be told."""
-    value = headers.get("Authorization") or headers.get("authorization")
-    if value and value.startswith("Bearer "):
-        token = value[len("Bearer ") :].strip()
-        if identity_map and token in identity_map:
-            return identity_map[token]
-        claims = decode_token(token)
-        if claims:
-            return claims.subject
-    fallback = headers.get("X-User-Id") or headers.get("x-user-id")
-    return fallback if fallback else None
+def _trusted_proxies_from_env() -> TrustedProxies:
+    """The trusted proxy ranges from the environment.
+
+    ``MIZAN_TRUSTED_PROXY_CIDRS`` is a comma separated list of CIDR ranges.
+    Unset means an empty allowlist - no proxy is trusted.
+
+    Fail closed: a set-but-invalid value is an error, not an empty
+    allowlist. Silently ignoring a broken range would either trust a proxy
+    the operator did not intend, or - worse - look like a working
+    configuration while trusting nobody.
+    """
+    import os
+
+    raw = os.environ.get(TRUSTED_PROXY_CIDRS_ENV, "")
+    cidrs = [part.strip() for part in raw.split(",") if part.strip()]
+    return TrustedProxies.from_cidrs(cidrs)
+
+
+def _principal(
+    headers: Any,
+    identity_map: dict[str, str] | None = None,
+    *,
+    peer: str | None = None,
+    trusted_proxies: TrustedProxies | None = None,
+) -> str | None:
+    """The identity behind a request, as far as it can be told.
+
+    One rule, shared with the WSGI recorder and the MITM addon:
+
+    1. an Authorization header was presented - it alone decides. A ``Bearer``
+       token resolves through the identity map, then through a readable JWT
+       subject (extracted, never verified). Any other scheme - ``Basic``,
+       empty, malformed - yields no identity and no fallback;
+    2. no Authorization header - the ``X-User-Id`` header is believed only
+       when the **immediate peer** (``peer``, the socket the request arrived
+       on) is inside an explicitly trusted proxy range. A forwarding header
+       is never used as proof of trust.
+    """
+    return resolve_identity(
+        authorization=headers.get("Authorization"),
+        user_id=headers.get("X-User-Id") or headers.get("x-user-id"),
+        peer=peer,
+        identity_map=identity_map,
+        trusted_proxies=trusted_proxies,
+    )
 
 
 def _json(payload: bytes) -> Any:

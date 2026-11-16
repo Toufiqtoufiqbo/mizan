@@ -52,7 +52,12 @@ def test_recorder_writes_a_traffic_log(tmp_path: Path) -> None:
     assert record.resource_owner == "alice"
 
 
-def test_recorder_falls_back_to_a_user_header(tmp_path: Path) -> None:
+def test_a_user_header_is_not_an_identity_by_default(tmp_path: Path) -> None:
+    """An ``X-User-Id`` header alone is not a proof of identity.
+
+    Any client can send it. It is believed only when the request came from
+    an explicitly trusted proxy - and by default no proxy is trusted.
+    """
     path = tmp_path / "traffic.jsonl"
     recorder = Recorder(_app, path)
     environ = {
@@ -60,11 +65,47 @@ def test_recorder_falls_back_to_a_user_header(tmp_path: Path) -> None:
         "PATH_INFO": "/orders/o1",
         "CONTENT_LENGTH": "0",
         "HTTP_X_USER_ID": "bob",
+        "REMOTE_ADDR": "203.0.113.7",
+        "wsgi.input": _Empty(),
+    }
+    recorder(environ, lambda *args, **kwargs: None)
+    log = TrafficLog.load(path)
+    assert log.records[0].principal is None
+
+
+def test_a_trusted_proxy_may_assert_an_identity(tmp_path: Path) -> None:
+    """With an explicit trusted range, the proxy's assertion is believed."""
+    path = tmp_path / "traffic.jsonl"
+    recorder = Recorder(_app, path, trusted_proxy_cidrs=["127.0.0.1/32", "10.10.0.0/24"])
+    environ = {
+        "REQUEST_METHOD": "GET",
+        "PATH_INFO": "/orders/o1",
+        "CONTENT_LENGTH": "0",
+        "HTTP_X_USER_ID": "bob",
+        "REMOTE_ADDR": "10.10.0.5",
         "wsgi.input": _Empty(),
     }
     recorder(environ, lambda *args, **kwargs: None)
     log = TrafficLog.load(path)
     assert log.records[0].principal == "bob"
+
+
+def test_a_forwarding_header_never_proves_trust(tmp_path: Path) -> None:
+    """``X-Forwarded-For`` is written by the client - it proves nothing."""
+    path = tmp_path / "traffic.jsonl"
+    recorder = Recorder(_app, path, trusted_proxy_cidrs=["127.0.0.1/32"])
+    environ = {
+        "REQUEST_METHOD": "GET",
+        "PATH_INFO": "/orders/o1",
+        "CONTENT_LENGTH": "0",
+        "HTTP_X_USER_ID": "bob",
+        "HTTP_X_FORWARDED_FOR": "127.0.0.1",
+        "REMOTE_ADDR": "203.0.113.7",
+        "wsgi.input": _Empty(),
+    }
+    recorder(environ, lambda *args, **kwargs: None)
+    log = TrafficLog.load(path)
+    assert log.records[0].principal is None
 
 
 class _Empty:
