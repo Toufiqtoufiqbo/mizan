@@ -160,30 +160,65 @@ class TrafficLog:
         return len(self.records)
 
 
-def infer_resource(response: Any, template: str) -> tuple[str | None, str | None, str | None]:
+def _candidate_objects(payload: Any, depth: int = 0) -> list[dict[str, Any]]:
+    """Bounded candidate resource objects from a JSON response."""
+    if depth > 2:
+        return []
+    if isinstance(payload, dict):
+        result = [payload]
+        for value in payload.values():
+            result.extend(_candidate_objects(value, depth + 1))
+        return result
+    if isinstance(payload, list):
+        result = []
+        for item in payload[:20]:
+            result.extend(_candidate_objects(item, depth + 1))
+        return result
+    return []
+
+
+def infer_resource(
+    response: Any, template: str, *, path: str | None = None
+) -> tuple[str | None, str | None, str | None]:
     """Guess `(type, id, owner)` from a JSON response body.
 
-    The heuristic is intentionally simple: the last non-placeholder path segment
-    gives the type, an ``id`` field gives the id and an ``owner_id``/``user_id``
-    field gives the owner.
+    The conventional fields remain supported, because existing applications
+    and serialized traffic must keep working. When there is no conventional
+    ``id`` field, the concrete request path is used as independent evidence:
+    a response field whose value equals the path's identifier segment names
+    the resource. That rule does not guess a field name - it follows the
+    request/response pair.
+
+    ``path`` is the concrete path; ``template`` is the same path with ``{id}``
+    placeholders. Both are needed when the identifier is not called ``id``.
     """
-    if isinstance(response, list):
-        # A listing carries objects as well.
-        for item in response:
-            if isinstance(item, dict) and "id" in item:
-                return infer_resource(item, template)
+    concrete = (path or template).split("?")[0]
+    segments = [segment for segment in concrete.split("/") if segment]
+    identifier = segments[-1] if segments else None
+    if identifier and identifier.startswith("{"):
+        identifier = None
+
+    # A resource may be wrapped (`{"data": {...}}`) or be one item of a
+    # collection. Look at every bounded candidate object instead of assuming
+    # the response itself is the object.
+    for candidate in _candidate_objects(response):
+        resource_id = candidate.get("id")
+        if resource_id is None and identifier is not None:
+            for value in candidate.values():
+                if isinstance(value, (str, int)) and not isinstance(value, bool) and str(value) == identifier:
+                    resource_id = value
+                    break
+        if not isinstance(resource_id, (str, int)) or isinstance(resource_id, bool):
+            continue
+        owner = None
+        for key in ("owner_id", "user_id", "owner", "principal_id", "account_id"):
+            value = candidate.get(key)
+            if isinstance(value, (str, int)) and not isinstance(value, bool):
+                owner = str(value)
+                break
+        break
+    else:
         return None, None, None
-    if not isinstance(response, dict):
-        return None, None, None
-    resource_id = response.get("id")
-    if not isinstance(resource_id, (str, int)):
-        return None, None, None
-    owner = None
-    for key in ("owner_id", "user_id", "owner", "principal_id", "account_id"):
-        value = response.get(key)
-        if isinstance(value, (str, int)):
-            owner = str(value)
-            break
     segments = [segment for segment in template.split("/") if segment]
     placeholders = [index for index, segment in enumerate(segments) if segment.startswith("{")]
     resource_type = None

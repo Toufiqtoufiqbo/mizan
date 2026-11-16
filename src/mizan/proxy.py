@@ -214,7 +214,7 @@ class RecordingProxy:
     ) -> None:
         template = to_template(path.split("?")[0])
         response_json = _json(payload)
-        resource_type, resource_id, resource_owner = infer_resource(response_json, template)
+        resource_type, resource_id, resource_owner = infer_resource(response_json, template, path=path.split("?")[0])
         record = TrafficRecord(
             method=method,
             path=path.split("?")[0],

@@ -190,6 +190,25 @@ class ScanCoverage:
     budget_exhausted: bool = False
     """Whether the request budget cut the scan short."""
 
+    # Phase V: ownership evidence is a separate dimension from raw discovery.
+    resources_with_ownership_evidence: int = 0
+    """Discovered resources with any confirmed ownership evidence."""
+
+    resources_corroborated: int = 0
+    """Ownership edges supported by more than one independent source."""
+
+    ownership_candidates: int = 0
+    """Resources whose owner is only a candidate - never a finding basis."""
+
+    ownership_ambiguous: int = 0
+    """Relationships whose evidence is ambiguous or contradictory."""
+
+    sharing_explained: int = 0
+    """Cross-principal accesses explained by an explicit sharing relationship."""
+
+    inconclusive_checks: int = 0
+    """Checks that could not be completed, with a recorded reason."""
+
     @property
     def meaningful(self) -> bool:
         """Whether the scan established enough coverage to make a clean claim."""
@@ -210,6 +229,12 @@ class ScanCoverage:
             "probes_executed": self.probes_executed,
             "budget_exhausted": self.budget_exhausted,
             "meaningful": self.meaningful,
+            "resources_with_ownership_evidence": self.resources_with_ownership_evidence,
+            "resources_corroborated": self.resources_corroborated,
+            "ownership_candidates": self.ownership_candidates,
+            "ownership_ambiguous": self.ownership_ambiguous,
+            "sharing_explained": self.sharing_explained,
+            "inconclusive_checks": self.inconclusive_checks,
         }
 
 

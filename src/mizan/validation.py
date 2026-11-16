@@ -48,6 +48,10 @@ VARIANTS: dict[str, tuple[str, ...]] = {
     "read": ("L2",),
     "write": ("L3",),
     "both": ("L2", "L3"),
+    # Phase V: an explicit sharing grant, and an ownership anchor that cannot
+    # be resolved. Neither is a finding - the second is inconclusive.
+    "collaborator": (),
+    "ambiguous": (),
 }
 
 #: The principals that L2 and L3 validation require. Cross-user testing is
@@ -258,6 +262,12 @@ LAUNCH_FLASK = LaunchSpec(
     spec_source=SpecSource.from_file("{fixture}/openapi.json"),
 )
 
+#: The launch specification for the nonstandard-ownership fixture (Phase V).
+LAUNCH_LINKED = LaunchSpec(
+    command=[sys.executable, "{fixture}/app.py"],
+    spec_source=SpecSource.from_file("{fixture}/openapi.json"),
+)
+
 
 def launch_for(fixture_dir: Path) -> LaunchSpec | None:
     """Return the ``LaunchSpec`` for a fixture directory, or ``None`` if unknown."""
@@ -265,6 +275,7 @@ def launch_for(fixture_dir: Path) -> LaunchSpec | None:
         "fastapi_store": LAUNCH_FASTAPI,
         "express_store": LAUNCH_EXPRESS,
         "flask_store": LAUNCH_FLASK,
+        "linked_store": LAUNCH_LINKED,
     }
     return _FIXTURE_LAUNCH.get(fixture_dir.name)
 
@@ -360,6 +371,8 @@ class ValidationResult:
     workspace: str | None = None
     requests: RequestAccounting = field(default_factory=RequestAccounting)
     coverage: ScanCoverage = field(default_factory=ScanCoverage)
+    #: Phase V: the ownership graph report for this scan (explainability).
+    ownership: dict[str, Any] = field(default_factory=dict)
 
     @property
     def verdict(self) -> Verdict:
@@ -421,6 +434,7 @@ class ValidationResult:
             "clean": self.clean,
             "inconclusive": self.inconclusive,
             "coverage": self.coverage.to_dict(),
+            "ownership": self.ownership,
             "evidence_complete": self.evidence_complete,
             "traffic_lines": self.traffic_lines,
             "missing_identities": list(self.missing_identities),
@@ -656,6 +670,8 @@ def scan_application(
         coverage.learning_operations = len(learned)
         coverage.budget_exhausted = accounting.budget_exhausted
         result.coverage = coverage
+        result.ownership = engine.graph.report() if engine.graph is not None else {}
+        result.ownership["inconclusive_checks"] = list(engine.inconclusive_checks)
 
         result.finding_count = len(violations)
         result.law_types = sorted({violation.law for violation in violations})
@@ -690,7 +706,7 @@ def validate_application(
     "vulnerable" application that is vulnerable in more ways than intended is
     caught.
     """
-    expected = expected or {"clean": (), "read": ("L2",), "write": ("L3",), "both": ("L2", "L3")}
+    expected = expected or dict(VARIANTS)
     root = Path(tempfile.mkdtemp(prefix="mizan-validate-"))
     checks: list[dict[str, Any]] = []
     variants: dict[str, Any] = {}

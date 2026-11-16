@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -36,6 +36,14 @@ from mizan.core import (
     is_authority_field,
 )
 from mizan.identity import decode_token
+from mizan.ownership import (
+    EvidenceState,
+    Observation,
+    OwnershipGraph,
+    RelationshipType,
+    _scalars,
+    build_ownership_graph,
+)
 from mizan.patching import render as patch_render
 from mizan.proof import ProofBundle
 from mizan.races import RaceOutcome, detect_race, looks_single_use, run_concurrently
@@ -110,6 +118,10 @@ class Mizan:
         self.permitted = AccessMatrix()
         self.observed_principals: set[str] = set()
         self._attributed_events: list[WriteEvent] = []
+        #: Phase V: the evidence-based ownership graph built by ``learn()``.
+        self.graph: OwnershipGraph | None = None
+        #: Checks that could not be completed, with the reason (never a clean result).
+        self.inconclusive_checks: list[dict[str, str]] = []
         #: How many requests the engine sent - the cost of a finding.
         self.requests = 0
         #: The number of requests the engine may send. ``None`` means no limit.
@@ -157,6 +169,46 @@ class Mizan:
             if record.principal and resource is not None:
                 accessed.setdefault((record.principal, resource.type, record.action), set()).add(resource.key)
                 self.observed.grant(record.principal, resource.key, record.action)
+
+        # Phase V: evidence-based ownership. Only a confirmed, unambiguous
+        # relationship may add an owner; a contradiction removes the claim
+        # instead of silently preferring whichever source arrived last.
+        schema = (
+            self.attributor.schema() if self.attributor is not None and hasattr(self.attributor, "schema") else None
+        )
+        db_rows: dict[str, list[dict[str, Any]]] = {}
+        if schema is not None and hasattr(self.attributor, "rows"):
+            db_rows = {name: self.attributor.rows(name) for name in schema.tables}
+        observations = self._identity_observations(schema, db_rows) if schema is not None else []
+        self.graph = build_ownership_graph(
+            resources=policy.resources,
+            traffic=[*self.traffic.records, *observations],
+            ledger=self.ledger.events,
+            schema=schema,
+            rows=db_rows,
+        )
+        for key, resource in list(policy.resources.items()):
+            owner = self.graph.owner_of(key)
+            if owner is None:
+                if resource.owner and self.graph.owner_state(key) is EvidenceState.CONTRADICTED:
+                    policy.resources[key] = replace(resource, owner=None)
+                continue
+            if resource.owner is None:
+                policy.resources[key] = replace(resource, owner=owner)
+            elif resource.owner != owner:
+                policy.resources[key] = replace(resource, owner=None)
+
+        # The probes iterate the traffic records, so their resource view must
+        # carry the same confirmed owner as the policy.
+        for record in self.traffic.records:
+            if not record.resource_type or not record.resource_id:
+                continue
+            key = f"{record.resource_type}:{record.resource_id}"
+            owner = self.graph.owner_of(key)
+            if owner is not None:
+                record.resource_owner = owner
+            elif record.resource_owner and self.graph.owner_state(key) is EvidenceState.CONTRADICTED:
+                record.resource_owner = None
 
         # Ownership rules: a principal that only ever touched resources it owns.
         for (principal_id, resource_type, action), keys in accessed.items():
@@ -335,12 +387,23 @@ class Mizan:
         # on it - otherwise there is no cross-identity check to perform.
         testable = {principal.id for principal in self.target.principals if self._is_testable(principal)}
         usable = [resource for resource in owned if testable - {resource.owner}]
+        corroborated = sum(
+            1
+            for relation in (self.graph.relationships if self.graph else [])
+            if relation.type is RelationshipType.OWNS and len(relation.evidence) > 1
+        )
+        report = self.graph.report() if self.graph is not None else {}
         return ScanCoverage(
             resources_discovered=len(resources),
             resources_owned=len(usable),
             probe_candidates=self.probe_candidates,
             probes_executed=self.probes_executed,
             budget_exhausted=self.budget_exhausted,
+            resources_with_ownership_evidence=report.get("confirmed_ownership_edges", 0),
+            resources_corroborated=corroborated,
+            ownership_candidates=report.get("candidate_ownership_edges", 0),
+            ownership_ambiguous=report.get("ambiguous_relationships", 0) + report.get("contradicted_relationships", 0),
+            inconclusive_checks=len(self.inconclusive_checks),
         )
 
     def attack_groups(self, groups: list[str]) -> list[Violation]:
@@ -403,6 +466,38 @@ class Mizan:
                 if resource is None or not resource.owner:
                     continue
                 owner = resource.owner
+                owner_principal = self.target.principal(owner)
+                if owner_principal is None or not owner_principal.token:
+                    self.inconclusive_checks.append(
+                        {"law": "L2", "resource": resource.key, "reason": "owner has no testable identity"}
+                    )
+                    continue
+                # Control: the alleged owner must actually be able to read the
+                # exact object. Without it the accusation is unverified.
+                control = self._request(
+                    self.target.session_for(owner_principal),
+                    READ_METHOD,
+                    self._url(record.path),
+                    timeout=self.target.timeout,
+                )
+                control_body = _json(control)
+                if not (200 <= control.status_code < 300) or not contains_object(control_body, resource.id):
+                    self.inconclusive_checks.append(
+                        {"law": "L2", "resource": resource.key, "reason": "owner control could not read the object"}
+                    )
+                    continue
+                ownership_evidence = (
+                    sorted(
+                        {
+                            evidence
+                            for relation in self.graph.relationships
+                            if relation.type is RelationshipType.OWNS and relation.object == resource.key
+                            for evidence in relation.evidence
+                        }
+                    )
+                    if self.graph is not None
+                    else []
+                )
                 for attacker in self.target.principals:
                     if attacker.id == owner:
                         continue
@@ -429,6 +524,17 @@ class Mizan:
                                 break
                     if returned_owner is not None and returned_owner == attacker.id:
                         continue
+                    if self.graph is not None and self.graph.explained_by_sharing(owner, attacker.id, resource.key):
+                        # An explicit sharing/membership relationship explains
+                        # the access: it is not an authorization failure.
+                        self.inconclusive_checks.append(
+                            {
+                                "law": "L2",
+                                "resource": resource.key,
+                                "reason": "explicit sharing relationship explains the access",
+                            }
+                        )
+                        continue
                     self.observed.grant(attacker.id, resource.key, "read")
                     violations.append(
                         Violation(
@@ -448,6 +554,8 @@ class Mizan:
                                 "owner": owner,
                                 "returned_owner": returned_owner,
                                 "object": _truncate(body),
+                                "owner_control_status": control.status_code,
+                                "ownership_evidence": ownership_evidence,
                             },
                             steps=[
                                 Step(
@@ -547,6 +655,46 @@ class Mizan:
                 return True
         return False
 
+    def _identity_observations(self, schema: Any, db_rows: dict[str, list[dict[str, Any]]]) -> list[Observation]:
+        """Ask every configured principal for its own identity record.
+
+        A path qualifies only when its already-recorded response contains a
+        scalar value that matches a declared database column - the same
+        structural evidence the anchor requires. At most one such path is
+        replayed, so the request cost is bounded and no identity endpoint is
+        guessed from a name such as ``/me``.
+        """
+        candidates: set[str] = set()
+        for record in self.traffic:
+            if record.method not in {"GET", "HEAD"} or not record.template or "{" in record.template:
+                continue
+            # An identity assertion is one record, not a listing of many.
+            if not isinstance(record.response, dict):
+                continue
+            values = set(_scalars(record.response))
+            if not values:
+                continue
+            if any(
+                str(value) in values
+                for rows in db_rows.values()
+                for row in rows
+                for value in row.values()
+                if value is not None
+            ):
+                candidates.add(record.path)
+        observations: list[Observation] = []
+        for path in sorted(candidates)[:1]:
+            for principal in self.target.principals:
+                if not principal.token or not self._is_testable(principal):
+                    continue
+                response = self._request(
+                    self.target.session_for(principal), READ_METHOD, self._url(path), timeout=self.target.timeout
+                )
+                body = _json(response)
+                if isinstance(body, dict):
+                    observations.append(Observation(principal.id, body))
+        return observations
+
     def _identity_endpoints(self) -> list[tuple[str, str, str]]:
         """Endpoints that answer "who am I?", learned from the traffic."""
         endpoints: list[tuple[str, str, str]] = []
@@ -602,32 +750,66 @@ class Mizan:
                     if not tainted:
                         continue
                     event = tainted[0]
-                    # The row that was actually touched decides, not the row the
-                    # URL was built from: `/users/me` resolves to whoever calls it.
+                    row_key = f"{event.table}:{event.row_key}" if event.row_key else event.resource_key
+                    # The row that was actually touched decides. Its identity
+                    # comes from declared primary-key metadata when available;
+                    # rowid remains the fallback for older ledgers.
                     owner = event.row_owner
+                    if self.graph is not None:
+                        state = self.graph.owner_state(row_key)
+                        if state is EvidenceState.CONFIRMED:
+                            owner = self.graph.owner_of(row_key)
+                        elif state in {EvidenceState.AMBIGUOUS, EvidenceState.CONTRADICTED}:
+                            self.inconclusive_checks.append(
+                                {"law": "L3", "resource": row_key, "reason": f"ownership is {state.value}"}
+                            )
+                            continue
                     if owner is None:
-                        known = self.policy.resource(event.resource_key)
+                        known = self.policy.resource(row_key) or self.policy.resource(event.resource_key)
                         owner = known.owner if known else None
                     if owner is None or owner == attacker.id:
                         continue
-                    self.observed.grant(attacker.id, event.resource_key, "write")
+                    if self.graph is not None and self.graph.explained_by_sharing(owner, attacker.id, row_key):
+                        self.inconclusive_checks.append(
+                            {
+                                "law": "L3",
+                                "resource": row_key,
+                                "reason": "explicit sharing relationship explains the write",
+                            }
+                        )
+                        continue
+                    self.observed.grant(attacker.id, row_key, "write")
+                    ownership_evidence = (
+                        sorted(
+                            {
+                                evidence
+                                for relation in self.graph.relationships
+                                if relation.type is RelationshipType.OWNS
+                                and relation.object in {row_key, event.resource_key}
+                                for evidence in relation.evidence
+                            }
+                        )
+                        if self.graph is not None
+                        else []
+                    )
                     violations.append(
                         Violation(
                             law="L3",
                             title=f"{attacker.id} wrote into an object owned by {owner}",
                             detail=(
-                                f"`{method} {url}` performed by `{attacker.id}` changed `{event.resource_key}`, which "
+                                f"`{method} {url}` performed by `{attacker.id}` changed `{row_key}`, which "
                                 f"belongs to `{owner}`. The write landed in the database, it was not rejected."
                             ),
                             severity="high",
                             principal=attacker.id,
-                            resource=event.resource_key,
+                            resource=row_key,
                             action="write",
                             evidence={
                                 "attacker_status": response.status_code,
                                 "columns": sorted(event.columns),
                                 "owner": owner,
                                 "event": event.to_dict(),
+                                "ownership_evidence": ownership_evidence,
                             },
                             steps=[
                                 Step(
@@ -1026,6 +1208,8 @@ class Mizan:
             "residual_cells": len(residual),
             "residual_norm": residual.norm(),
             "server_managed_fields": {k: sorted(v) for k, v in self.policy.server_managed_fields.items()},
+            "ownership": self.graph.report() if self.graph is not None else {},
+            "inconclusive_checks": list(self.inconclusive_checks),
         }
 
     def write_bundles(self, violations: Iterable[Violation], root: str | Path) -> list[Path]:
@@ -1065,15 +1249,26 @@ def contains_object(payload: Any, resource_id: str | None) -> bool:
     A `200` with an empty list is not a disclosure: the object was not
     returned. Without this check every successful request would look like a
     cross-identity read.
+
+    The identifier is matched by *value*, not by a field called ``id``: an
+    application is free to call its public identifier ``document_key``.
     """
     if resource_id is None:
         return False
-    if isinstance(payload, dict):
-        identifier = payload.get("id")
-        return identifier is not None and str(identifier) == str(resource_id)
-    if isinstance(payload, list):
-        return any(isinstance(item, dict) and str(item.get("id")) == str(resource_id) for item in payload)
-    return False
+    target = str(resource_id)
+
+    def search(value: Any, depth: int) -> bool:
+        if depth > 4:
+            return False
+        if isinstance(value, dict):
+            return any(search(item, depth + 1) for item in value.values())
+        if isinstance(value, (list, tuple)):
+            return any(search(item, depth + 1) for item in value[:50])
+        if isinstance(value, (str, int)) and not isinstance(value, bool):
+            return str(value) == target
+        return False
+
+    return search(payload, 0)
 
 
 def _normalize_path(path: str, identifiers: set[str]) -> str:

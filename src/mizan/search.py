@@ -29,6 +29,7 @@ from typing import Any
 
 from mizan.core import Step, Violation
 from mizan.races import looks_single_use
+from mizan.tokens import mask_authorization
 
 #: How much a breach is worth, per law. A breach that grants authority is
 #: worth more than one that leaks a field.
@@ -544,7 +545,9 @@ class GuidedSearch:
             Step(
                 method=action.method,
                 url=url,
-                headers={"Authorization": f"Bearer {principal.token}"} if principal.token else {},
+                headers=mask_authorization(
+                    {"Authorization": f"Bearer {principal.token}"} if principal.token else {}, principal.id
+                ),
                 body=action.body,
                 status=statuses[0] if statuses else None,
                 note="first of two concurrent identical requests",
@@ -552,7 +555,9 @@ class GuidedSearch:
             Step(
                 method=action.method,
                 url=url,
-                headers={"Authorization": f"Bearer {principal.token}"} if principal.token else {},
+                headers=mask_authorization(
+                    {"Authorization": f"Bearer {principal.token}"} if principal.token else {}, principal.id
+                ),
                 body=action.body,
                 status=statuses[1] if len(statuses) > 1 else None,
                 note="second, concurrent - it should have been rejected",

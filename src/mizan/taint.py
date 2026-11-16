@@ -22,6 +22,7 @@ from mizan.core import (
     Violation,
     actions_for,
 )
+from mizan.tokens import mask_authorization
 
 # --------------------------------------------------------------------------- #
 # Events
@@ -45,6 +46,9 @@ class WriteEvent:
     row_owner: str | None = None
     status: int = 200
     method_args: dict[str, Any] = field(default_factory=dict)
+    #: The row's identity from declared primary-key metadata, when known.
+    #: Older ledgers do not have it; ``resource_key`` keeps the legacy rowid.
+    row_key: str | None = None
 
     @property
     def action(self) -> str:
@@ -68,6 +72,7 @@ class WriteEvent:
             "row_owner": self.row_owner,
             "status": self.status,
             "method_args": self.method_args,
+            "row_key": self.row_key,
         }
 
     @classmethod
@@ -85,6 +90,7 @@ class WriteEvent:
             row_owner=data.get("row_owner"),
             status=int(data.get("status", 200)),
             method_args=dict(data.get("method_args", {})),
+            row_key=data.get("row_key"),
         )
 
 
@@ -310,7 +316,10 @@ class TaintAnalyzer:
                             Step(
                                 method=event.method,
                                 url=event.path,
-                                headers={"Authorization": f"Bearer {principal.token}"} if principal.token else {},
+                                headers=mask_authorization(
+                                    {"Authorization": f"Bearer {principal.token}"} if principal.token else {},
+                                    principal.id,
+                                ),
                                 body=event.method_args.get("body"),
                                 note="the write that tainted the row",
                             )
@@ -359,7 +368,10 @@ class TaintAnalyzer:
                             Step(
                                 method=event.method,
                                 url=event.path,
-                                headers={"Authorization": f"Bearer {principal.token}"} if principal.token else {},
+                                headers=mask_authorization(
+                                    {"Authorization": f"Bearer {principal.token}"} if principal.token else {},
+                                    principal.id,
+                                ),
                                 body=event.method_args.get("body"),
                                 note="the request that created authority",
                             )

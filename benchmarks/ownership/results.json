@@ -1,0 +1,419 @@
+{
+  "summary": {
+    "seed": "fixed fixture identifiers; no random sampling in the inference",
+    "budget_per_scan": 90,
+    "law_detection": {
+      "detected": 5,
+      "eligible": 5
+    },
+    "clean_control_false_positives": {
+      "count": 0,
+      "controls": 4
+    },
+    "ownership_edges_confirmed": 15,
+    "ownership_edges_candidates": 0,
+    "resources_discovered": 18,
+    "unresolved_rate": 0.16666666666666666,
+    "probes_executed": 16,
+    "probe_candidates": 51,
+    "requests_consumed": 159,
+    "limitations": [
+      "Ownership precision/recall need per-resource labels from a held-out app; the seeded fixture rows are the ground truth here, so they are reported as edge counts rather than claimed as independent generalization.",
+      "One fixture family per ownership convention: no claim of generalization beyond conventional and nonstandard-field SQLite applications."
+    ]
+  },
+  "cases": [
+    {
+      "fixture": "flask_store",
+      "variant": "clean",
+      "verdict": "CLEAN",
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 1,
+      "resources_owned": 1,
+      "confirmed_ownership_edges": 1,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 2,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 7,
+        "attack": 6,
+        "total": 15,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 7,
+        "resources_discovered": 1,
+        "resources_owned": 1,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 1,
+        "resources_corroborated": 0,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0
+      },
+      "false_finding_on_clean_control": false
+    },
+    {
+      "fixture": "flask_store",
+      "variant": "read",
+      "verdict": "FINDINGS",
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 1,
+      "resources_owned": 1,
+      "confirmed_ownership_edges": 1,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 2,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 7,
+        "attack": 6,
+        "total": 15,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 7,
+        "resources_discovered": 1,
+        "resources_owned": 1,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 1,
+        "resources_corroborated": 0,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0
+      },
+      "false_finding_on_clean_control": false
+    },
+    {
+      "fixture": "flask_store",
+      "variant": "write",
+      "verdict": "FINDINGS",
+      "law_types": [
+        "L3"
+      ],
+      "expected_laws": [
+        "L3"
+      ],
+      "law_detection": {
+        "L3": true
+      },
+      "resources_discovered": 1,
+      "resources_owned": 1,
+      "confirmed_ownership_edges": 1,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 2,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 7,
+        "attack": 6,
+        "total": 15,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 7,
+        "resources_discovered": 1,
+        "resources_owned": 1,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 1,
+        "resources_corroborated": 0,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0
+      },
+      "false_finding_on_clean_control": false
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "clean",
+      "verdict": "CLEAN",
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 2,
+      "resources_owned": 2,
+      "confirmed_ownership_edges": 2,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 8,
+        "attack": 8,
+        "total": 18,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 8,
+        "resources_discovered": 2,
+        "resources_owned": 2,
+        "probe_candidates": 5,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 2,
+        "resources_corroborated": 2,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0
+      },
+      "false_finding_on_clean_control": false
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "read",
+      "verdict": "FINDINGS",
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 6,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0
+      },
+      "false_finding_on_clean_control": false
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "write",
+      "verdict": "FINDINGS",
+      "law_types": [
+        "L3"
+      ],
+      "expected_laws": [
+        "L3"
+      ],
+      "law_detection": {
+        "L3": true
+      },
+      "resources_discovered": 2,
+      "resources_owned": 2,
+      "confirmed_ownership_edges": 2,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 8,
+        "attack": 8,
+        "total": 18,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 8,
+        "resources_discovered": 2,
+        "resources_owned": 2,
+        "probe_candidates": 5,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 2,
+        "resources_corroborated": 2,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0
+      },
+      "false_finding_on_clean_control": false
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "both",
+      "verdict": "FINDINGS",
+      "law_types": [
+        "L2",
+        "L3"
+      ],
+      "expected_laws": [
+        "L2",
+        "L3"
+      ],
+      "law_detection": {
+        "L2": true,
+        "L3": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 6,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0
+      },
+      "false_finding_on_clean_control": false
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "collaborator",
+      "verdict": "CLEAN",
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 2,
+      "confirmed_ownership_edges": 2,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 1,
+      "unresolved_rate": 0.3333333333333333,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 8,
+        "total": 20,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 2,
+        "probe_candidates": 5,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 2,
+        "resources_corroborated": 2,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0
+      },
+      "false_finding_on_clean_control": false
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "ambiguous",
+      "verdict": "INCONCLUSIVE",
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 2,
+      "resources_owned": 0,
+      "confirmed_ownership_edges": 0,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 2,
+      "unresolved_rate": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 8,
+        "attack": 2,
+        "total": 12,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 8,
+        "resources_discovered": 2,
+        "resources_owned": 0,
+        "probe_candidates": 0,
+        "probes_executed": 0,
+        "budget_exhausted": false,
+        "meaningful": false,
+        "resources_with_ownership_evidence": 0,
+        "resources_corroborated": 0,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0
+      },
+      "false_finding_on_clean_control": false
+    }
+  ]
+}
