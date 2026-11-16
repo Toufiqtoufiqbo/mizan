@@ -282,3 +282,26 @@ removal or weakening of existing tests.
    were both referenced, a flat "is referenced" bonus tied them. The score now
    counts the number of declared foreign keys pointing at the column, so a
    central identity record wins over a single association-table reference.
+
+---
+
+## 9. Phase V.1 corrections (supersedes the earlier decisions above)
+
+An adversarial review found that the structural scoring above was still too
+confident. **Phase V.1 supersedes sections 3–6 of this design**:
+
+1. A foreign key to an anchored principal is now `REFERENCES` plus, at most,
+   `OWNS CANDIDATE`. It can never be `CONFIRMED OWNS` on structural grounds.
+2. Confirmed ownership and confirmed sharing require a **trusted semantic
+   contract** (`mizan-relationships.json`) or an explicit response-level claim
+   naming a configured principal. No column/endpoint name is hardcoded.
+3. Association tables produce `SHARED_WITH CANDIDATE` unless the contract
+   declares `semantics: authorization_grant`. Candidates never suppress L2/L3.
+4. An identity anchor requires a contract-declared endpoint and field; any
+   other value match stays candidate evidence with an explicit reason.
+5. API resources map to database rows by the **complete** declared primary
+   key, serialized as a canonical JSON array (no delimiter collisions), and
+   ambiguous mappings become inconclusive checks.
+6. `WITHOUT ROWID` tables are snapshotted from declared primary keys.
+
+See `PHASE_V1_CORRECTION_REPORT.md` for root causes, reproductions and evidence.

@@ -18,14 +18,125 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from mizan.attribution import DatabaseSchema
 from mizan.core import UNKNOWN_PRINCIPAL, Resource
 from mizan.taint import WriteEvent
+
+
+def canonical_key(values: Sequence[Any]) -> str:
+    """An unambiguous identity for a (possibly composite) primary key.
+
+    A JSON array is used instead of a delimiter join: ``["a:b", "c"]`` and
+    ``["a", "b:c"]`` cannot collide.
+    """
+    return json.dumps([str(value) for value in values], separators=(",", ":"))
+
+
+def parse_identity(value: str | None) -> tuple[str, ...]:
+    """Parse a resource identifier into its key components.
+
+    A canonical JSON array denotes a composite key; anything else is a single
+    component. Older ledgers and proof formats therefore keep working.
+    """
+    if value is None:
+        return ()
+    text = str(value)
+    if text.startswith("[") and text.endswith("]"):
+        try:
+            decoded = json.loads(text)
+        except ValueError:
+            return (text,)
+        if isinstance(decoded, list):
+            return tuple(str(item) for item in decoded)
+    return (text,)
+
+
+@dataclass(frozen=True)
+class RelationshipContract:
+    """Explicit, trusted semantic declarations about an application.
+
+    This is operator/application-provided metadata, not a hardcoded list of
+    column names inside the inference engine. Without it, structural evidence
+    stays structural: a foreign key is a reference, and an association row is
+    a candidate relationship, never confirmed semantics.
+    """
+
+    version: int = 1
+    identity: tuple[str, str] | None = None
+    ownership: dict[str, tuple[str, str]] = field(default_factory=dict)
+    sharing: dict[str, tuple[str, str, str, str]] = field(default_factory=dict)
+    variants: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def for_variant(self, name: str | None) -> RelationshipContract:
+        """Merge a variant's explicit declarations over the base contract."""
+        if not name or name not in self.variants:
+            return self
+        merged = {
+            "version": self.version,
+            "identity": {"endpoint": self.identity[0], "field": self.identity[1]} if self.identity else None,
+            "ownership": {key: {"source": value[0], "column": value[1]} for key, value in self.ownership.items()},
+            "sharing": {
+                key: {
+                    "resource_fk": value[0],
+                    "principal_fk": value[1],
+                    "semantics": value[2],
+                }
+                for key, value in self.sharing.items()
+            },
+        }
+        override = self.variants[name]
+        for section, value in override.items():
+            if value is None:
+                merged.pop(section, None)
+            elif isinstance(value, dict) and isinstance(merged.get(section), dict):
+                merged[section] = {**merged[section], **value}
+            else:
+                merged[section] = value
+        return RelationshipContract.from_dict(merged)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> RelationshipContract:
+        if not isinstance(data, dict):
+            return cls()
+        identity = data.get("identity")
+        identity_pair = None
+        if isinstance(identity, dict) and identity.get("endpoint") and identity.get("field"):
+            identity_pair = (str(identity["endpoint"]), str(identity["field"]))
+        ownership: dict[str, tuple[str, str]] = {}
+        for resource_type, declaration in (data.get("ownership") or {}).items():
+            if not isinstance(declaration, dict) or not declaration.get("source"):
+                continue
+            name = declaration.get("column") or declaration.get("field")
+            if name:
+                ownership[str(resource_type)] = (str(declaration["source"]), str(name))
+        sharing: dict[str, tuple[str, str, str, str]] = {}
+        for table, declaration in (data.get("sharing") or {}).items():
+            if not isinstance(declaration, dict) or declaration.get("semantics") != "authorization_grant":
+                continue
+            resource_fk, principal_fk = declaration.get("resource_fk"), declaration.get("principal_fk")
+            if resource_fk and principal_fk:
+                sharing[str(table)] = (str(resource_fk), str(principal_fk), "authorization_grant", str(table))
+        variants = {}
+        if isinstance(data.get("variants"), dict):
+            variants = {str(key): value for key, value in data["variants"].items() if isinstance(value, dict)}
+        return cls(version=1, identity=identity_pair, ownership=ownership, sharing=sharing, variants=variants)
+
+    @classmethod
+    def load(cls, path: str | Path | None, variant: str | None = None) -> RelationshipContract | None:
+        if path is None or not Path(path).exists():
+            return None
+        try:
+            contract = cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            return None
+        return contract.for_variant(variant)
+
 
 #: The conventional response fields that remain one *source* of ownership
 #: evidence. They are not the only source and not an authoritative one: a
@@ -35,10 +146,11 @@ RESPONSE_OWNER_FIELDS = ("owner_id", "user_id", "owner", "principal_id", "accoun
 
 @dataclass(frozen=True)
 class Observation:
-    """A principal's own identity response - no token, no raw payload copy."""
+    """A response observed for one principal - no token, no raw payload copy."""
 
     principal: str
     response: Any
+    path: str | None = None
 
 
 class RelationshipType(StrEnum):
@@ -164,7 +276,12 @@ class OwnershipGraph:
 
     relationships: list[Relationship] = field(default_factory=list)
     inconclusive: dict[str, str] = field(default_factory=dict)
-    """resource key -> why ownership could not be established."""
+    """subject key -> why the conclusion could not be established."""
+
+    #: API resource key -> (database table, complete primary-key components).
+    resource_rows: dict[str, tuple[str, tuple[str, ...]]] = field(default_factory=dict)
+    #: A database row identity -> resource key, for L3 write-event resolution.
+    row_resources: dict[str, str] = field(default_factory=dict)
 
     # -- building ----------------------------------------------------------- #
 
@@ -246,6 +363,14 @@ class OwnershipGraph:
             counts[relation.state.value] += 1
         return counts
 
+    def row_to_resource(self, table: str, key_components: Sequence[Any]) -> str | None:
+        """Resolve a database row identity to exactly one API resource."""
+        identity = (table, tuple(str(value) for value in key_components))
+        return next(
+            (resource for resource, mapping in self.resource_rows.items() if mapping == identity),
+            None,
+        )
+
     def report(self) -> dict[str, Any]:
         """A compact, explainable summary for reports and proof bundles."""
         principals = sum(1 for kind in self.entities.values() if kind == "principal")
@@ -266,6 +391,7 @@ class OwnershipGraph:
             "ambiguous_relationships": sum(1 for r in self.relationships if r.state is EvidenceState.AMBIGUOUS),
             "contradicted_relationships": sum(1 for r in self.relationships if r.state is EvidenceState.CONTRADICTED),
             "unattributed_resources": len(self.inconclusive),
+            "resource_row_mappings": len(self.resource_rows),
             "sources": dict(sorted(sources.items())),
             "inconclusive": dict(sorted(self.inconclusive.items())),
         }
@@ -278,6 +404,9 @@ class OwnershipGraph:
             "evidence": {key: self.evidence[key].to_dict() for key in sorted(self.evidence)},
             "relationships": [r.to_dict() for r in self.relationships],
             "inconclusive": dict(sorted(self.inconclusive.items())),
+            "resource_rows": {
+                key: [mapping[0], list(mapping[1])] for key, mapping in sorted(self.resource_rows.items())
+            },
         }
 
     @classmethod
@@ -287,6 +416,13 @@ class OwnershipGraph:
         graph.evidence = {key: Evidence.from_dict(item) for key, item in data.get("evidence", {}).items()}
         graph.relationships = [Relationship.from_dict(item) for item in data.get("relationships", [])]
         graph.inconclusive = dict(data.get("inconclusive", {}))
+        graph.resource_rows = {
+            key: (str(mapping[0]), tuple(str(item) for item in mapping[1]))
+            for key, mapping in data.get("resource_rows", {}).items()
+        }
+        graph.row_resources = {
+            canonical_key([table, *values]): resource for resource, (table, values) in graph.resource_rows.items()
+        }
         return graph
 
 
@@ -318,16 +454,24 @@ def _scalars(payload: Any, depth: int = 0) -> list[str]:
 
 def _find_rows(
     resource_id: str, schema: DatabaseSchema, rows: dict[str, list[dict[str, Any]]]
-) -> list[tuple[str, dict[str, Any]]]:
-    """Find declared primary-key rows whose value is the resource's public id."""
-    matches: list[tuple[str, dict[str, Any]]] = []
+) -> list[tuple[str, dict[str, Any], tuple[str, ...]]]:
+    """Find rows whose **complete** declared primary key is the resource id.
+
+    A single component of a composite key never identifies a row. The caller
+    passes either a scalar id or a canonical JSON array of components.
+    """
+    components = parse_identity(resource_id)
+    if not components:
+        return []
+    matches: list[tuple[str, dict[str, Any], tuple[str, ...]]] = []
     for table, declared in schema.tables.items():
         columns = declared.primary_key or tuple(column.name for column in declared.columns)
-        if not columns:
-            continue
+        if len(columns) != len(components):
+            continue  # a composite key must match the whole tuple
         for row in rows.get(table, []):
-            if any(str(row.get(column)) == resource_id and row.get(column) is not None for column in columns):
-                matches.append((table, row))
+            values = tuple(str(row.get(column)) for column in columns)
+            if all(row.get(column) is not None for column in columns) and values == components:
+                matches.append((table, row, values))
     return matches
 
 
@@ -348,19 +492,29 @@ def discover_anchors(
     records: Iterable[Any],
     schema: DatabaseSchema,
     rows: dict[str, list[dict[str, Any]]],
+    contract: RelationshipContract | None = None,
 ) -> dict[str, Anchor]:
-    """Anchor each configured principal to a database identity record.
+    """Anchor principals to database identity records using declared evidence.
 
-    A candidate must be supported by *distinct* values from at least two
-    different principals (the repeatability requirement). The choice is made
-    on structural grounds - primary key, then a column other tables point at,
-    then uniqueness - never on a table name such as ``users``.
+    Only a response from the contract-declared identity endpoint/field may
+    produce a **confirmed** anchor. Other value matches stay candidates: a
+    document, assignment or task response that happens to contain a database
+    value is not proof of who the caller is.
     """
-    observed: dict[str, set[str]] = {}
+    declared_values: dict[str, set[str]] = {}
+    candidate_values: dict[str, set[str]] = {}
     for record in records:
         if not record.principal or record.principal == UNKNOWN_PRINCIPAL:
             continue
-        observed.setdefault(record.principal, set()).update(_scalars(record.response))
+        endpoint, field = contract.identity if contract is not None and contract.identity else ("", "")
+        if endpoint and getattr(record, "path", None) == endpoint and isinstance(record.response, dict):
+            value = record.response.get(field)
+            if isinstance(value, (str, int)) and not isinstance(value, bool):
+                declared_values.setdefault(record.principal, set()).add(str(value))
+        else:
+            candidate_values.setdefault(record.principal, set()).update(_scalars(record.response))
+
+    observed = declared_values
 
     matches: dict[tuple[str, str], dict[str, str]] = {}
     for (table, column), mapping in _column_matches(schema, rows, observed).items():
@@ -382,9 +536,9 @@ def discover_anchors(
             ranked.setdefault(principal, []).append((score, table, column, {principal: value}))
 
     anchors: dict[str, Anchor] = {}
-    for principal, candidates in sorted(ranked.items()):
-        best = max(score for score, _, _, _ in candidates)
-        winners = [candidate for candidate in candidates if candidate[0] == best]
+    for principal, ranked_candidates in sorted(ranked.items()):
+        best = max(score for score, _, _, _ in ranked_candidates)
+        winners = [candidate for candidate in ranked_candidates if candidate[0] == best]
         if len(winners) != 1:
             # Preserve the ambiguity: no owner may be confirmed from it.
             for _, table, column, mapping in winners:
@@ -425,6 +579,29 @@ def discover_anchors(
             [evidence],
         )
         anchors[principal] = Anchor(principal, table, column, value, EvidenceState.CONFIRMED, evidence)
+
+    # Undeclared value matches are kept as CANDIDATE observations and as an
+    # explicit coverage reason - never promoted to an identity anchor.
+    for principal, values in sorted(candidate_values.items()):
+        if principal in anchors:
+            continue
+        for (table, column), mapping in sorted(_column_matches(schema, rows, candidate_values).items()):
+            if principal not in mapping:
+                continue
+            evidence = graph.add_evidence(
+                Evidence(
+                    source="candidate_identity_observation",
+                    principal=principal,
+                    entity=f"{table}:{column}",
+                    detail="a response value matches a database value, but no declared identity evidence exists",
+                )
+            )
+            graph.add_relationship(
+                RelationshipType.MEMBER_OF, principal, f"{table}:{column}", EvidenceState.CANDIDATE, [evidence]
+            )
+        graph.inconclusive.setdefault(
+            f"identity:{principal}", "identity endpoint/field not declared; no confirmed anchor"
+        )
     return anchors
 
 
@@ -471,15 +648,24 @@ def discover_relationships(
     schema: DatabaseSchema,
     rows: dict[str, list[dict[str, Any]]],
     anchors: dict[str, Anchor],
+    contract: RelationshipContract | None = None,
+    known_principals: frozenset[str] = frozenset(),
 ) -> None:
-    """Apply the conservative inference rules and fill the graph."""
+    """Apply the conservative inference rules and fill the graph.
+
+    Confirmed ownership needs a **semantic** signal: either the application
+    declares the ownership source in the trusted relationship contract, or an
+    explicit response-level owner claim names a configured principal. A
+    foreign key to an anchored identity record is a reference and, at most, a
+    candidate owner - never a confirmed one on its own.
+    """
     anchor_by_value = {(anchor.table, anchor.column, anchor.value): anchor.principal for anchor in anchors.values()}
     writes = list(ledger)
     created: set[tuple[str, str, str]] = set()
     for event in writes:
-        if event.principal and event.principal != UNKNOWN_PRINCIPAL and event.row_key:
-            created.add((event.table, event.row_key, event.principal))
         if event.principal and event.principal != UNKNOWN_PRINCIPAL:
+            if event.row_key:
+                created.add((event.table, event.row_key, event.principal))
             created.add((event.table, str(event.row_id), event.principal))
 
     for key, resource in sorted(resources.items()):
@@ -488,33 +674,68 @@ def discover_relationships(
             graph.inconclusive[key] = "no public identifier"
             continue
 
-        # Source 1: a response-level owner claim (the conventional source).
-        response_owner = resource.owner
-        if response_owner:
-            evidence = graph.add_evidence(
+        # Source 1: an explicit response-level ownership claim. It counts as
+        # semantic evidence only when it names a principal the scan knows.
+        response_owner = resource.owner if resource.owner in known_principals else None
+        if resource.owner and response_owner is None:
+            response_evidence = graph.add_evidence(
                 Evidence(
-                    source="response_field",
-                    principal=response_owner,
+                    source="unverified_response_claim",
+                    principal=resource.owner,
                     resource=key,
-                    detail="the API response names this principal as owner",
+                    detail="a response field names an unconfigured identity; not an ownership claim",
                 )
             )
-            graph.add_relationship(RelationshipType.OWNS, response_owner, key, EvidenceState.CONFIRMED, [evidence])
+            graph.add_relationship(
+                RelationshipType.OWNS, resource.owner, key, EvidenceState.CANDIDATE, [response_evidence]
+            )
+
+        declared = contract.ownership.get(resource.type) if contract is not None else None
+        declared_owner: str | None = None
 
         matches = _find_rows(resource.id, schema, rows)
         if len(matches) != 1:
-            if not response_owner:
-                graph.inconclusive[key] = "the public identifier does not match exactly one declared primary-key row"
+            graph.inconclusive.setdefault(
+                key,
+                "ambiguous row mapping: the public identifier matches more than one declared primary-key row"
+                if len(matches) > 1
+                else "no unique database row maps to the API resource",
+            )
+            if response_owner is not None:
+                claim = graph.add_evidence(
+                    Evidence(
+                        source="response_claim",
+                        principal=response_owner,
+                        resource=key,
+                        detail="the API response names this principal as owner",
+                    )
+                )
+                graph.add_relationship(RelationshipType.OWNS, response_owner, key, EvidenceState.CONFIRMED, [claim])
             continue
-        table, row = matches[0]
-        graph.add_entity(f"{table}:{resource.id}", "database")
-        declared = schema.get(table)
-        if declared is None:
+        table, row, pk_values = matches[0]
+        graph.resource_rows[key] = (table, pk_values)
+        graph.row_resources[canonical_key([table, *pk_values])] = key
+        declared_row = schema.get(table)
+
+        # A response claim is semantic evidence, corroborated by the row match.
+        if response_owner is not None:
+            claim = graph.add_evidence(
+                Evidence(
+                    source="response_claim",
+                    principal=response_owner,
+                    resource=key,
+                    table=table,
+                    detail="the API response names a configured principal as owner of the matched row",
+                )
+            )
+            graph.add_relationship(RelationshipType.OWNS, response_owner, key, EvidenceState.CONFIRMED, [claim])
+
+        if declared_row is None:
             continue
-        for fk in declared.foreign_keys:
+        for fk in declared_row.foreign_keys:
             local = row.get(fk.column)
             if local is None or isinstance(local, bool):
-                continue  # nullable / missing references are never ownership
+                continue  # nullable or missing references are never ownership
             target = anchor_by_value.get((fk.table, fk.column_ref, str(local)))
             reference = graph.add_evidence(
                 Evidence(
@@ -535,46 +756,49 @@ def discover_relationships(
             )
             if target is None:
                 continue
-            corroboration: list[str] = []
-            # The anchor is independent evidence: a repeatable, distinct
-            # mapping from several principals to this exact database record.
-            # A direct foreign key to an anchored principal is ownership -
-            # unlike a foreign key to an intermediate entity (a workspace or
-            # tenant), which stays a plain reference.
-            anchor = anchors[target]
-            if anchor.evidence:
-                corroboration.append(anchor.evidence)
-            if response_owner == target:
-                corroboration.append(
-                    graph.add_evidence(
-                        Evidence(
-                            source="response_field",
-                            principal=target,
-                            resource=key,
-                            detail="the API response agrees with the foreign key",
-                        )
+
+            # The contract may declare this exact FK as the ownership signal.
+            is_declared_owner = (
+                declared is not None and declared[0] == "database_foreign_key" and declared[1] == fk.column
+            )
+            creation = (table, str(local), target) in created or (table, canonical_key(pk_values), target) in created
+            if is_declared_owner:
+                semantic = graph.add_evidence(
+                    Evidence(
+                        source="declared_semantics",
+                        principal=target,
+                        resource=key,
+                        table=table,
+                        column=fk.column,
+                        detail="the application contract declares this foreign key as the owner",
                     )
                 )
-            if (table, str(local), target) in created or (table, resource.id, target) in created:
-                corroboration.append(
+                graph.add_relationship(
+                    RelationshipType.OWNS, target, key, EvidenceState.CONFIRMED, [reference, semantic]
+                )
+                declared_owner = target
+                continue
+
+            # Structural reference + anchor + creation is still a hypothesis.
+            evidence = [reference]
+            if creation:
+                evidence.append(
                     graph.add_evidence(
                         Evidence(
                             source="write_ledger",
                             principal=target,
                             resource=key,
                             table=table,
-                            detail="the anchored principal created the referenced row",
+                            detail="the anchored principal created the referenced row (creation is not ownership)",
                         )
                     )
                 )
-            if corroboration:
-                graph.add_relationship(
-                    RelationshipType.OWNS, target, key, EvidenceState.CONFIRMED, [reference, *corroboration]
-                )
-            else:
-                graph.add_relationship(RelationshipType.OWNS, target, key, EvidenceState.CANDIDATE, [reference])
+            graph.add_relationship(RelationshipType.OWNS, target, key, EvidenceState.CANDIDATE, evidence)
 
-    discover_associations(graph, schema, rows, anchors, resources)
+        if declared_owner is not None and response_owner is not None and declared_owner != response_owner:
+            graph.inconclusive.setdefault(key, "the response claim and the declared ownership source disagree")
+
+    discover_associations(graph, schema, rows, anchors, resources, contract)
 
 
 def discover_associations(
@@ -583,12 +807,13 @@ def discover_associations(
     rows: dict[str, list[dict[str, Any]]],
     anchors: dict[str, Anchor],
     resources: dict[str, Resource],
+    contract: RelationshipContract | None = None,
 ) -> None:
     """Structural discovery of association tables.
 
-    A table with foreign keys to a resource table and to an anchored identity
-    table is an association table. Its rows explain access; they never create
-    ownership. This is structural, not a naming convention.
+    Table shape is not permission. Rows create **CANDIDATE** sharing unless
+    the trusted contract declares the association as an authorization grant.
+    Candidates never suppress a security finding.
     """
     anchor_by_value = {(anchor.table, anchor.column, anchor.value): anchor.principal for anchor in anchors.values()}
     resource_tables = {table for table, declared in schema.tables.items() if declared.primary_key}
@@ -620,23 +845,29 @@ def discover_associations(
                     resource_key = _resource_key_for(resources, str(value))
                     if resource_key is None:
                         continue
+                    grant = contract.sharing.get(table) if contract is not None else None
+                    if grant is not None and grant[0] == str(fk.column) and grant[2] == "authorization_grant":
+                        source, state = "declared_grant", EvidenceState.CONFIRMED
+                        detail = "the application contract declares this association as an authorization grant"
+                    else:
+                        source, state = "association_table", EvidenceState.CANDIDATE
+                        detail = "an association row relates the principal to the resource; semantics are unproven"
                     evidence = graph.add_evidence(
                         Evidence(
-                            source="association_table",
+                            source=source,
                             principal=principal,
                             resource=resource_key,
                             table=table,
                             column=fk.column,
-                            detail="an association row explicitly relates the principal to the resource",
+                            detail=detail,
                         )
                     )
-                    graph.add_relationship(
-                        RelationshipType.SHARED_WITH,
-                        principal,
-                        resource_key,
-                        EvidenceState.CONFIRMED,
-                        [evidence],
-                    )
+                    graph.add_relationship(RelationshipType.SHARED_WITH, principal, resource_key, state, [evidence])
+                    if state is EvidenceState.CANDIDATE:
+                        graph.inconclusive.setdefault(
+                            f"sharing:{principal}:{resource_key}",
+                            "association semantics are undeclared; sharing remains a candidate",
+                        )
 
 
 def _values(anchor_by_value: dict[tuple[str, str, str], str], fk: Any) -> list[str]:
@@ -656,36 +887,41 @@ def build_ownership_graph(
     ledger: Iterable[WriteEvent],
     schema: DatabaseSchema | None,
     rows: dict[str, list[dict[str, Any]]] | None,
+    contract: RelationshipContract | None = None,
 ) -> OwnershipGraph:
-    """Build the graph from independent evidence sources.
+    """Build the graph from independent, semantically grounded evidence.
 
-    With no database schema at all the graph still records response-level
-    ownership, so existing scans keep their behaviour. A database is needed
-    only for schema-level discovery.
+    Without a schema, response-level claims naming a known principal remain
+    usable, so older/conventional scans keep their behaviour. Database-level
+    relationships require the relationship contract to be confirmed.
     """
     graph = OwnershipGraph()
     records = list(traffic)
-    for record in records:
-        if record.principal and record.principal != UNKNOWN_PRINCIPAL:
-            graph.add_entity(record.principal, "principal")
+    known = frozenset(
+        record.principal for record in records if record.principal and record.principal != UNKNOWN_PRINCIPAL
+    )
+    for principal in known:
+        graph.add_entity(principal, "principal")
     for key, resource in resources.items():
         graph.add_entity(key, "resource")
     if schema is not None and schema.tables:
-        anchors = discover_anchors(graph, records, schema, rows or {})
-        discover_relationships(graph, resources, ledger, schema, rows or {}, anchors)
-    elif any(resource.owner for resource in resources.values()):
+        anchors = discover_anchors(graph, records, schema, rows or {}, contract)
+        discover_relationships(graph, resources, ledger, schema, rows or {}, anchors, contract, known)
+    else:
         for key, resource in resources.items():
-            if resource.owner:
+            if resource.owner in known:
                 evidence = graph.add_evidence(
                     Evidence(
-                        source="response_field",
+                        source="response_claim",
                         principal=resource.owner,
                         resource=key,
-                        detail="the API response names this principal as owner",
+                        detail="the API response names a configured principal as owner",
                     )
                 )
                 graph.add_relationship(RelationshipType.OWNS, resource.owner, key, EvidenceState.CONFIRMED, [evidence])
+            elif resource.owner:
+                graph.inconclusive.setdefault(key, "the response owner is not a configured principal")
     for key, resource in resources.items():
         if graph.owner_of(key) is None and key not in graph.inconclusive:
-            graph.inconclusive[key] = "no confirmed owner from independent evidence"
+            graph.inconclusive[key] = "ownership cannot be established from semantic evidence"
     return graph

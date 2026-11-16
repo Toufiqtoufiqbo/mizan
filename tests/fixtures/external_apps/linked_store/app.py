@@ -222,9 +222,11 @@ def create_app(database: str | Path, *, vulnerability: str = "clean") -> Flask:
             "display_name": row["display_name"],
         }
         if app.config["VULNERABILITY"] == "ambiguous":
-            # Two real identity records for the same caller: the anchor is
-            # ambiguous, so ownership cannot be confirmed from it.
-            document["alternate_identity_key"] = f"{identity}-alt"
+            # The declared identity field now names a *document*, not an
+            # identity record. The anchor resolves to the wrong table, so no
+            # ownership may be confirmed from it.
+            document["identity_key"] = f"doc-{identity}-1"
+            document["alternate_identity_key"] = identity
         return jsonify(document)
 
     @app.get("/documents")

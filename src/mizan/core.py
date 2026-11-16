@@ -209,6 +209,18 @@ class ScanCoverage:
     inconclusive_checks: int = 0
     """Checks that could not be completed, with a recorded reason."""
 
+    identity_anchors_unresolved: int = 0
+    """Principals with no confirmed database identity anchor."""
+
+    ownership_semantics_missing: int = 0
+    """Resources whose ownership evidence is only structural/candidate."""
+
+    resource_row_mapping_ambiguous: int = 0
+    """Resources whose API id does not map uniquely to a database row."""
+
+    sharing_semantics_ambiguous: int = 0
+    """Associations whose permission semantics are unproven."""
+
     @property
     def meaningful(self) -> bool:
         """Whether the scan established enough coverage to make a clean claim."""
@@ -235,6 +247,10 @@ class ScanCoverage:
             "ownership_ambiguous": self.ownership_ambiguous,
             "sharing_explained": self.sharing_explained,
             "inconclusive_checks": self.inconclusive_checks,
+            "identity_anchors_unresolved": self.identity_anchors_unresolved,
+            "ownership_semantics_missing": self.ownership_semantics_missing,
+            "resource_row_mapping_ambiguous": self.resource_row_mapping_ambiguous,
+            "sharing_semantics_ambiguous": self.sharing_semantics_ambiguous,
         }
 
 

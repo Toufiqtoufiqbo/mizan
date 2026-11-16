@@ -41,8 +41,8 @@ from mizan.ownership import (
     Observation,
     OwnershipGraph,
     RelationshipType,
-    _scalars,
     build_ownership_graph,
+    parse_identity,
 )
 from mizan.patching import render as patch_render
 from mizan.proof import ProofBundle
@@ -95,6 +95,7 @@ class Mizan:
         spec_document: dict[str, Any] | None = None,
         twin: Any | None = None,
         attributor: Any | None = None,
+        relationship_contract: Any | None = None,
         request_budget: int | None = None,
     ) -> None:
         self.target = target
@@ -112,6 +113,9 @@ class Mizan:
         #: An optional data-level attributor that derives writes from the
         #: database itself, so the application needs no instrumentation.
         self.attributor = attributor
+        #: Phase V.1: trusted, explicit semantic declarations. Without one,
+        #: structural evidence is never promoted to confirmed semantics.
+        self.relationship_contract = relationship_contract
         self.traffic: TrafficLog = TrafficLog(self.traffic_path)
         self.ledger: Ledger = Ledger(self.ledger_path)
         self.observed = AccessMatrix()
@@ -179,13 +183,14 @@ class Mizan:
         db_rows: dict[str, list[dict[str, Any]]] = {}
         if schema is not None and hasattr(self.attributor, "rows"):
             db_rows = {name: self.attributor.rows(name) for name in schema.tables}
-        observations = self._identity_observations(schema, db_rows) if schema is not None else []
+        observations = self._identity_observations() if schema is not None else []
         self.graph = build_ownership_graph(
             resources=policy.resources,
             traffic=[*self.traffic.records, *observations],
             ledger=self.ledger.events,
             schema=schema,
             rows=db_rows,
+            contract=self.relationship_contract,
         )
         for key, resource in list(policy.resources.items()):
             owner = self.graph.owner_of(key)
@@ -393,6 +398,7 @@ class Mizan:
             if relation.type is RelationshipType.OWNS and len(relation.evidence) > 1
         )
         report = self.graph.report() if self.graph is not None else {}
+        reasons = list((self.graph.inconclusive if self.graph else {}).items())
         return ScanCoverage(
             resources_discovered=len(resources),
             resources_owned=len(usable),
@@ -404,6 +410,14 @@ class Mizan:
             ownership_candidates=report.get("candidate_ownership_edges", 0),
             ownership_ambiguous=report.get("ambiguous_relationships", 0) + report.get("contradicted_relationships", 0),
             inconclusive_checks=len(self.inconclusive_checks),
+            identity_anchors_unresolved=sum(1 for key, _ in reasons if key.startswith("identity:")),
+            ownership_semantics_missing=sum(
+                1
+                for key, reason in reasons
+                if not key.startswith(("identity:", "sharing:")) and "ownership" in reason.lower()
+            ),
+            resource_row_mapping_ambiguous=sum(1 for _, reason in reasons if "mapping" in reason.lower()),
+            sharing_semantics_ambiguous=sum(1 for key, _ in reasons if key.startswith("sharing:")),
         )
 
     def attack_groups(self, groups: list[str]) -> list[Violation]:
@@ -655,44 +669,28 @@ class Mizan:
                 return True
         return False
 
-    def _identity_observations(self, schema: Any, db_rows: dict[str, list[dict[str, Any]]]) -> list[Observation]:
-        """Ask every configured principal for its own identity record.
+    def _identity_observations(self) -> list[Observation]:
+        """Replay the contract-declared identity endpoint for each principal.
 
-        A path qualifies only when its already-recorded response contains a
-        scalar value that matches a declared database column - the same
-        structural evidence the anchor requires. At most one such path is
-        replayed, so the request cost is bounded and no identity endpoint is
-        guessed from a name such as ``/me``.
+        A response that merely contains a database value is *not* identity
+        evidence: it may be a document, an assignment or a task. Only the
+        application's explicit declaration makes an endpoint an identity
+        source, and no endpoint name is assumed here.
         """
-        candidates: set[str] = set()
-        for record in self.traffic:
-            if record.method not in {"GET", "HEAD"} or not record.template or "{" in record.template:
-                continue
-            # An identity assertion is one record, not a listing of many.
-            if not isinstance(record.response, dict):
-                continue
-            values = set(_scalars(record.response))
-            if not values:
-                continue
-            if any(
-                str(value) in values
-                for rows in db_rows.values()
-                for row in rows
-                for value in row.values()
-                if value is not None
-            ):
-                candidates.add(record.path)
+        contract = self.relationship_contract
+        if contract is None or contract.identity is None:
+            return []
+        endpoint, _field = contract.identity
         observations: list[Observation] = []
-        for path in sorted(candidates)[:1]:
-            for principal in self.target.principals:
-                if not principal.token or not self._is_testable(principal):
-                    continue
-                response = self._request(
-                    self.target.session_for(principal), READ_METHOD, self._url(path), timeout=self.target.timeout
-                )
-                body = _json(response)
-                if isinstance(body, dict):
-                    observations.append(Observation(principal.id, body))
+        for principal in self.target.principals:
+            if not principal.token or not self._is_testable(principal):
+                continue
+            response = self._request(
+                self.target.session_for(principal), READ_METHOD, self._url(endpoint), timeout=self.target.timeout
+            )
+            body = _json(response)
+            if isinstance(body, dict):
+                observations.append(Observation(principal.id, body, path=endpoint))
         return observations
 
     def _identity_endpoints(self) -> list[tuple[str, str, str]]:
@@ -750,16 +748,45 @@ class Mizan:
                     if not tainted:
                         continue
                     event = tainted[0]
-                    row_key = f"{event.table}:{event.row_key}" if event.row_key else event.resource_key
-                    # The row that was actually touched decides. Its identity
-                    # comes from declared primary-key metadata when available;
-                    # rowid remains the fallback for older ledgers.
+                    # The write event's database identity is mapped to an API
+                    # resource explicitly. Naming coincidence is never enough.
+                    row_components = parse_identity(event.row_key) if event.row_key else None
+                    mapped_resource = (
+                        self.graph.row_to_resource(event.table, row_components)
+                        if self.graph is not None and row_components
+                        else None
+                    )
+                    if mapped_resource is None and self.graph is not None and not event.row_key:
+                        # Legacy ledger: no declared row identity. Accept only
+                        # a unique, unambiguous single-column mapping.
+                        candidates = [
+                            resource
+                            for resource, (table, values) in self.graph.resource_rows.items()
+                            if table == event.table and values == (str(event.row_id),)
+                        ]
+                        if len(candidates) == 1:
+                            mapped_resource = candidates[0]
+                    if mapped_resource is None:
+                        self.inconclusive_checks.append(
+                            {
+                                "law": "L3",
+                                "resource": event.resource_key,
+                                "reason": "the changed database row does not map uniquely to an API resource",
+                            }
+                        )
+                        continue
+                    row_key = mapped_resource
                     owner = event.row_owner
                     if self.graph is not None:
                         state = self.graph.owner_state(row_key)
                         if state is EvidenceState.CONFIRMED:
                             owner = self.graph.owner_of(row_key)
-                        elif state in {EvidenceState.AMBIGUOUS, EvidenceState.CONTRADICTED}:
+                        elif state in {
+                            EvidenceState.AMBIGUOUS,
+                            EvidenceState.CONTRADICTED,
+                            EvidenceState.CANDIDATE,
+                            EvidenceState.UNKNOWN,
+                        }:
                             self.inconclusive_checks.append(
                                 {"law": "L3", "resource": row_key, "reason": f"ownership is {state.value}"}
                             )
@@ -814,6 +841,11 @@ class Mizan:
                                 "owner": owner,
                                 "event": event.to_dict(),
                                 "ownership_evidence": ownership_evidence,
+                                "resource_mapping": {
+                                    "database_table": event.table,
+                                    "database_key": event.row_key or event.row_id,
+                                    "api_resource": mapped_resource,
+                                },
                             },
                             steps=[
                                 Step(

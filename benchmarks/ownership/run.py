@@ -34,6 +34,13 @@ CASES: list[tuple[str, str, tuple[str, ...], bool]] = [
     ("linked_store", "both", ("L2", "L3"), True),
     ("linked_store", "collaborator", (), True),
     ("linked_store", "ambiguous", (), True),
+    # Phase V.1 adversarial cases.
+    ("adversarial_store", "clean", (), True),
+    ("adversarial_store", "read", ("L2",), True),
+    ("adversarial_store", "write", ("L3",), True),
+    ("adversarial_store", "grant", (), True),
+    ("adversarial_store", "provenance", (), True),
+    ("adversarial_store", "ambiguous_identity", (), True),
 ]
 
 BUDGET = 90
@@ -74,6 +81,7 @@ def _measure(fixture: str, variant: str, expected: tuple[str, ...]) -> dict[str,
         "fixture": fixture,
         "variant": variant,
         "verdict": result.verdict.value,
+        "error": result.error,
         "law_types": result.law_types,
         "expected_laws": list(expected),
         "law_detection": law_detection,
@@ -87,6 +95,8 @@ def _measure(fixture: str, variant: str, expected: tuple[str, ...]) -> dict[str,
         "requests": result.requests.to_dict(),
         "coverage": result.coverage.to_dict(),
         "false_finding_on_clean_control": (bool(result.law_types) if not expected else False),
+        "expected_inconclusive": variant in {"ambiguous", "provenance", "ambiguous_identity"},
+        "sharing_should_be_confirmed": variant == "grant",
     }
 
 
@@ -97,9 +107,16 @@ def main() -> None:
     detected = sum(all(m["law_detection"].values()) for m in expected_cases)
     clean_controls = [m for m in measurements if not m["expected_laws"]]
     false_positives = sum(1 for m in clean_controls if m["law_types"])
+    expected_inconclusive = [m for m in measurements if m["expected_inconclusive"]]
+    inconclusive_ok = sum(1 for m in expected_inconclusive if m["verdict"] == "INCONCLUSIVE")
     total_discovered = sum(m["resources_discovered"] for m in measurements)
     total_confirmed = sum(m["confirmed_ownership_edges"] for m in measurements)
     total_requests = sum(m["requests"]["total"] for m in measurements)
+    total_mapped = sum(m["coverage"]["resources_owned"] for m in measurements)
+    anchor_false_positives = sum(
+        1 for m in measurements if m["variant"] == "ambiguous_identity" and m["confirmed_ownership_edges"] > 0
+    )
+    sharing_false_positives = sum(1 for m in measurements if m["variant"] == "read" and "L2" not in m["law_types"])
 
     summary = {
         "seed": "fixed fixture identifiers; no random sampling in the inference",
@@ -113,6 +130,13 @@ def main() -> None:
         "probes_executed": sum(m["coverage"]["probes_executed"] for m in measurements),
         "probe_candidates": sum(m["coverage"]["probe_candidates"] for m in measurements),
         "requests_consumed": total_requests,
+        "identity_anchor_false_positives": {"count": anchor_false_positives, "ambiguous_cases": 1},
+        "association_to_sharing_false_positives": {"count": sharing_false_positives, "unauthorized_cases": 1},
+        "resource_row_mapping": {
+            "resolved": total_mapped,
+            "discovered": total_discovered,
+        },
+        "inconclusive_outcomes": {"correct": inconclusive_ok, "expected": len(expected_inconclusive)},
         "limitations": [
             "Ownership precision/recall need per-resource labels from a held-out app; "
             "the seeded fixture rows are the ground truth here, so they are reported "

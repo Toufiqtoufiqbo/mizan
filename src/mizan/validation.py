@@ -282,6 +282,12 @@ LAUNCH_LINKED = LaunchSpec(
     spec_source=SpecSource.from_file("{fixture}/openapi.json"),
 )
 
+#: The Phase V.1 adversarial fixture.
+LAUNCH_ADVERSARIAL = LaunchSpec(
+    command=[sys.executable, "{fixture}/app.py"],
+    spec_source=SpecSource.from_file("{fixture}/openapi.json"),
+)
+
 
 def launch_for(fixture_dir: Path) -> LaunchSpec | None:
     """Return the ``LaunchSpec`` for a fixture directory, or ``None`` if unknown."""
@@ -290,6 +296,7 @@ def launch_for(fixture_dir: Path) -> LaunchSpec | None:
         "express_store": LAUNCH_EXPRESS,
         "flask_store": LAUNCH_FLASK,
         "linked_store": LAUNCH_LINKED,
+        "adversarial_store": LAUNCH_ADVERSARIAL,
     }
     return _FIXTURE_LAUNCH.get(fixture_dir.name)
 
@@ -666,13 +673,16 @@ def scan_application(
         ]
 
         from mizan.attribution import SqliteAttributor
+        from mizan.ownership import RelationshipContract
 
+        contract = RelationshipContract.load(app_dir / "mizan-relationships.json", variant)
         engine = Mizan(
             Target(base_url=proxy.base_url, principals=principals),
             traffic_path=traffic_path,
             spec_document=document,
             twin=twin,
             attributor=SqliteAttributor(database),
+            relationship_contract=contract,
             request_budget=max(0, budget - accounting.bootstrap - accounting.learning),
         )
 

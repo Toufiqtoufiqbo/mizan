@@ -1,0 +1,8 @@
+{
+  "clean": [],
+  "read": ["L2"],
+  "write": ["L3"],
+  "grant": [],
+  "provenance": [],
+  "ambiguous_identity": []
+}

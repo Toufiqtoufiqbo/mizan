@@ -116,3 +116,15 @@ No new law, no LLM/AI planner, no engine rewrite, no graph database, no new exte
 ## Verdict
 
 **READY FOR REVIEW** — provided every mandatory CI job passes on the exact final commit (verified in the delivery message). No confirmed finding rests on candidate ownership; the collaborator case produces no false L2; the ambiguous case produces no fabricated owner; the nonstandard L2/L3 vulnerabilities are detected; existing regressions are preserved.
+
+---
+
+## Phase V.1 correction notice
+
+The inference rules in sections 2–5 were tightened after adversarial review:
+structural evidence (a foreign key, an association row, a matching response
+value) is no longer promoted to confirmed ownership, sharing, or identity
+without an explicit semantic declaration. See `PHASE_V1_CORRECTION_REPORT.md`
+for the four root causes, the reproductions, the fixes and the new
+denominator-based benchmark. The corrected suite is **476 passed / 0 failed /
+0 skipped**; cross-framework gate 8/8.

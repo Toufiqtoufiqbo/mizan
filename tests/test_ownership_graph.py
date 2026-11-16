@@ -19,6 +19,7 @@ from mizan.ownership import (
     EvidenceState,
     Observation,
     OwnershipGraph,
+    RelationshipContract,
     RelationshipType,
     build_ownership_graph,
     discover_anchors,
@@ -261,12 +262,17 @@ def test_anchor_ambiguity_is_preserved(tmp_path: Path) -> None:
     )
     schema = attributor.schema()
     rows = {name: attributor.rows(name) for name in schema.tables}
+    contract = RelationshipContract.from_dict(
+        {"version": 1, "identity": {"endpoint": "/session", "field": "identity_key"}}
+    )
     records = [
-        Observation("alice", {"person_key": "alice", "alias_key": "a1"}),
-        Observation("bob", {"person_key": "bob", "alias_key": "b1"}),
+        Observation("alice", {"identity_key": "alice"}, path="/session"),
+        Observation("alice", {"identity_key": "a1"}, path="/session"),
+        Observation("bob", {"identity_key": "bob"}, path="/session"),
+        Observation("bob", {"identity_key": "b1"}, path="/session"),
     ]
     graph = OwnershipGraph()
-    anchors = discover_anchors(graph, records, schema, rows)
+    anchors = discover_anchors(graph, records, schema, rows, contract)
     assert not anchors  # two equally supported columns: no claim
     assert graph.report()["ambiguous_relationships"] > 0
 
@@ -283,11 +289,20 @@ def test_direct_foreign_key_to_anchored_principal_is_ownership(tmp_path: Path) -
     schema = attributor.schema()
     rows = {name: attributor.rows(name) for name in schema.tables}
     records = [
-        Observation("alice", {"person_key": "alice"}),
-        Observation("bob", {"person_key": "bob"}),
+        Observation("alice", {"identity_key": "alice"}, path="/session"),
+        Observation("bob", {"identity_key": "bob"}, path="/session"),
     ]
     resources = {"documents:d1": Resource("documents", "d1"), "documents:d2": Resource("documents", "d2")}
-    graph = build_ownership_graph(resources=resources, traffic=records, ledger=[], schema=schema, rows=rows)
+    contract = RelationshipContract.from_dict(
+        {
+            "version": 1,
+            "identity": {"endpoint": "/session", "field": "identity_key"},
+            "ownership": {"documents": {"source": "database_foreign_key", "column": "custodian_ref"}},
+        }
+    )
+    graph = build_ownership_graph(
+        resources=resources, traffic=records, ledger=[], schema=schema, rows=rows, contract=contract
+    )
     assert graph.owner_of("documents:d1") == "alice"
     assert graph.owner_of("documents:d2") == "bob"
 
@@ -335,9 +350,22 @@ def test_association_table_creates_sharing_not_ownership(tmp_path: Path) -> None
     )
     schema = attributor.schema()
     rows = {name: attributor.rows(name) for name in schema.tables}
+    contract = RelationshipContract.from_dict(
+        {
+            "version": 1,
+            "identity": {"endpoint": "/session", "field": "identity_key"},
+            "sharing": {
+                "grants": {
+                    "resource_fk": "document_key",
+                    "principal_fk": "person_ref",
+                    "semantics": "authorization_grant",
+                }
+            },
+        }
+    )
     records = [
-        Observation("alice", {"person_key": "alice"}),
-        Observation("bob", {"person_key": "bob"}),
+        Observation("alice", {"identity_key": "alice"}, path="/session"),
+        Observation("bob", {"identity_key": "bob"}, path="/session"),
     ]
     graph = build_ownership_graph(
         resources={"documents:d1": Resource("documents", "d1")},
@@ -345,6 +373,7 @@ def test_association_table_creates_sharing_not_ownership(tmp_path: Path) -> None
         ledger=[],
         schema=schema,
         rows=rows,
+        contract=contract,
     )
     assert graph.explained_by_sharing("alice", "bob", "documents:d1") is True
     assert graph.owner_of("documents:d1") is None

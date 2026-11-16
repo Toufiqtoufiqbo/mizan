@@ -1,0 +1,65 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Adversarial Store", "version": "1.0.0" },
+  "servers": [{ "url": "/" }],
+  "components": {
+    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
+    "schemas": {
+      "Login": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "examples": ["alice"] },
+          "password": { "type": "string", "examples": ["alice-secret"] }
+        }
+      },
+      "Asset": {
+        "type": "object",
+        "properties": {
+          "item_ref": { "type": "string" },
+          "label": { "type": "string" }
+        }
+      },
+      "NewAsset": {
+        "type": "object",
+        "required": ["label"],
+        "properties": { "label": { "type": "string" } }
+      }
+    }
+  },
+  "paths": {
+    "/health": { "get": { "responses": { "200": { "description": "OK" } } } },
+    "/login": {
+      "post": {
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Login" } } } },
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/whoami": {
+      "get": {
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/assets": {
+      "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK" } } },
+      "post": {
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NewAsset" } } } },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/assets/{item_ref}": {
+      "parameters": [{ "name": "item_ref", "in": "path", "required": true, "schema": { "type": "string" } }],
+      "get": {
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Asset" } } } } }
+      },
+      "put": {
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NewAsset" } } } },
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  }
+}

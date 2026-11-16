@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "identity": { "endpoint": "/session", "field": "identity_key" },
+  "ownership": {
+    "documents": { "source": "database_foreign_key", "column": "custodian_ref" }
+  },
+  "sharing": {
+    "document_grants": {
+      "resource_fk": "document_key",
+      "principal_fk": "identity_key",
+      "semantics": "authorization_grant"
+    }
+  }
+}

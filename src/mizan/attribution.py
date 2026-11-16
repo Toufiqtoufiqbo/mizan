@@ -210,16 +210,31 @@ class SqliteAttributor:
             result: dict[str, TableSnapshot] = {}
             for table in tables:
                 quoted = quote_identifier(table)
-                try:
-                    rows = connection.execute(f"SELECT rowid AS __rowid__, * FROM {quoted}").fetchall()
-                except sqlite3.Error:
-                    continue
                 declared = schema.get(table)
                 pk = declared.primary_key if declared is not None else ()
+                try:
+                    rows = connection.execute(f"SELECT rowid AS __rowid__, * FROM {quoted}").fetchall()
+                    without_rowid = False
+                except sqlite3.Error:
+                    # WITHOUT ROWID tables have no rowid. Their declared
+                    # primary key is the only row identity available.
+                    if not pk:
+                        continue
+                    rows = connection.execute(f"SELECT * FROM {quoted}").fetchall()
+                    without_rowid = True
                 snapshot = TableSnapshot(name=table, rows={}, keys={})
                 for row in rows:
                     data = dict(row)
-                    key = str(data.pop("__rowid__"))
+                    if without_rowid:
+                        # Single-column keys keep their scalar identity; only
+                        # composite keys need the canonical JSON array.
+                        key = (
+                            str(data[pk[0]])
+                            if len(pk) == 1
+                            else json.dumps([str(data[column]) for column in pk], separators=(",", ":"))
+                        )
+                    else:
+                        key = str(data.pop("__rowid__"))
                     if pk and all(column in data for column in pk):
                         snapshot.keys[key] = tuple(str(data[column]) for column in pk)
                     snapshot.rows[key] = data
