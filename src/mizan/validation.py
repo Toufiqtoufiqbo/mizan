@@ -43,16 +43,29 @@ from mizan.proxy import RecordingProxy
 from mizan.twin import Twin, TwinSpec, script_command
 
 #: The variants of an application, and the laws each of them must produce.
-VARIANTS: dict[str, tuple[str, ...]] = {
+#: The default variants of a fixture. A fixture with additional variants
+#: declares them in its own ``variants.json``; production code never names a
+#: particular fixture or guesses which variants it implements.
+DEFAULT_EXPECTED: dict[str, tuple[str, ...]] = {
     "clean": (),
     "read": ("L2",),
     "write": ("L3",),
     "both": ("L2", "L3"),
-    # Phase V: an explicit sharing grant, and an ownership anchor that cannot
-    # be resolved. Neither is a finding - the second is inconclusive.
-    "collaborator": (),
-    "ambiguous": (),
 }
+
+
+def expected_variants(application: str | Path) -> dict[str, tuple[str, ...]]:
+    """The variants a fixture declares, or the standard contract by default."""
+    manifest = Path(application) / "variants.json"
+    if not manifest.exists():
+        return dict(DEFAULT_EXPECTED)
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return dict(DEFAULT_EXPECTED)
+    if not isinstance(data, dict):
+        return dict(DEFAULT_EXPECTED)
+    return {str(name): tuple(str(law) for law in laws) for name, laws in data.items()}
 
 #: The principals that L2 and L3 validation require. Cross-user testing is
 #: meaningless with fewer than two unprivileged identities, so a scan that
@@ -531,9 +544,13 @@ def scan_application(
     ``launch``: the launch contract. When given, it overrides the fixture
     convention entirely.
     """
-    if variant not in VARIANTS:
-        raise ValueError(f"unknown variant {variant!r}; expected one of {sorted(VARIANTS)}")
-    app_dir = Path(application).resolve()
+    application_path = Path(application).resolve()
+    if variant not in expected_variants(application_path):
+        raise ValueError(
+            f"unknown variant {variant!r} for this fixture; expected one of "
+            f"{sorted(expected_variants(application_path))}"
+        )
+    app_dir = application_path
     root = Path(workspace) if workspace else Path(tempfile.mkdtemp(prefix=f"mizan-validate-{variant}-"))
     root.mkdir(parents=True, exist_ok=True)
 
@@ -706,7 +723,7 @@ def validate_application(
     "vulnerable" application that is vulnerable in more ways than intended is
     caught.
     """
-    expected = expected or dict(VARIANTS)
+    expected = expected or expected_variants(application)
     root = Path(tempfile.mkdtemp(prefix="mizan-validate-"))
     checks: list[dict[str, Any]] = []
     variants: dict[str, Any] = {}

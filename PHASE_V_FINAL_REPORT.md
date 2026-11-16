@@ -93,11 +93,13 @@ Precision/recall against held-out labels are **not claimed**: the fixture's own 
 
 ## 11. Full regression and CI results
 
-Local gates on the final tree: `pytest` → **450 passed, 0 failed, 0 skipped** (416 pre-existing + 21 graph tests + 13 fixture tests); `ruff check .` and `ruff format --check .` clean; `git diff --check` clean; benchmark, independent application, Flask/FastAPI/Express, PostgreSQL, security regression and self-scan gates all included in the suite. GitHub Actions verification is recorded in the delivery message and updated below after the push.
+Local gates on the final tree: `pytest` → **450 passed, 0 failed, 0 skipped** (416 pre-existing + 21 graph tests + 13 fixture tests); `ruff check .` and `ruff format --check .` clean; `git diff --check` clean; benchmark, independent application, Flask/FastAPI/Express, PostgreSQL, security regression and self-scan gates all included in the suite. GitHub Actions verification is recorded in the delivery message for the exact final SHA (the first run exposed a fixture-variant regression, fixed in the final commit).
 
 ## 12. Exact commit SHA and PR URL
 
-Filled after the final commit/push (see the delivery message for the authoritative values).
+- Branch: `feat/ownership-graph-v1` (pushed without force).
+- PR: **#9 — https://github.com/Toufiqtoufiqbo/mizan/pull/9** (open, unmerged).
+- The exact final commit SHA and the Actions run number/result for that SHA are stated in the delivery message.
 
 ## 13. Remaining limitations
 
