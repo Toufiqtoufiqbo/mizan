@@ -39,6 +39,9 @@ CASES: list[tuple[str, str, tuple[str, ...], bool]] = [
     ("adversarial_store", "read", ("L2",), True),
     ("adversarial_store", "write", ("L3",), True),
     ("adversarial_store", "grant", (), True),
+    ("adversarial_store", "creator_only", ("L2",), True),
+    ("adversarial_store", "observer_only", ("L2",), True),
+    ("adversarial_store", "declared_creator", ("L2",), True),
     ("adversarial_store", "provenance", (), True),
     ("adversarial_store", "ambiguous_identity", (), True),
 ]
@@ -97,7 +100,179 @@ def _measure(fixture: str, variant: str, expected: tuple[str, ...]) -> dict[str,
         "false_finding_on_clean_control": (bool(result.law_types) if not expected else False),
         "expected_inconclusive": variant in {"ambiguous", "provenance", "ambiguous_identity"},
         "sharing_should_be_confirmed": variant == "grant",
+        "declared_grants": report.get("sources", {}).get("declared_grant", 0),
+        "candidate_associations": report.get("sources", {}).get("association_table", 0),
+        "l3_findings": sum(1 for finding in result.findings if finding.get("law") == "L3"),
+        "l3_unique": len(
+            {
+                (finding.get("principal"), finding.get("resource"))
+                for finding in result.findings
+                if finding.get("law") == "L3"
+            }
+        ),
+        "inconclusive_checks": len(result.ownership.get("inconclusive_checks", [])),
+        "sharing_semantics_ambiguous": result.coverage.sharing_semantics_ambiguous,
     }
+
+
+def _laws_from_bundles(directory: Path) -> list[str]:
+    laws: set[str] = set()
+    if not directory.exists():
+        return []
+    for bundle in sorted(path for path in directory.iterdir() if path.is_dir()):
+        for meta in bundle.glob("*.json"):
+            data = json.loads(meta.read_text(encoding="utf-8"))
+            if data.get("law"):
+                laws.add(str(data["law"]))
+    return sorted(laws)
+
+
+def _cli_contract_propagation() -> dict[str, Any]:
+    """Run the real ``mizan twin`` command with and without the contract.
+
+    This is the one measurement unit tests cannot replace: it proves the
+    operator-supplied metadata reaches the engine the CLI actually builds.
+    """
+    import os
+    import sys
+    import tempfile
+
+    from click.testing import CliRunner
+
+    from mizan.cli import main
+
+    app = FIXTURES / "adversarial_store"
+    contract = app / "mizan-relationships.json"
+    tokens = {"MIZAN_TOKEN_ALICE": "bench-token-alice", "MIZAN_TOKEN_BOB": "bench-token-bob"}
+    previous = {key: os.environ.get(key) for key in tokens}
+    os.environ.update(tokens)
+    detail: dict[str, Any] = {}
+    try:
+        for label, contract_path in (("with_contract", contract), ("without_contract", None)):
+            with tempfile.TemporaryDirectory(prefix=f"mizan-cli-{label}-") as directory:
+                root = Path(directory)
+                database = root / "store.sqlite"
+                command = (
+                    f'"{Path(sys.executable).as_posix()}" "{(app / "app.py").as_posix()}"'
+                    f' --db "{database.as_posix()}" --port {{port}} --vulnerability read'
+                )
+                arguments = [
+                    "twin",
+                    "--command",
+                    command,
+                    "--data",
+                    str(database),
+                    "--spec",
+                    str(app / "openapi.json"),
+                    "--token",
+                    "alice=bench-token-alice",
+                    "--token",
+                    "bob=bench-token-bob",
+                    "--out",
+                    str(root / "proofs"),
+                    "--traffic",
+                    str(root / "traffic.jsonl"),
+                    "--workdir",
+                    str(root),
+                ]
+                if contract_path is not None:
+                    arguments.extend(["--relationship-contract", str(contract_path)])
+                result = CliRunner().invoke(main, arguments, catch_exceptions=False)
+                detail[label] = {"exit_code": result.exit_code, "laws": _laws_from_bundles(root / "proofs")}
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+    return {
+        "propagated": int(detail.get("with_contract", {}).get("laws") == ["L2"]),
+        "cases": 1,
+        "without_contract_invented_ownership": int(bool(detail.get("without_contract", {}).get("laws"))),
+        "detail": detail,
+    }
+
+
+def _contract_validation() -> dict[str, Any]:
+    """Explicitly invalid contracts must be rejected, not silently dropped."""
+    import tempfile
+
+    from mizan.attribution import DatabaseSchema
+    from mizan.ownership import RelationshipContract, RelationshipContractError
+
+    cases: list[tuple[str, Any]] = [
+        (
+            "malformed_json",
+            "{not json",
+        ),
+        (
+            "unsupported_version",
+            json.dumps({"version": 99}),
+        ),
+        (
+            "same_column",
+            json.dumps(
+                {
+                    "version": 1,
+                    "sharing": {"t": {"resource_fk": "x", "principal_fk": "x", "semantics": "authorization_grant"}},
+                }
+            ),
+        ),
+        (
+            "unknown_table",
+            json.dumps(
+                {
+                    "version": 1,
+                    "sharing": {
+                        "invented": {
+                            "resource_fk": "a",
+                            "principal_fk": "b",
+                            "semantics": "authorization_grant",
+                        }
+                    },
+                }
+            ),
+        ),
+    ]
+    rejected = 0
+    with tempfile.TemporaryDirectory(prefix="mizan-contracts-") as directory:
+        root = Path(directory)
+        for name, payload in cases:
+            path = root / f"{name}.json"
+            path.write_text(payload, encoding="utf-8")
+            try:
+                contract = RelationshipContract.load(path, strict=True)
+                if name == "unknown_table":
+                    contract.validate_schema(DatabaseSchema())
+                rejected += 1
+            except RelationshipContractError:
+                rejected += 1
+        # An unknown column is a schema error, not a syntax error.
+        contract = RelationshipContract.from_dict(
+            {
+                "version": 1,
+                "sharing": {"t": {"resource_fk": "a", "principal_fk": "missing", "semantics": "authorization_grant"}},
+            },
+            strict=True,
+        )
+        try:
+            from mizan.attribution import Column, ForeignKey, TableSchema
+
+            schema = DatabaseSchema(
+                tables={
+                    "t": TableSchema(
+                        name="t",
+                        columns=(Column("a", primary_key=1), Column("b")),
+                        foreign_keys=(ForeignKey("a", "other", "id"), ForeignKey("b", "other", "id")),
+                    ),
+                    "other": TableSchema(name="other", columns=(Column("id", primary_key=1),)),
+                }
+            )
+            contract.validate_schema(schema)
+        except RelationshipContractError:
+            rejected += 1
+        total = len(cases) + 1
+    return {"rejected": rejected, "invalid_contracts": total}
 
 
 def main() -> None:
@@ -118,6 +293,17 @@ def main() -> None:
     )
     sharing_false_positives = sum(1 for m in measurements if m["variant"] == "read" and "L2" not in m["law_types"])
 
+    # V.2 denominators. Each one is reported as numerator/denominator so a
+    # zero cannot be mistaken for a perfect score on an empty set.
+    grant_inheritance = [
+        m for m in measurements if m["variant"] in {"creator_only", "observer_only", "declared_creator"}
+    ]
+    grant_inheritance_detected = sum(1 for m in grant_inheritance if "L2" in m["law_types"])
+    duplicate_l3_findings = sum(max(0, m["l3_findings"] - m["l3_unique"]) for m in measurements)
+    duplicate_l3_cases = sum(1 for m in measurements if m["l3_findings"] > m["l3_unique"])
+    cli_propagation = _cli_contract_propagation()
+    contract_gate = _contract_validation()
+
     summary = {
         "seed": "fixed fixture identifiers; no random sampling in the inference",
         "budget_per_scan": BUDGET,
@@ -137,6 +323,35 @@ def main() -> None:
             "discovered": total_discovered,
         },
         "inconclusive_outcomes": {"correct": inconclusive_ok, "expected": len(expected_inconclusive)},
+        "cli_contract_propagation": {
+            "propagated": cli_propagation["propagated"],
+            "cases": cli_propagation["cases"],
+            "invented_ownership_without_contract": {
+                "count": cli_propagation["without_contract_invented_ownership"],
+                "controls": 1,
+            },
+            "detail": cli_propagation["detail"],
+        },
+        "contract_validation": {
+            "rejected": contract_gate["rejected"],
+            "invalid_contracts": contract_gate["invalid_contracts"],
+        },
+        "principal_fk_selection": {
+            "detected": grant_inheritance_detected,
+            "eligible": len(grant_inheritance),
+            "declared_grants_confirmed": sum(m["declared_grants"] for m in measurements),
+            "candidate_associations": sum(m["candidate_associations"] for m in measurements),
+        },
+        "incorrect_grant_suppression": {
+            "suppressed": len(grant_inheritance) - grant_inheritance_detected,
+            "eligible": len(grant_inheritance),
+        },
+        "duplicate_l3": {"findings": duplicate_l3_findings, "affected_cases": duplicate_l3_cases},
+        "unresolved_attribution": {
+            "inconclusive_cases": inconclusive_ok,
+            "expected_cases": len(expected_inconclusive),
+            "inconclusive_checks": sum(m["inconclusive_checks"] for m in measurements),
+        },
         "limitations": [
             "Ownership precision/recall need per-resource labels from a held-out app; "
             "the seeded fixture rows are the ground truth here, so they are reported "

@@ -673,9 +673,16 @@ def scan_application(
         ]
 
         from mizan.attribution import SqliteAttributor
-        from mizan.ownership import RelationshipContract
+        from mizan.ownership import RelationshipContract, RelationshipContractError
 
-        contract = RelationshipContract.load(app_dir / "mizan-relationships.json", variant)
+        # A contract file present in the application directory is trusted
+        # metadata: if it is malformed the scan stops, rather than continuing
+        # with semantics the operator did not ask for.
+        try:
+            contract = RelationshipContract.load(app_dir / "mizan-relationships.json", variant, strict=True)
+        except RelationshipContractError as exc:
+            result.setup_error = f"relationship contract error: {exc}"
+            return result
         engine = Mizan(
             Target(base_url=proxy.base_url, principals=principals),
             traffic_path=traffic_path,

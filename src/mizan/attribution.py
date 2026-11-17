@@ -43,11 +43,17 @@ class Column:
 
 @dataclass(frozen=True)
 class ForeignKey:
-    """One declared foreign key: local column -> remote table/column."""
+    """One declared foreign key: local column -> remote table/column.
+
+    ``composite`` marks a column that is one part of a multi-column foreign
+    key. Such a key is never treated as a resource/principal grant: its local
+    column alone does not identify the referenced row.
+    """
 
     column: str
     table: str
     column_ref: str
+    composite: bool = False
 
 
 @dataclass(frozen=True)
@@ -157,9 +163,18 @@ class SqliteAttributor:
                     )
                     for row in connection.execute(f"PRAGMA table_info({quoted})")
                 )
+                fk_rows = list(connection.execute(f"PRAGMA foreign_key_list({quoted})"))
+                group_sizes: dict[int, int] = {}
+                for row in fk_rows:
+                    group_sizes[int(row["id"])] = group_sizes.get(int(row["id"]), 0) + 1
                 foreign_keys = tuple(
-                    ForeignKey(column=str(row["from"]), table=str(row["table"]), column_ref=str(row["to"]))
-                    for row in connection.execute(f"PRAGMA foreign_key_list({quoted})")
+                    ForeignKey(
+                        column=str(row["from"]),
+                        table=str(row["table"]),
+                        column_ref=str(row["to"]),
+                        composite=group_sizes[int(row["id"])] > 1,
+                    )
+                    for row in fk_rows
                 )
                 # A single-column UNIQUE index is also a usable row identity.
                 unique_columns = {
@@ -338,13 +353,25 @@ class SqliteAttributor:
             return None
         finally:
             connection.close()
-        return ":".join(str(value) for value in row) if row else None
+        return _canonical_identity(tuple(str(value) for value in row)) if row else None
+
+
+def _canonical_identity(values: tuple[str, ...]) -> str:
+    """An unambiguous row identity: a scalar for one column, JSON for several.
+
+    Delimiter concatenation is never used, because ``("a:b", "c")`` and
+    ``("a", "b:c")`` would produce the same string. Legacy ledgers keep their
+    scalar identifiers, which is exactly the single-column form.
+    """
+    if len(values) == 1:
+        return values[0]
+    return json.dumps(list(values), separators=(",", ":"))
 
 
 def _row_key(snapshot: TableSnapshot, rowid: str) -> str | None:
     """The declared primary-key identity of a row, when metadata is available."""
     values = snapshot.keys.get(rowid)
-    return ":".join(values) if values else None
+    return _canonical_identity(values) if values else None
 
 
 def _owner(values: dict[str, Any]) -> str | None:

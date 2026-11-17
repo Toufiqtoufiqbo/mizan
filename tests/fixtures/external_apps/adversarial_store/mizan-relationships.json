@@ -5,14 +5,23 @@
     "assets": { "source": "database_foreign_key", "column": "originator_ref" }
   },
   "sharing": {
-    "access_grants": {
+    "item_relations": {
       "resource_fk": "item_ref",
-      "principal_fk": "p_ref",
+      "principal_fk": "collaborator_ref",
       "semantics": "authorization_grant"
     }
   },
   "variants": {
     "provenance": { "ownership": null },
-    "ambiguous_identity": { "identity": { "endpoint": "/whoami", "field": "item_ref" } }
+    "ambiguous_identity": { "identity": { "endpoint": "/whoami", "field": "item_ref" } },
+    "declared_creator": {
+      "sharing": {
+        "item_relations": {
+          "resource_fk": "item_ref",
+          "principal_fk": "creator_ref",
+          "semantics": "authorization_grant"
+        }
+      }
+    }
   }
 }

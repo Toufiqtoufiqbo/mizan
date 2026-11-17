@@ -128,3 +128,18 @@ without an explicit semantic declaration. See `PHASE_V1_CORRECTION_REPORT.md`
 for the four root causes, the reproductions, the fixes and the new
 denominator-based benchmark. The corrected suite is **476 passed / 0 failed /
 0 skipped**; cross-framework gate 8/8.
+
+## Phase V.2 correction notice
+
+Phase V.2 closes the gap between the inference above and the product that runs:
+
+- the contract reaches the real `mizan twin` command and every parallel worker
+  (`--relationship-contract`), and an invalid file fails closed;
+- a grant is confirmed only for the exact declared `resource_fk` **and**
+  `principal_fk`, so creator/observer columns never inherit it;
+- `TaintAnalyzer` consumes the ownership graph when one exists and treats
+  `row_owner` as a diagnostic only; unresolved cases are inconclusive;
+- composite row identities are canonical JSON, never delimiter-joined.
+
+See `PHASE_V2_INTEGRATION_REPORT.md` for reproductions, the exact evidence
+rules and the re-measured benchmark.

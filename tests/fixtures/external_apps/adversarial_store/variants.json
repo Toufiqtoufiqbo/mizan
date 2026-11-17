@@ -3,6 +3,9 @@
   "read": ["L2"],
   "write": ["L3"],
   "grant": [],
+  "creator_only": ["L2"],
+  "observer_only": ["L2"],
+  "declared_creator": ["L2"],
   "provenance": [],
   "ambiguous_identity": []
 }

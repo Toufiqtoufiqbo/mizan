@@ -40,6 +40,7 @@ from mizan.ownership import (
     EvidenceState,
     Observation,
     OwnershipGraph,
+    RelationshipContractError,
     RelationshipType,
     build_ownership_graph,
     parse_identity,
@@ -183,6 +184,15 @@ class Mizan:
         db_rows: dict[str, list[dict[str, Any]]] = {}
         if schema is not None and hasattr(self.attributor, "rows"):
             db_rows = {name: self.attributor.rows(name) for name in schema.tables}
+        # Phase V.2: an operator-supplied contract is configuration, not a hint.
+        # It must describe this database, and a bad declaration stops the scan
+        # instead of silently running with different semantics.
+        if self.relationship_contract is not None:
+            if schema is None or not schema.tables:
+                raise RelationshipContractError(
+                    "a relationship contract was supplied, but no database schema is available"
+                )
+            self.relationship_contract.validate_schema(schema)
         observations = self._identity_observations() if schema is not None else []
         self.graph = build_ownership_graph(
             resources=policy.resources,
@@ -440,10 +450,28 @@ class Mizan:
             ("T", self._probe_data_view),
         ]
 
+    def _data_view_graph(self) -> OwnershipGraph | None:
+        """The graph the data-level analyzer may use.
+
+        Mapping a written database row to an API resource requires a database
+        schema. In a ledger-only deployment there is nothing to map, so every
+        write would become an inconclusive check and a real cross-identity
+        write would be lost. That deployment keeps the historical,
+        policy-level behaviour; a database-backed scan is graph-backed.
+        """
+        return self.graph if self.attributor is not None else None
+
     def _probe_data_view(self) -> list[Violation]:
-        """The data-level view: what the ledger says about the writes."""
-        analyzer = TaintAnalyzer(self.policy)
-        return analyzer.analyze(self._ledger_events())
+        """The data-level view: what the ledger says about the writes.
+
+        When the engine has an ownership graph the analyzer shares it, so the
+        write probes and the data view apply one standard of evidence. The
+        analyzer's own uncertainty is reported with the engine's.
+        """
+        analyzer = TaintAnalyzer(self.policy, graph=self._data_view_graph())
+        violations = analyzer.analyze(self._ledger_events())
+        self.inconclusive_checks.extend(analyzer.inconclusive)
+        return violations
 
     def _is_testable(self, principal: Principal) -> bool:
         """Whether it makes sense to attack with this identity.
@@ -776,24 +804,30 @@ class Mizan:
                         )
                         continue
                     row_key = mapped_resource
-                    owner = event.row_owner
                     if self.graph is not None:
+                        # Graph-backed mode: the graph is the only ownership
+                        # source. A legacy row_owner hint never decides here.
                         state = self.graph.owner_state(row_key)
-                        if state is EvidenceState.CONFIRMED:
-                            owner = self.graph.owner_of(row_key)
-                        elif state in {
-                            EvidenceState.AMBIGUOUS,
-                            EvidenceState.CONTRADICTED,
-                            EvidenceState.CANDIDATE,
-                            EvidenceState.UNKNOWN,
-                        }:
+                        if state is not EvidenceState.CONFIRMED:
                             self.inconclusive_checks.append(
                                 {"law": "L3", "resource": row_key, "reason": f"ownership is {state.value}"}
                             )
                             continue
-                    if owner is None:
-                        known = self.policy.resource(row_key) or self.policy.resource(event.resource_key)
-                        owner = known.owner if known else None
+                        owner = self.graph.owner_of(row_key)
+                        if owner is None:
+                            self.inconclusive_checks.append(
+                                {
+                                    "law": "L3",
+                                    "resource": row_key,
+                                    "reason": "ownership is CONFIRMED but not unique",
+                                }
+                            )
+                            continue
+                    else:
+                        owner = event.row_owner
+                        if owner is None:
+                            known = self.policy.resource(row_key) or self.policy.resource(event.resource_key)
+                            owner = known.owner if known else None
                     if owner is None or owner == attacker.id:
                         continue
                     if self.graph is not None and self.graph.explained_by_sharing(owner, attacker.id, row_key):
@@ -1090,7 +1124,9 @@ class Mizan:
                         ],
                     )
                 )
-        violations.extend(TaintAnalyzer(self.policy).analyze(new_events))
+        data_analyzer = TaintAnalyzer(self.policy, graph=self._data_view_graph())
+        violations.extend(data_analyzer.analyze(new_events))
+        self.inconclusive_checks.extend(data_analyzer.inconclusive)
 
         # L1 - did the server act as the identity the token claims?
         claims = decode_token(principal.token) if principal.token else None

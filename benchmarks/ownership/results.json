@@ -3,20 +3,20 @@
     "seed": "fixed fixture identifiers; no random sampling in the inference",
     "budget_per_scan": 90,
     "law_detection": {
-      "detected": 7,
-      "eligible": 7
+      "detected": 10,
+      "eligible": 10
     },
     "clean_control_false_positives": {
       "count": 0,
       "controls": 8
     },
-    "ownership_edges_confirmed": 42,
+    "ownership_edges_confirmed": 56,
     "ownership_edges_candidates": 2,
-    "resources_discovered": 48,
-    "unresolved_rate": 0.125,
-    "probes_executed": 24,
-    "probe_candidates": 93,
-    "requests_consumed": 348,
+    "resources_discovered": 62,
+    "unresolved_rate": 0.0967741935483871,
+    "probes_executed": 30,
+    "probe_candidates": 116,
+    "requests_consumed": 442,
     "identity_anchor_false_positives": {
       "count": 0,
       "ambiguous_cases": 1
@@ -26,12 +26,55 @@
       "unauthorized_cases": 1
     },
     "resource_row_mapping": {
-      "resolved": 42,
-      "discovered": 48
+      "resolved": 56,
+      "discovered": 62
     },
     "inconclusive_outcomes": {
       "correct": 3,
       "expected": 3
+    },
+    "cli_contract_propagation": {
+      "propagated": 1,
+      "cases": 1,
+      "invented_ownership_without_contract": {
+        "count": 0,
+        "controls": 1
+      },
+      "detail": {
+        "with_contract": {
+          "exit_code": 0,
+          "laws": [
+            "L2"
+          ]
+        },
+        "without_contract": {
+          "exit_code": 0,
+          "laws": []
+        }
+      }
+    },
+    "contract_validation": {
+      "rejected": 5,
+      "invalid_contracts": 5
+    },
+    "principal_fk_selection": {
+      "detected": 3,
+      "eligible": 3,
+      "declared_grants_confirmed": 3,
+      "candidate_associations": 10
+    },
+    "incorrect_grant_suppression": {
+      "suppressed": 0,
+      "eligible": 3
+    },
+    "duplicate_l3": {
+      "findings": 0,
+      "affected_cases": 0
+    },
+    "unresolved_attribution": {
+      "inconclusive_cases": 3,
+      "expected_cases": 3,
+      "inconclusive_checks": 8
     },
     "limitations": [
       "Ownership precision/recall need per-resource labels from a held-out app; the seeded fixture rows are the ground truth here, so they are reported as edge counts rather than claimed as independent generalization.",
@@ -49,35 +92,35 @@
       "law_detection": {
         "<none>": true
       },
-      "resources_discovered": 4,
-      "resources_owned": 4,
-      "confirmed_ownership_edges": 4,
+      "resources_discovered": 5,
+      "resources_owned": 5,
+      "confirmed_ownership_edges": 5,
       "candidate_ownership_edges": 0,
-      "resources_with_ground_truth": 8,
+      "resources_with_ground_truth": 12,
       "unresolved_resources": 0,
       "unresolved_rate": 0.0,
       "requests": {
         "bootstrap": 2,
-        "learning": 13,
-        "attack": 15,
-        "total": 30,
+        "learning": 15,
+        "attack": 18,
+        "total": 35,
         "budget": 90,
         "budget_exhausted": false
       },
       "coverage": {
-        "learning_operations": 13,
-        "resources_discovered": 4,
-        "resources_owned": 4,
-        "probe_candidates": 12,
+        "learning_operations": 15,
+        "resources_discovered": 5,
+        "resources_owned": 5,
+        "probe_candidates": 13,
         "probes_executed": 2,
         "budget_exhausted": false,
         "meaningful": true,
-        "resources_with_ownership_evidence": 4,
+        "resources_with_ownership_evidence": 5,
         "resources_corroborated": 0,
         "ownership_candidates": 0,
         "ownership_ambiguous": 0,
         "sharing_explained": 0,
-        "inconclusive_checks": 1,
+        "inconclusive_checks": 2,
         "identity_anchors_unresolved": 2,
         "ownership_semantics_missing": 0,
         "resource_row_mapping_ambiguous": 0,
@@ -85,7 +128,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 2,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "flask_store",
@@ -101,35 +150,35 @@
       "law_detection": {
         "L2": true
       },
-      "resources_discovered": 4,
-      "resources_owned": 4,
-      "confirmed_ownership_edges": 4,
+      "resources_discovered": 5,
+      "resources_owned": 5,
+      "confirmed_ownership_edges": 5,
       "candidate_ownership_edges": 0,
-      "resources_with_ground_truth": 8,
+      "resources_with_ground_truth": 12,
       "unresolved_resources": 0,
       "unresolved_rate": 0.0,
       "requests": {
         "bootstrap": 2,
-        "learning": 13,
-        "attack": 15,
-        "total": 30,
+        "learning": 15,
+        "attack": 18,
+        "total": 35,
         "budget": 90,
         "budget_exhausted": false
       },
       "coverage": {
-        "learning_operations": 13,
-        "resources_discovered": 4,
-        "resources_owned": 4,
-        "probe_candidates": 12,
+        "learning_operations": 15,
+        "resources_discovered": 5,
+        "resources_owned": 5,
+        "probe_candidates": 13,
         "probes_executed": 2,
         "budget_exhausted": false,
         "meaningful": true,
-        "resources_with_ownership_evidence": 4,
+        "resources_with_ownership_evidence": 5,
         "resources_corroborated": 0,
         "ownership_candidates": 0,
         "ownership_ambiguous": 0,
         "sharing_explained": 0,
-        "inconclusive_checks": 1,
+        "inconclusive_checks": 2,
         "identity_anchors_unresolved": 2,
         "ownership_semantics_missing": 0,
         "resource_row_mapping_ambiguous": 0,
@@ -137,7 +186,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 2,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "flask_store",
@@ -153,35 +208,35 @@
       "law_detection": {
         "L3": true
       },
-      "resources_discovered": 4,
-      "resources_owned": 4,
-      "confirmed_ownership_edges": 4,
+      "resources_discovered": 5,
+      "resources_owned": 5,
+      "confirmed_ownership_edges": 5,
       "candidate_ownership_edges": 0,
-      "resources_with_ground_truth": 8,
+      "resources_with_ground_truth": 12,
       "unresolved_resources": 0,
       "unresolved_rate": 0.0,
       "requests": {
         "bootstrap": 2,
-        "learning": 13,
-        "attack": 15,
-        "total": 30,
+        "learning": 15,
+        "attack": 18,
+        "total": 35,
         "budget": 90,
         "budget_exhausted": false
       },
       "coverage": {
-        "learning_operations": 13,
-        "resources_discovered": 4,
-        "resources_owned": 4,
-        "probe_candidates": 12,
+        "learning_operations": 15,
+        "resources_discovered": 5,
+        "resources_owned": 5,
+        "probe_candidates": 13,
         "probes_executed": 2,
         "budget_exhausted": false,
         "meaningful": true,
-        "resources_with_ownership_evidence": 4,
+        "resources_with_ownership_evidence": 5,
         "resources_corroborated": 0,
         "ownership_candidates": 0,
         "ownership_ambiguous": 0,
         "sharing_explained": 0,
-        "inconclusive_checks": 1,
+        "inconclusive_checks": 2,
         "identity_anchors_unresolved": 2,
         "ownership_semantics_missing": 0,
         "resource_row_mapping_ambiguous": 0,
@@ -189,7 +244,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 5,
+      "l3_unique": 5,
+      "inconclusive_checks": 2,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "linked_store",
@@ -205,7 +266,7 @@
       "resources_owned": 2,
       "confirmed_ownership_edges": 2,
       "candidate_ownership_edges": 0,
-      "resources_with_ground_truth": 6,
+      "resources_with_ground_truth": 8,
       "unresolved_resources": 0,
       "unresolved_rate": 0.0,
       "requests": {
@@ -237,7 +298,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "linked_store",
@@ -257,7 +324,7 @@
       "resources_owned": 6,
       "confirmed_ownership_edges": 6,
       "candidate_ownership_edges": 0,
-      "resources_with_ground_truth": 6,
+      "resources_with_ground_truth": 8,
       "unresolved_resources": 0,
       "unresolved_rate": 0.0,
       "requests": {
@@ -289,7 +356,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "linked_store",
@@ -309,7 +382,7 @@
       "resources_owned": 2,
       "confirmed_ownership_edges": 2,
       "candidate_ownership_edges": 0,
-      "resources_with_ground_truth": 6,
+      "resources_with_ground_truth": 8,
       "unresolved_resources": 0,
       "unresolved_rate": 0.0,
       "requests": {
@@ -341,7 +414,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 2,
+      "l3_unique": 2,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "linked_store",
@@ -364,7 +443,7 @@
       "resources_owned": 6,
       "confirmed_ownership_edges": 6,
       "candidate_ownership_edges": 0,
-      "resources_with_ground_truth": 6,
+      "resources_with_ground_truth": 8,
       "unresolved_resources": 0,
       "unresolved_rate": 0.0,
       "requests": {
@@ -396,7 +475,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 6,
+      "l3_unique": 6,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "linked_store",
@@ -412,7 +497,7 @@
       "resources_owned": 3,
       "confirmed_ownership_edges": 3,
       "candidate_ownership_edges": 0,
-      "resources_with_ground_truth": 6,
+      "resources_with_ground_truth": 8,
       "unresolved_resources": 0,
       "unresolved_rate": 0.0,
       "requests": {
@@ -444,7 +529,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 1,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 1,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "linked_store",
@@ -460,7 +551,7 @@
       "resources_owned": 0,
       "confirmed_ownership_edges": 0,
       "candidate_ownership_edges": 0,
-      "resources_with_ground_truth": 6,
+      "resources_with_ground_truth": 8,
       "unresolved_resources": 2,
       "unresolved_rate": 1.0,
       "requests": {
@@ -488,11 +579,17 @@
         "identity_anchors_unresolved": 0,
         "ownership_semantics_missing": 2,
         "resource_row_mapping_ambiguous": 0,
-        "sharing_semantics_ambiguous": 0
+        "sharing_semantics_ambiguous": 1
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": true,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 1
     },
     {
       "fixture": "adversarial_store",
@@ -540,7 +637,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "adversarial_store",
@@ -556,31 +659,31 @@
       "law_detection": {
         "L2": true
       },
-      "resources_discovered": 4,
-      "resources_owned": 4,
-      "confirmed_ownership_edges": 4,
+      "resources_discovered": 6,
+      "resources_owned": 6,
+      "confirmed_ownership_edges": 6,
       "candidate_ownership_edges": 0,
       "resources_with_ground_truth": 0,
       "unresolved_resources": 0,
       "unresolved_rate": 0.0,
       "requests": {
         "bootstrap": 2,
-        "learning": 12,
-        "attack": 14,
-        "total": 28,
+        "learning": 16,
+        "attack": 20,
+        "total": 38,
         "budget": 90,
         "budget_exhausted": false
       },
       "coverage": {
-        "learning_operations": 12,
-        "resources_discovered": 4,
-        "resources_owned": 4,
-        "probe_candidates": 7,
+        "learning_operations": 16,
+        "resources_discovered": 6,
+        "resources_owned": 6,
+        "probe_candidates": 9,
         "probes_executed": 2,
         "budget_exhausted": false,
         "meaningful": true,
-        "resources_with_ownership_evidence": 4,
-        "resources_corroborated": 4,
+        "resources_with_ownership_evidence": 6,
+        "resources_corroborated": 6,
         "ownership_candidates": 0,
         "ownership_ambiguous": 0,
         "sharing_explained": 0,
@@ -588,11 +691,17 @@
         "identity_anchors_unresolved": 0,
         "ownership_semantics_missing": 0,
         "resource_row_mapping_ambiguous": 0,
-        "sharing_semantics_ambiguous": 1
+        "sharing_semantics_ambiguous": 2
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 3,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 2
     },
     {
       "fixture": "adversarial_store",
@@ -644,7 +753,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 2,
+      "l3_unique": 2,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "adversarial_store",
@@ -688,11 +803,191 @@
         "identity_anchors_unresolved": 0,
         "ownership_semantics_missing": 0,
         "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 2
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": true,
+      "declared_grants": 1,
+      "candidate_associations": 3,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 1,
+      "sharing_semantics_ambiguous": 2
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "creator_only",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 6,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
         "sharing_semantics_ambiguous": 1
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": false,
-      "sharing_should_be_confirmed": true
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 1,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 1
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "observer_only",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 6,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 2
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 2,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 2
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "declared_creator",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 6,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 1
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 1,
+      "candidate_associations": 1,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 1
     },
     {
       "fixture": "adversarial_store",
@@ -740,7 +1035,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": true,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
     },
     {
       "fixture": "adversarial_store",
@@ -788,7 +1089,13 @@
       },
       "false_finding_on_clean_control": false,
       "expected_inconclusive": true,
-      "sharing_should_be_confirmed": false
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
     }
   ]
 }

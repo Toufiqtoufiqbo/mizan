@@ -57,6 +57,19 @@ def parse_identity(value: str | None) -> tuple[str, ...]:
     return (text,)
 
 
+class RelationshipContractError(ValueError):
+    """An explicitly supplied relationship contract is invalid.
+
+    This is a configuration error, not a scan result: continuing with weaker
+    semantics would silently change what the scan is allowed to conclude.
+    """
+
+
+#: Ownership sources the engine understands. A declaration naming anything
+#: else cannot be honoured, so it is rejected instead of being dropped.
+OWNERSHIP_SOURCES = frozenset({"database_foreign_key", "response_field"})
+
+
 @dataclass(frozen=True)
 class RelationshipContract:
     """Explicit, trusted semantic declarations about an application.
@@ -65,6 +78,10 @@ class RelationshipContract:
     column names inside the inference engine. Without it, structural evidence
     stays structural: a foreign key is a reference, and an association row is
     a candidate relationship, never confirmed semantics.
+
+    Three states are distinct and must never collapse into one another:
+    no contract supplied (``None``), a valid contract, and an explicitly
+    supplied contract that is invalid (``RelationshipContractError``).
     """
 
     version: int = 1
@@ -73,7 +90,7 @@ class RelationshipContract:
     sharing: dict[str, tuple[str, str, str, str]] = field(default_factory=dict)
     variants: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    def for_variant(self, name: str | None) -> RelationshipContract:
+    def for_variant(self, name: str | None, *, strict: bool = False) -> RelationshipContract:
         """Merge a variant's explicit declarations over the base contract."""
         if not name or name not in self.variants:
             return self
@@ -98,44 +115,153 @@ class RelationshipContract:
                 merged[section] = {**merged[section], **value}
             else:
                 merged[section] = value
-        return RelationshipContract.from_dict(merged)
+        return RelationshipContract.from_dict(merged, strict=strict)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> RelationshipContract:
+    def from_dict(cls, data: dict[str, Any] | None, *, strict: bool = False) -> RelationshipContract:
+        """Build a contract from JSON data.
+
+        ``strict`` is used for operator-supplied metadata: an unsupported or
+        malformed declaration raises instead of being silently ignored. The
+        lenient mode remains for internally composed data and older callers.
+        """
         if not isinstance(data, dict):
+            if strict:
+                raise RelationshipContractError("a relationship contract must be a JSON object")
             return cls()
+        version = data.get("version", 1)
+        if strict and version != 1:
+            raise RelationshipContractError(f"unsupported relationship-contract version: {version!r}")
         identity = data.get("identity")
         identity_pair = None
         if isinstance(identity, dict) and identity.get("endpoint") and identity.get("field"):
             identity_pair = (str(identity["endpoint"]), str(identity["field"]))
+        elif strict and identity is not None:
+            raise RelationshipContractError("identity must declare both an endpoint and a field")
         ownership: dict[str, tuple[str, str]] = {}
-        for resource_type, declaration in (data.get("ownership") or {}).items():
+        ownership_data = data.get("ownership") or {}
+        if strict and not isinstance(ownership_data, dict):
+            raise RelationshipContractError("ownership must be an object")
+        for resource_type, declaration in ownership_data.items():
             if not isinstance(declaration, dict) or not declaration.get("source"):
+                if strict:
+                    raise RelationshipContractError(f"ownership declaration for {resource_type!r} has no source")
                 continue
+            source = str(declaration["source"])
             name = declaration.get("column") or declaration.get("field")
-            if name:
-                ownership[str(resource_type)] = (str(declaration["source"]), str(name))
+            if not name:
+                if strict:
+                    raise RelationshipContractError(
+                        f"ownership declaration for {resource_type!r} names neither a column nor a field"
+                    )
+                continue
+            if strict and source not in OWNERSHIP_SOURCES:
+                raise RelationshipContractError(
+                    f"unsupported ownership source {source!r} for {resource_type!r}; "
+                    f"expected one of {sorted(OWNERSHIP_SOURCES)}"
+                )
+            ownership[str(resource_type)] = (source, str(name))
         sharing: dict[str, tuple[str, str, str, str]] = {}
-        for table, declaration in (data.get("sharing") or {}).items():
-            if not isinstance(declaration, dict) or declaration.get("semantics") != "authorization_grant":
+        sharing_data = data.get("sharing") or {}
+        if strict and not isinstance(sharing_data, dict):
+            raise RelationshipContractError("sharing must be an object")
+        for table, declaration in sharing_data.items():
+            if not isinstance(declaration, dict):
+                if strict:
+                    raise RelationshipContractError(f"sharing declaration for {table!r} must be an object")
+                continue
+            semantics = declaration.get("semantics")
+            if strict and semantics != "authorization_grant":
+                raise RelationshipContractError(
+                    f"sharing declaration for {table!r} must use semantics 'authorization_grant'"
+                )
+            if semantics != "authorization_grant":
                 continue
             resource_fk, principal_fk = declaration.get("resource_fk"), declaration.get("principal_fk")
-            if resource_fk and principal_fk:
-                sharing[str(table)] = (str(resource_fk), str(principal_fk), "authorization_grant", str(table))
+            if not resource_fk or not principal_fk:
+                if strict:
+                    raise RelationshipContractError(
+                        f"sharing declaration for {table!r} must name both resource_fk and principal_fk"
+                    )
+                continue
+            if strict and resource_fk == principal_fk:
+                raise RelationshipContractError(
+                    f"sharing declaration for {table!r} names the same column for both foreign keys"
+                )
+            sharing[str(table)] = (str(resource_fk), str(principal_fk), "authorization_grant", str(table))
         variants = {}
         if isinstance(data.get("variants"), dict):
             variants = {str(key): value for key, value in data["variants"].items() if isinstance(value, dict)}
+        elif strict and data.get("variants") is not None:
+            raise RelationshipContractError("variants must be an object")
         return cls(version=1, identity=identity_pair, ownership=ownership, sharing=sharing, variants=variants)
 
+    def validate_schema(self, schema: Any) -> None:
+        """Check the declared relationships against the application's schema.
+
+        Syntactic JSON validity is not enough: a grant that names a table or a
+        column the database does not have could silently change which access
+        looks legitimate. Every problem raises, with the offending name.
+        """
+        problems: list[str] = []
+        for table, (resource_fk, principal_fk, _semantics, _name) in sorted(self.sharing.items()):
+            declared = schema.get(table) if schema is not None else None
+            if declared is None:
+                problems.append(f"sharing declares unknown table {table!r}")
+                continue
+            resource_column = declared.column(resource_fk)
+            principal_column = declared.column(principal_fk)
+            if resource_column is None:
+                problems.append(f"{table!r} has no resource_fk column {resource_fk!r}")
+            if principal_column is None:
+                problems.append(f"{table!r} has no principal_fk column {principal_fk!r}")
+            if resource_column is None or principal_column is None:
+                continue
+            resource_target = next((fk for fk in declared.foreign_keys if fk.column == resource_fk), None)
+            principal_target = next((fk for fk in declared.foreign_keys if fk.column == principal_fk), None)
+            if resource_target is None:
+                problems.append(f"{table}.{resource_fk} is not a declared foreign key")
+            if principal_target is None:
+                problems.append(f"{table}.{principal_fk} is not a declared foreign key")
+            if resource_target is not None and principal_target is not None:
+                if getattr(resource_target, "composite", False) or getattr(principal_target, "composite", False):
+                    problems.append(
+                        f"{table} declares a composite foreign key; only single-column grants are supported"
+                    )
+                elif resource_target.table == principal_target.table:
+                    problems.append(
+                        f"{table} references {resource_target.table!r} for both the resource and the principal"
+                    )
+                target = schema.get(resource_target.table) if schema is not None else None
+                if target is None or not target.primary_key:
+                    problems.append(f"{table}.{resource_fk} does not reference a table with a primary key")
+                principal_entity = schema.get(principal_target.table) if schema is not None else None
+                if principal_entity is None or not principal_entity.primary_key:
+                    problems.append(f"{table}.{principal_fk} does not reference a table with a primary key")
+        if problems:
+            raise RelationshipContractError("; ".join(problems))
+
     @classmethod
-    def load(cls, path: str | Path | None, variant: str | None = None) -> RelationshipContract | None:
+    def load(
+        cls, path: str | Path | None, variant: str | None = None, *, strict: bool = False
+    ) -> RelationshipContract | None:
+        """Load a contract file.
+
+        A missing path is the "no contract supplied" state and returns
+        ``None``. With ``strict``, a file that exists but cannot be read,
+        parsed or validated raises ``RelationshipContractError``: an explicit
+        operator decision must never degrade silently into no contract.
+        """
         if path is None or not Path(path).exists():
             return None
         try:
-            contract = cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
-        except (OSError, ValueError):
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            if strict:
+                raise RelationshipContractError(f"cannot read {path}: {exc}") from exc
             return None
-        return contract.for_variant(variant)
+        contract = cls.from_dict(data, strict=strict)
+        return contract.for_variant(variant, strict=strict)
 
 
 #: The conventional response fields that remain one *source* of ownership
@@ -812,8 +938,10 @@ def discover_associations(
     """Structural discovery of association tables.
 
     Table shape is not permission. Rows create **CANDIDATE** sharing unless
-    the trusted contract declares the association as an authorization grant.
-    Candidates never suppress a security finding.
+    the trusted contract declares this exact association - table, resource
+    foreign key **and principal foreign key** - as an authorization grant.
+    A second foreign key that merely points at the same identity table never
+    inherits the grant, because that could suppress a real finding.
     """
     anchor_by_value = {(anchor.table, anchor.column, anchor.value): anchor.principal for anchor in anchors.values()}
     resource_tables = {table for table, declared in schema.tables.items() if declared.primary_key}
@@ -826,29 +954,39 @@ def discover_associations(
         ]
         if not resource_fks or not identity_fks:
             continue
+        grant = contract.sharing.get(table) if contract is not None else None
+        declared_resource_fk = grant[0] if grant is not None else None
+        declared_principal_fk = grant[1] if grant is not None else None
+        if grant is not None and not any(fk.column == declared_principal_fk for fk in identity_fks):
+            graph.inconclusive.setdefault(
+                f"sharing:{table}",
+                "the declared principal foreign key has no anchored identity; no grant is confirmed",
+            )
         for row in rows.get(table, []):
-            principal_values = []
+            principals_by_column: dict[str, str] = {}
             for fk in identity_fks:
                 value = row.get(fk.column)
                 if value is None:
                     continue
                 principal = anchor_by_value.get((fk.table, fk.column_ref, str(value)))
                 if principal:
-                    principal_values.append(principal)
-            if not principal_values:
+                    principals_by_column[fk.column] = principal
+            if not principals_by_column:
                 continue
-            for principal in principal_values:
+            for column, principal in sorted(principals_by_column.items()):
                 for fk in resource_fks:
                     value = row.get(fk.column)
                     if value is None:
                         continue
-                    resource_key = _resource_key_for(resources, str(value))
+                    resource_key = _resource_for_reference(graph, fk.table, str(value))
                     if resource_key is None:
                         continue
-                    grant = contract.sharing.get(table) if contract is not None else None
-                    if grant is not None and grant[0] == str(fk.column) and grant[2] == "authorization_grant":
+                    exact_grant = (
+                        grant is not None and column == declared_principal_fk and str(fk.column) == declared_resource_fk
+                    )
+                    if exact_grant:
                         source, state = "declared_grant", EvidenceState.CONFIRMED
-                        detail = "the application contract declares this association as an authorization grant"
+                        detail = "the application contract declares this exact association as an authorization grant"
                     else:
                         source, state = "association_table", EvidenceState.CANDIDATE
                         detail = "an association row relates the principal to the resource; semantics are unproven"
@@ -870,14 +1008,26 @@ def discover_associations(
                         )
 
 
+def _resource_for_reference(graph: OwnershipGraph, table: str, value: str) -> str | None:
+    """Resolve a database reference to the API resource it actually identifies.
+
+    The referenced table must match and the key must be the resource's complete
+    primary key. Two tables holding the same identifier do not collide, and a
+    coincidentally equal API id in an unrelated table is not accepted.
+    """
+    direct = graph.row_to_resource(table, (value,))
+    if direct is not None:
+        return direct
+    candidates = [
+        resource
+        for resource, (mapped_table, values) in graph.resource_rows.items()
+        if mapped_table == table and values == (str(value),)
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _values(anchor_by_value: dict[tuple[str, str, str], str], fk: Any) -> list[str]:
     return [value for (table, column, value) in anchor_by_value if table == fk.table and column == fk.column_ref]
-
-
-def _resource_key_for(resources: dict[str, Resource], value: str) -> str | None:
-    """Resolve a database key to a discovered resource by its public id."""
-    matches = [key for key, resource in resources.items() if resource.id is not None and str(resource.id) == value]
-    return matches[0] if len(matches) == 1 else None
 
 
 def build_ownership_graph(

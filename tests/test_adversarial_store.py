@@ -21,6 +21,9 @@ CASES = {
     "read": (Verdict.FINDINGS, ("L2",)),
     "write": (Verdict.FINDINGS, ("L3",)),
     "grant": (Verdict.CLEAN, ()),
+    "creator_only": (Verdict.FINDINGS, ("L2",)),
+    "observer_only": (Verdict.FINDINGS, ("L2",)),
+    "declared_creator": (Verdict.FINDINGS, ("L2",)),
     "provenance": (Verdict.INCONCLUSIVE, ()),
     "ambiguous_identity": (Verdict.INCONCLUSIVE, ()),
 }
@@ -53,10 +56,29 @@ def test_a_declared_grant_explains_legitimate_access() -> None:
     result = scan_application(APP, variant="grant", budget=90)
     assert result.finding_count == 0
     assert result.ownership["by_state"]["CONFIRMED"] > 0
-    assert (
-        any(item.get("source") == "declared_grant" for item in result.ownership.get("evidence", {}).values())
-        or result.ownership["by_state"]["CONFIRMED"] > 0
-    )
+    assert result.ownership["sources"].get("declared_grant", 0) >= 1
+
+
+def test_a_creator_column_never_becomes_a_grant() -> None:
+    """The creator row is provenance: access through it stays a real finding."""
+    result = scan_application(APP, variant="creator_only", budget=90)
+    assert result.law_types == ["L2"]
+    assert result.ownership["sources"].get("declared_grant", 0) == 0
+    assert any(finding["principal"] == "bob" and finding["law"] == "L2" for finding in result.findings)
+
+
+def test_an_observer_column_never_becomes_a_grant() -> None:
+    result = scan_application(APP, variant="observer_only", budget=90)
+    assert result.law_types == ["L2"]
+    assert result.ownership["sources"].get("declared_grant", 0) == 0
+
+
+def test_a_contract_naming_the_wrong_principal_fk_does_not_suppress_l2() -> None:
+    """The declared creator column is not the column the application authorizes on."""
+    result = scan_application(APP, variant="declared_creator", budget=90)
+    assert result.law_types == ["L2"]
+    for finding in result.findings:
+        assert finding["principal"] == "bob"
 
 
 def test_provenance_only_ownership_is_inconclusive() -> None:

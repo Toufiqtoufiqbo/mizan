@@ -305,3 +305,34 @@ confident. **Phase V.1 supersedes sections 3–6 of this design**:
 6. `WITHOUT ROWID` tables are snapshotted from declared primary keys.
 
 See `PHASE_V1_CORRECTION_REPORT.md` for root causes, reproductions and evidence.
+
+## 10. Phase V.2 corrections (runtime integration and grant evidence)
+
+V.1 tightened the *inference*, but the shaded semantics were not always the ones
+the running product applied. **Phase V.2 supersedes the execution-path
+assumptions of sections 3–6**:
+
+1. The trusted contract is part of the command-line contract:
+   `mizan twin --relationship-contract PATH`. It is loaded once, strictly, and
+   passed to the learning engine and to every parallel worker. No contract,
+   valid contract and invalid contract are three distinct states; the third
+   exits non-zero with a diagnostic instead of degrading silently.
+2. A declared grant is confirmed only for the exact
+   `(table, resource_fk, principal_fk, authorization_grant)` tuple, with an
+   anchored principal for that column and a reference that resolves to exactly
+   one API resource of the matching table and complete primary key. Other
+   principal foreign keys in the same row remain candidates.
+3. `TaintAnalyzer` is graph-backed when a graph exists. Graph mode requires a
+   unique resource mapping and `OWNS CONFIRMED`; `row_owner` and conventional
+   owner columns are diagnostics there. Legacy mode is preserved only when no
+   graph is attached. The engine selects graph mode for database-backed scans;
+   a ledger-only deployment has no row mapping and keeps the historical
+   policy-level analyzer.
+4. Contract validation is schema-aware: unknown tables/columns, non-foreign-key
+   columns, composite keys, same-target roles and targets without a primary key
+   are rejected before a scan starts.
+5. Composite row identity uses a canonical JSON array; scalar identities remain
+   unchanged for compatibility.
+
+See `PHASE_V2_INTEGRATION_REPORT.md` for the reproductions and the
+denominator-based re-measurement.

@@ -107,3 +107,25 @@ Old ledgers (no `row_key`), old policies, traffic records, proof bundles, SARIF 
 ## 14. Final SHA and PR status
 
 Recorded in the delivery message after the final commit/push; PR #9 remains open and unmerged.
+
+---
+
+## Phase V.2 follow-up (supersedes the execution-path assumptions above)
+
+Sections 3–8 describe the corrected inference; V.2 makes the running product
+apply it:
+
+- `mizan twin --relationship-contract PATH` loads the contract strictly, fails
+  closed on an invalid file, and forwards it to the learning engine and to
+  every parallel worker.
+- A declared grant is confirmed only for the exact `(table, resource_fk,
+  principal_fk, authorization_grant)` tuple with an anchored principal and a
+  uniquely mapped resource; other principal foreign keys stay candidates.
+- `TaintAnalyzer` consumes the ownership graph when attached; `row_owner` is a
+  diagnostic there, and unresolved cases are explicit inconclusive checks.
+  Database-backed scans are graph-backed; ledger-only deployments keep the
+  historical policy-level analyzer because they have no row mapping.
+- Composite row identity is canonical JSON (scalar preserved for single keys).
+
+See `PHASE_V2_INTEGRATION_REPORT.md` for pre-fix reproductions and the
+denominator-based re-measurement.

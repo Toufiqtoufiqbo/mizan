@@ -1,16 +1,23 @@
-"""An independent adversarial application for Phase V.1.
+"""An independent adversarial application for Phase V.1/V.2.
 
 It knows nothing about Mīzān: no import, its own opaque tokens, its own
 SQLite database and its own OpenAPI document. Every name is deliberately
 nonstandard so the engine cannot rely on owner/user conventions.
 
+The relation table carries **three** foreign keys to the principal registry:
+a creator (provenance), a collaborator (the only declared authorization
+grant) and an observer (neither). Only the declared pair may explain access.
+
 Variants:
-  clean             - owner-only access
-  read              - cross-user read allowed, with an unrelated watcher row
-  write             - cross-user write allowed
-  grant             - an explicit access grant (declared in the contract)
-  provenance        - the only principal FK records creation provenance
-  ambiguous_identity- the declared identity field names an item, not a principal
+  clean              - owner-only access
+  read               - cross-user read allowed, with an unrelated observer row
+  write              - cross-user write allowed, with an unrelated observer row
+  grant              - access granted through the declared collaborator column
+  creator_only       - access granted through the creator column (not a grant)
+  observer_only      - access granted through the observer column (not a grant)
+  declared_creator   - the contract names the creator column, access uses the collaborator
+  provenance         - the only principal FK records creation provenance
+  ambiguous_identity - the declared identity field names an item, not a principal
 """
 
 from __future__ import annotations
@@ -40,19 +47,26 @@ CREATE TABLE IF NOT EXISTS inventory_items (
     originator_ref TEXT NOT NULL REFERENCES principals_registry(p_key),
     label TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS observer_links (
+CREATE TABLE IF NOT EXISTS item_relations (
+    link_ref TEXT PRIMARY KEY,
     item_ref TEXT NOT NULL REFERENCES inventory_items(item_ref),
-    p_ref TEXT NOT NULL REFERENCES principals_registry(p_key),
-    PRIMARY KEY (item_ref, p_ref)
-);
-CREATE TABLE IF NOT EXISTS access_grants (
-    item_ref TEXT NOT NULL REFERENCES inventory_items(item_ref),
-    p_ref TEXT NOT NULL REFERENCES principals_registry(p_key),
-    PRIMARY KEY (item_ref, p_ref)
+    creator_ref TEXT REFERENCES principals_registry(p_key),
+    collaborator_ref TEXT REFERENCES principals_registry(p_key),
+    observer_ref TEXT REFERENCES principals_registry(p_key)
 );
 """
 
-VARIANTS = ("clean", "read", "write", "grant", "provenance", "ambiguous_identity")
+VARIANTS = (
+    "clean",
+    "read",
+    "write",
+    "grant",
+    "creator_only",
+    "observer_only",
+    "declared_creator",
+    "provenance",
+    "ambiguous_identity",
+)
 USERS = (("alice", "Alice"), ("bob", "Bob"))
 
 
@@ -93,14 +107,15 @@ def create_app(database: str | Path, *, vulnerability: str = "clean") -> Flask:
                 "INSERT OR IGNORE INTO inventory_items (item_ref, originator_ref, label) VALUES (?, ?, ?)",
                 ("item-bob-1", "bob", "Bob's item"),
             )
-            # A watcher row with no authorization semantics whatsoever.
+            relation = _relation_row(vulnerability)
             connection.execute(
-                "INSERT OR IGNORE INTO observer_links (item_ref, p_ref) VALUES (?, ?)", ("item-alice-1", "bob")
+                """
+                INSERT OR REPLACE INTO item_relations
+                    (link_ref, item_ref, creator_ref, collaborator_ref, observer_ref)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                relation,
             )
-            if vulnerability == "grant":
-                connection.execute(
-                    "INSERT OR IGNORE INTO access_grants (item_ref, p_ref) VALUES (?, ?)", ("item-alice-1", "bob")
-                )
         connection.close()
 
     initialise()
@@ -158,19 +173,27 @@ def create_app(database: str | Path, *, vulnerability: str = "clean") -> Flask:
         finally:
             connection.close()
 
+    def relation_for(item_ref: str) -> sqlite3.Row | None:
+        connection = connect()
+        try:
+            return connection.execute("SELECT * FROM item_relations WHERE item_ref = ?", (item_ref,)).fetchone()
+        finally:
+            connection.close()
+
+    def related(key: str, column: str, item_ref: str) -> bool:
+        row = relation_for(item_ref)
+        return row is not None and row[column] == key
+
     def may_read(row: sqlite3.Row, key: str) -> bool:
         variant = app.config["VULNERABILITY"]
         if variant == "read":
             return True
-        if variant == "grant":
-            connection = connect()
-            try:
-                grant = connection.execute(
-                    "SELECT 1 FROM access_grants WHERE item_ref = ? AND p_ref = ?", (row["item_ref"], key)
-                ).fetchone()
-            finally:
-                connection.close()
-            return row["originator_ref"] == key or grant is not None
+        if variant in {"grant", "declared_creator"}:
+            return row["originator_ref"] == key or related(key, "collaborator_ref", row["item_ref"])
+        if variant == "creator_only":
+            return row["originator_ref"] == key or related(key, "creator_ref", row["item_ref"])
+        if variant == "observer_only":
+            return row["originator_ref"] == key or related(key, "observer_ref", row["item_ref"])
         return row["originator_ref"] == key
 
     @app.get("/assets")
@@ -233,6 +256,18 @@ def create_app(database: str | Path, *, vulnerability: str = "clean") -> Flask:
         return jsonify(item_json(updated))
 
     return app
+
+
+def _relation_row(variant: str) -> tuple[str, str, str | None, str | None, str | None]:
+    """The relation row for one variant: (link, item, creator, collaborator, observer)."""
+    if variant == "creator_only":
+        return ("link-1", "item-alice-1", "bob", None, None)
+    if variant == "observer_only":
+        return ("link-1", "item-alice-1", "alice", None, "bob")
+    if variant in {"grant", "declared_creator"}:
+        return ("link-1", "item-alice-1", "alice", "bob", None)
+    # An unrelated observer row: it must never explain or suppress anything.
+    return ("link-1", "item-alice-1", "alice", None, "bob")
 
 
 def main() -> None:

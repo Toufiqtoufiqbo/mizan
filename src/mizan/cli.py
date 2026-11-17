@@ -133,6 +133,13 @@ def attack(
     type=click.Path(exists=True),
     help="JSON identity-map file for opaque tokens: environment-variable names, never tokens.",
 )
+@click.option(
+    "--relationship-contract",
+    "relationship_contract_path",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Trusted JSON declarations of identity endpoints, ownership columns and authorization grants.",
+)
 @click.option("--workdir", default=".", type=click.Path(), help="Where the application runs.")
 @click.option("--out", "out_path", default="mizan-proofs", type=click.Path(), help="Directory for proof bundles.")
 @click.option(
@@ -154,6 +161,7 @@ def twin(
     spec_path: str,
     tokens: tuple[str, ...],
     identity_map_path: str | None,
+    relationship_contract_path: str | None,
     workdir: str,
     out_path: str,
     traffic_path: str | None,
@@ -175,8 +183,18 @@ def twin(
     from mizan.attribution import SqliteAttributor
     from mizan.identity import IdentityMapError, load_identity_map, resolve_identity_map
     from mizan.learning import learn_from_spec
+    from mizan.ownership import RelationshipContract, RelationshipContractError
     from mizan.proxy import RecordingProxy
     from mizan.twin import Twin, TwinSpec
+
+    # Three states, kept distinct: no contract (None), a valid contract, and an
+    # invalid contract, which is a configuration error - never a silent
+    # downgrade to weaker semantics.
+    try:
+        contract = RelationshipContract.load(relationship_contract_path, strict=True)
+    except RelationshipContractError as exc:
+        click.echo(f"relationship contract error: {exc}", err=True)
+        raise SystemExit(2) from None
 
     identities: list[Principal] = []
     token_values: list[str] = []
@@ -249,10 +267,15 @@ def twin(
                     spec_path=spec_path,
                     twin=worker_twin,
                     attributor=attributor,
+                    relationship_contract=contract,
                 )
 
             engine = build_engine(proxy.base_url, resolved_data)
-            policy = engine.learn()
+            try:
+                policy = engine.learn()
+            except RelationshipContractError as exc:
+                click.echo(f"relationship contract error: {exc}", err=True)
+                raise SystemExit(2) from None
             click.echo(f"learned {len(policy.resources)} resources and {len(policy.rules)} rules")
 
             if guided:
@@ -261,7 +284,11 @@ def twin(
                 # The workers start from the pristine snapshot, not from the
                 # state the learning phase left behind.
                 pristine = engine_instance.snapshot_files() or resolved_data
-                violations = _attack_parallel(spec, workers, workspace, pristine, build_engine, out_path)
+                try:
+                    violations = _attack_parallel(spec, workers, workspace, pristine, build_engine, out_path)
+                except RelationshipContractError as exc:
+                    click.echo(f"relationship contract error: {exc}", err=True)
+                    raise SystemExit(2) from None
             else:
                 violations = engine.attack()
             directories = engine.write_bundles(violations, out_path)
