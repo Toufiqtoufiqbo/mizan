@@ -353,3 +353,28 @@ Phase V.2.1 narrows the semantics above in two places:
    relevant eligible L2/L3 check to have been attempted and resolved; a proven
    finding keeps `FINDINGS` precedence over incomplete coverage. See
    `PHASE_V2_1_SOUNDNESS_REPORT.md`.
+
+### Phase V.2.2 addendum
+
+Phase V.2.2 narrows the coverage boundary without changing the V.2.1
+authorization semantics:
+
+1. **Relevance rule.** An ownership-unresolved resource contributes to L2/L3
+   coverage only when it was discovered through a successful ownership-sensitive
+   traffic record (read ⇒ L2, write ⇒ L3), a non-privileged testable identity
+   exists, and the resource belongs to the ownership model — it has a unique
+   database row mapping, any ownership relationship evidence (even a CANDIDATE),
+   an ownership/sharing declaration for its type, or a recorded mapping
+   ambiguity. Health/login/static responses have no resource record and are
+   excluded. Ledger-only scans (no graph) keep their historical behavior.
+2. **Unresolved checks are first-class.** Relevant unresolved checks are
+   recorded once per stable `(law, action, resource, principal)` identity as
+   `INCONCLUSIVE` outcomes: eligible, attempted and inconclusive. They are never
+   findings and never silently resolved. Duplicates from repeated traffic
+   observations collapse into one denominator entry.
+3. **Strict variants.** A strict contract now rejects any non-object variant
+   value, an empty/non-string variant name, and invalid declarations inside a
+   variant (including action/sharing errors) at load time. Lenient mode keeps
+   dropping the invalid entry and never creates an effective grant.
+
+See `PHASE_V2_2_COVERAGE_REPORT.md` for measurements and gates.

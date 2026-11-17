@@ -323,8 +323,11 @@ def test_a_variant_override_is_validated_identically(tmp_path: Path) -> None:
             }
         }
     }
-    contract = RelationshipContract.from_dict(data, strict=True)
+    # Strict validation may reject at load time or when the override is
+    # selected; both are valid "fail before conclusions" points. The assertion
+    # is that the invalid override is never silently accepted.
     with pytest.raises(RelationshipContractError, match="action"):
+        contract = RelationshipContract.from_dict(data, strict=True)
         contract.for_variant("broken", strict=True)
 
 

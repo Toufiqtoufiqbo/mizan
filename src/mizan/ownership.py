@@ -137,11 +137,9 @@ class RelationshipContract:
     sharing: dict[str, tuple[str, str, str, str, frozenset[str]]] = field(default_factory=dict)
     variants: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    def for_variant(self, name: str | None, *, strict: bool = False) -> RelationshipContract:
-        """Merge a variant's explicit declarations over the base contract."""
-        if not name or name not in self.variants:
-            return self
-        merged = {
+    def _merged_data(self, name: str, override: dict[str, Any]) -> dict[str, Any]:
+        """Merge one variant's explicit declarations over the base contract."""
+        merged: dict[str, Any] = {
             "version": self.version,
             "identity": {"endpoint": self.identity[0], "field": self.identity[1]} if self.identity else None,
             "ownership": {key: {"source": value[0], "column": value[1]} for key, value in self.ownership.items()},
@@ -155,7 +153,6 @@ class RelationshipContract:
                 for key, value in self.sharing.items()
             },
         }
-        override = self.variants[name]
         for section, value in override.items():
             if value is None:
                 merged.pop(section, None)
@@ -163,7 +160,13 @@ class RelationshipContract:
                 merged[section] = {**merged[section], **value}
             else:
                 merged[section] = value
-        return RelationshipContract.from_dict(merged, strict=strict)
+        return merged
+
+    def for_variant(self, name: str | None, *, strict: bool = False) -> RelationshipContract:
+        """Merge a variant's explicit declarations over the base contract."""
+        if not name or name not in self.variants:
+            return self
+        return RelationshipContract.from_dict(self._merged_data(name, self.variants[name]), strict=strict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None, *, strict: bool = False) -> RelationshipContract:
@@ -246,12 +249,35 @@ class RelationshipContract:
                 str(table),
                 actions,
             )
-        variants = {}
-        if isinstance(data.get("variants"), dict):
-            variants = {str(key): value for key, value in data["variants"].items() if isinstance(value, dict)}
-        elif strict and data.get("variants") is not None:
-            raise RelationshipContractError("variants must be an object")
-        return cls(version=1, identity=identity_pair, ownership=ownership, sharing=sharing, variants=variants)
+        variants_data = data.get("variants")
+        variants: dict[str, dict[str, Any]] = {}
+        if variants_data is None:
+            pass
+        elif not isinstance(variants_data, dict):
+            if strict:
+                raise RelationshipContractError("variants must be an object")
+        else:
+            for key, value in variants_data.items():
+                name = str(key)
+                if strict:
+                    if not isinstance(key, str) or not name.strip():
+                        raise RelationshipContractError("every variant must have a non-empty string name")
+                    if not isinstance(value, dict):
+                        raise RelationshipContractError(
+                            f"variant {name!r} must be an object, got {type(value).__name__}"
+                        )
+                if isinstance(value, dict):
+                    variants[name] = value
+        contract = cls(version=1, identity=identity_pair, ownership=ownership, sharing=sharing, variants=variants)
+        if strict:
+            # A variant override is the same kind of declaration as the base
+            # contract. Re-validate the merged result now: an invalid override
+            # must fail before any security conclusion is produced, not only
+            # when that variant happens to be selected later.
+            for name in sorted(variants):
+                merged = contract._merged_data(name, variants[name])
+                cls.from_dict(merged, strict=True)
+        return contract
 
     def validate_schema(self, schema: Any) -> None:
         """Check the declared relationships against the application's schema.

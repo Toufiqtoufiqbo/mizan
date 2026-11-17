@@ -48,6 +48,9 @@ CASES: list[tuple[str, str, tuple[str, ...], bool]] = [
     ("adversarial_store", "declared_creator", ("L2",), True),
     ("adversarial_store", "provenance", (), True),
     ("adversarial_store", "ambiguous_identity", (), True),
+    # Phase V.2.2 mixed confirmed/candidate/unknown ownership fixture.
+    ("mixed_ownership", "clean", (), True),
+    ("mixed_ownership", "finding", ("L3",), True),
 ]
 
 BUDGET = 90
@@ -102,13 +105,18 @@ def _measure(fixture: str, variant: str, expected: tuple[str, ...]) -> dict[str,
         "resources_owned": result.coverage.resources_owned,
         "confirmed_ownership_edges": confirmed,
         "candidate_ownership_edges": candidates,
+        "unknown_ownership_resources": sum(
+            1 for key in report.get("inconclusive", {}) if not key.startswith(("identity:", "sharing:"))
+        ),
         "resources_with_ground_truth": len(truth),
         "unresolved_resources": max(0, discovered - confirmed),
         "unresolved_rate": (max(0, discovered - confirmed) / discovered) if discovered else None,
         "requests": result.requests.to_dict(),
         "coverage": result.coverage.to_dict(),
         "false_finding_on_clean_control": (bool(result.law_types) if not expected else False),
-        "expected_inconclusive": variant in {"ambiguous", "provenance", "ambiguous_identity"},
+        "expected_inconclusive": variant in {"ambiguous", "provenance", "ambiguous_identity"}
+        or fixture == "mixed_ownership"
+        and variant == "clean",
         "sharing_should_be_confirmed": variant == "grant",
         "declared_grants": report.get("sources", {}).get("declared_grant", 0),
         "candidate_associations": report.get("sources", {}).get("association_table", 0),
@@ -131,7 +139,18 @@ def _measure(fixture: str, variant: str, expected: tuple[str, ...]) -> dict[str,
         "l2_detected": "L2" in result.law_types,
         "l3_detected": "L3" in result.law_types,
         "law_coverage": result.coverage.to_dict()["laws"],
+        "pending_checks": result.coverage.pending_checks,
+        "resolved_checks": result.coverage.resolved_checks,
+        "unresolved_checks": result.coverage.unresolved_checks,
+        "clean_with_unresolved": (result.verdict.value == "CLEAN" and result.coverage.unresolved_checks > 0),
         "authorization_outcomes": report.get("authorization_outcomes", []),
+        "duplicate_outcomes": len(report.get("authorization_outcomes", []))
+        - len(
+            {
+                (item.get("law"), item.get("action"), item.get("resource"), item.get("principal"), item.get("outcome"))
+                for item in report.get("authorization_outcomes", [])
+            }
+        ),
         "inconclusive_checks": len(result.ownership.get("inconclusive_checks", [])),
         "sharing_semantics_ambiguous": result.coverage.sharing_semantics_ambiguous,
     }
@@ -439,11 +458,34 @@ def main() -> None:
             for field in ("eligible", "attempted", "decided", "allowed_by_grant", "findings", "inconclusive")
         }
     duplicate_l2_findings = sum(max(0, m["l2_findings"] - m["l2_unique"]) for m in measurements)
+    mixed_cases = [m for m in measurements if m["fixture"] == "mixed_ownership"]
+    duplicate_outcomes = sum(m["duplicate_outcomes"] for m in measurements)
+    clean_false_positives = sum(1 for m in clean_controls if m["verdict"] == "CLEAN" and m["law_types"])
+    clean_with_unresolved = sum(1 for m in measurements if m["clean_with_unresolved"])
 
     summary = {
         "seed": "fixed fixture identifiers; no random sampling in the inference",
         "budget_per_scan": BUDGET,
         "case_count": len(measurements),
+        "ownership_evidence": {
+            "confirmed_checks": sum(m["confirmed_ownership_edges"] for m in measurements),
+            "candidate_checks": sum(m["candidate_ownership_edges"] for m in measurements),
+            "unknown_checks": sum(m["unknown_ownership_resources"] for m in measurements),
+            "denominator_cases": len(measurements),
+        },
+        "pending_checks": sum(m["pending_checks"] for m in measurements),
+        "duplicate_outcomes": {"count": duplicate_outcomes, "denominator_cases": len(measurements)},
+        "clean_verdict_false_positives": {
+            "with_findings": clean_false_positives,
+            "with_unresolved": clean_with_unresolved,
+            "controls": len(clean_controls),
+        },
+        "mixed_ownership_fixture": {
+            "cases": len(mixed_cases),
+            "l2_inconclusive": sum(m["law_coverage"].get("L2", {}).get("inconclusive", 0) for m in mixed_cases),
+            "l3_inconclusive": sum(m["law_coverage"].get("L3", {}).get("inconclusive", 0) for m in mixed_cases),
+            "l3_findings": sum(m["l3_findings"] for m in mixed_cases),
+        },
         "l2_detection": {"detected": l2_detected, "eligible_cases": len(l2_eligible)},
         "l3_detection": {"detected": l3_detected, "eligible_cases": len(l3_eligible)},
         "read_only_grant_behavior": {

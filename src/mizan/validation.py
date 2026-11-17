@@ -288,6 +288,12 @@ LAUNCH_ADVERSARIAL = LaunchSpec(
     spec_source=SpecSource.from_file("{fixture}/openapi.json"),
 )
 
+#: The Phase V.2.2 mixed-ownership fixture (confirmed/candidate/unknown).
+LAUNCH_MIXED = LaunchSpec(
+    command=[sys.executable, "{fixture}/app.py"],
+    spec_source=SpecSource.from_file("{fixture}/openapi.json"),
+)
+
 
 def launch_for(fixture_dir: Path) -> LaunchSpec | None:
     """Return the ``LaunchSpec`` for a fixture directory, or ``None`` if unknown."""
@@ -297,6 +303,7 @@ def launch_for(fixture_dir: Path) -> LaunchSpec | None:
         "flask_store": LAUNCH_FLASK,
         "linked_store": LAUNCH_LINKED,
         "adversarial_store": LAUNCH_ADVERSARIAL,
+        "mixed_ownership": LAUNCH_MIXED,
     }
     return _FIXTURE_LAUNCH.get(fixture_dir.name)
 

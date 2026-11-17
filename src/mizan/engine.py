@@ -35,6 +35,7 @@ from mizan.core import (
     ScanCoverage,
     Step,
     Violation,
+    actions_for,
     is_authority_field,
 )
 from mizan.identity import decode_token
@@ -317,6 +318,10 @@ class Mizan:
         self.outcomes = []
         self._outcome_seen = set()
         self._inconclusive_seen = set()
+        # Unresolved ownership is not silence: record it as an inconclusive
+        # security check before the probes run, so it is part of the same
+        # per-law accounting as the outcomes the probes produce.
+        self._record_unresolved_checks()
         for name, probe in self.probe_groups():
             if groups is not None and name not in groups:
                 continue
@@ -331,6 +336,149 @@ class Mizan:
             if self.requests > issued_before:
                 self.probes_executed += 1
         return _dedupe(violations)
+
+    # -- relevance of unresolved ownership -------------------------------- #
+
+    def _ownership_unresolved(self, resource_key: str) -> bool:
+        """Whether a discovered resource lacks a unique confirmed owner.
+
+        Candidate, unknown, ambiguous and contradicted ownership are all
+        unresolved. Ledger-only scans (no graph) have no ownership evidence and
+        therefore no relevance claim: they keep the historical behavior instead
+        of inventing uncertainty for every resource.
+        """
+        if self.graph is None:
+            return False
+        return self.graph.owner_state(resource_key) is not EvidenceState.CONFIRMED or (
+            self.graph.owner_of(resource_key) is None
+        )
+
+    def _ownership_relevant(self, resource_key: str, resource: Resource) -> bool:
+        """Whether an unresolved resource belongs to the ownership-sensitive surface.
+
+        A resource is relevant when it has a unique database row mapping, any
+        ownership relationship evidence (even a candidate), an explicit
+        ownership/sharing declaration for its type, or a recorded ownership
+        mapping ambiguity. Health/login endpoints and static metadata have no
+        resource record at all, so they never reach this predicate; a resource
+        with no ownership signal of any kind is outside the model.
+        """
+        if self.graph is None:
+            return False
+        if resource_key in self.graph.resource_rows:
+            return True
+        if self.graph.owner_state(resource_key) is not EvidenceState.UNKNOWN:
+            return True
+        reason = self.graph.inconclusive.get(resource_key, "").lower()
+        if "mapping" in reason or "ownership" in reason or "owner" in reason:
+            return True
+        contract = self.relationship_contract
+        return contract is not None and (resource.type in contract.ownership or resource.type in contract.sharing)
+
+    def _representative_principal(self, resource_key: str, observed: str | None) -> str | None:
+        """A stable, non-privileged, testable identity for an unresolved check.
+
+        The identity is derived from the resource and the configured identities
+        only, so repeated traffic observations cannot create new checks.
+        """
+        candidates = sorted(
+            principal.id for principal in self.target.principals if principal.token and self._is_testable(principal)
+        )
+        if not candidates:
+            return None
+        owner_hints = {
+            relation.subject
+            for relation in (self.graph.relationships if self.graph is not None else [])
+            if relation.type is RelationshipType.OWNS and relation.object == resource_key
+        }
+        remaining = [pid for pid in candidates if pid not in owner_hints and pid != observed]
+        if remaining:
+            return remaining[0]
+        remaining = [pid for pid in candidates if pid not in owner_hints]
+        return remaining[0] if remaining else candidates[0]
+
+    def _mapped_ledger_resource(self, event: Any) -> str | None:
+        """Unique API resource for a ledger write, or ``None`` when unmapped."""
+        if self.graph is None:
+            return event.resource_key
+        components = parse_identity(event.row_key) if event.row_key else None
+        if components:
+            return self.graph.row_to_resource(event.table, components)
+        candidates = [
+            resource
+            for resource, (table, values) in self.graph.resource_rows.items()
+            if table == event.table and values == (str(event.row_id),)
+        ]
+        return candidates[0] if len(candidates) == 1 else None
+
+    def _unresolved_checks(self) -> list[tuple[str, str, str, str, str]]:
+        """Relevant ownership checks that the probes cannot resolve.
+
+        Returns ``(law, action, resource, principal, reason)`` tuples, one per
+        stable check identity. They are counted as eligible, attempted and
+        inconclusive: an unresolved fact is never a finding and never a
+        successful check.
+        """
+        if self.graph is None:
+            return []
+        found: dict[tuple[str, str, str, str], str] = {}
+        for (method, _template), records in self._examples().items():
+            action = actions_for(method)
+            if action == "read":
+                law = "L2"
+            elif action == "write":
+                law = "L3"
+            else:
+                continue
+            for record in records:
+                if not (200 <= record.status < 400):
+                    continue
+                resource = record.resource
+                if resource is None:
+                    continue
+                key = resource.key
+                if not self._ownership_unresolved(key) or not self._ownership_relevant(key, resource):
+                    continue
+                principal = self._representative_principal(key, record.principal)
+                if principal is None:
+                    continue
+                reason = self.graph.inconclusive.get(key) or (
+                    f"ownership is {self.graph.owner_state(key).value}; a confirmed owner is required"
+                )
+                found.setdefault((law, action, key, principal), reason)
+
+        # A write whose database row cannot be mapped to an API resource is a
+        # relevant unresolved L3 check too. The ledger analyzer records it with
+        # the raw event resource key, so the same identity must be eligible.
+        observed_write_tables = {
+            record.resource.type
+            for (method, _template), records in self._examples().items()
+            if method in {"POST", "PUT", "PATCH"}
+            for record in records
+            if 200 <= record.status < 400 and record.resource is not None
+        }
+        for event in self._ledger_events():
+            if event.action != "write" or event.table not in observed_write_tables:
+                continue
+            if self._mapped_ledger_resource(event) is not None:
+                continue
+            principal = (
+                event.principal
+                if self.target.principal(event.principal)
+                else self._representative_principal(event.resource_key, event.principal)
+            )
+            if principal is None:
+                continue
+            found.setdefault(
+                ("L3", "write", event.resource_key, principal),
+                "the changed database row does not map uniquely to an API resource",
+            )
+        return [(*identity, found[identity]) for identity in sorted(found)]
+
+    def _record_unresolved_checks(self) -> None:
+        """Expose relevant unresolved checks as inconclusive security checks."""
+        for law, action, resource, principal, reason in self._unresolved_checks():
+            self._inconclusive(law, resource, reason, action=action, principal=principal)
 
     def _eligible_probe_targets(self) -> dict[str, int]:
         """How many checks each probe could legitimately run, before it runs.
@@ -365,43 +513,34 @@ class Mizan:
         # L1 - an identity endpoint per testable principal.
         counts["L1"] = len(self._identity_endpoints()) * len(attackers)
 
-        # L2 - one check per (observed read of an owned object, other
-        # testable principal). A probe group is not a check: the group can
-        # contain several objects and several identities.
-        reads = 0
+        # L2/L3 - one check per stable (law, action, resource, principal)
+        # identity. The set is what makes duplicate traffic observations collapse
+        # into a single denominator entry. Ownership-unresolved resources that
+        # are relevant to an observed read/write are eligible too: a missing
+        # owner is not evidence that the operation was safe.
+        l2_checks: set[tuple[str, str, str, str]] = set()
+        l3_checks: set[tuple[str, str, str, str]] = set()
         for (method, _template), records in examples.items():
-            if method not in {"GET", "HEAD"}:
-                continue
-            for record in records:
-                resource = record.resource
-                if resource is None or not resource.owner:
-                    continue
-                owner = resource.owner
-                for attacker in attackers:
-                    if attacker.id != owner and attacker.token:
-                        reads += 1
-        counts["L2"] = reads
-
-        # L3 - one check per unique (attacker, object, write method), the same
-        # identity the write probe uses to deduplicate its attempts.
-        writes = 0
-        seen_writes: set[tuple[str, str, str]] = set()
-        for (method, template), records in examples.items():
-            if method not in {"POST", "PUT", "PATCH"}:
-                continue
-            if not any(isinstance(record.body, dict) for record in records):
-                continue
-            for _url, resource in self._candidate_urls(method, template, records):
-                if resource is None or not resource.owner:
-                    continue
-                for attacker in attackers:
-                    if attacker.id == resource.owner or not attacker.token:
+            if method in {"GET", "HEAD"}:
+                for record in records:
+                    resource = record.resource
+                    if resource is None or not resource.owner:
                         continue
-                    key = (attacker.id, resource.key, method)
-                    if key not in seen_writes:
-                        seen_writes.add(key)
-                        writes += 1
-        counts["L3"] = writes
+                    for attacker in attackers:
+                        if attacker.id != resource.owner and attacker.token:
+                            l2_checks.add(("L2", "read", resource.key, attacker.id))
+            elif method in {"POST", "PUT", "PATCH"} and any(isinstance(record.body, dict) for record in records):
+                for _url, resource in self._candidate_urls(method, _template, records):
+                    if resource is None or not resource.owner:
+                        continue
+                    for attacker in attackers:
+                        if attacker.id == resource.owner or not attacker.token:
+                            continue
+                        l3_checks.add(("L3", "write", resource.key, attacker.id))
+        for law, action, resource, principal, _reason in self._unresolved_checks():
+            (l2_checks if law == "L2" else l3_checks).add((law, action, resource, principal))
+        counts["L2"] = len(l2_checks)
+        counts["L3"] = len(l3_checks)
 
         # L4 - an authority-carrying field to try writing.
         fields = sorted(self._authority_fields())
@@ -508,7 +647,12 @@ class Mizan:
             eligible = self.eligible_by_law.get(law, 0)
             if not eligible and not records:
                 continue
-            counter = LawCoverage(eligible=eligible, attempted=len(records))
+            # Every recorded outcome is, by definition, an eligible check that
+            # actually ran. Ledger writes discovered only while the probes run
+            # (for example a row created by a POST) may not have been in the
+            # pre-computed target list; include them in the denominator so the
+            # counters stay internally consistent.
+            counter = LawCoverage(eligible=max(eligible, len(records)), attempted=len(records))
             for item in records:
                 value = item.get("outcome")
                 if value == AuthorizationOutcome.DECIDED.value:

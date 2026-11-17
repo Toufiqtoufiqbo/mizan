@@ -1,0 +1,53 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Mixed Ownership Fixture", "version": "1.0.0" },
+  "servers": [{ "url": "/" }],
+  "components": {
+    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
+    "schemas": {
+      "Login": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "examples": ["alice"] },
+          "password": { "type": "string", "examples": ["alice-secret"] }
+        }
+      },
+      "Item": {
+        "type": "object",
+        "properties": {
+          "item_ref": { "type": "string" },
+          "label": { "type": "string" }
+        }
+      },
+      "NewLabel": {
+        "type": "object",
+        "required": ["label"],
+        "properties": { "label": { "type": "string", "examples": ["Changed"] } }
+      }
+    }
+  },
+  "paths": {
+    "/health": { "get": { "responses": { "200": { "description": "OK" } } } },
+    "/login": { "post": { "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Login" } } } }, "responses": { "200": { "description": "OK" } } } },
+    "/whoami": { "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK" } } } },
+    "/confirmed": { "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } } } } } } } },
+    "/confirmed/{item_ref}": {
+      "parameters": [{ "name": "item_ref", "in": "path", "required": true, "schema": { "type": "string" } }],
+      "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } } } } },
+      "put": { "security": [{ "bearerAuth": [] }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NewLabel" } } } }, "responses": { "200": { "description": "OK" } } }
+    },
+    "/candidate": { "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } } } } } } } },
+    "/candidate/{item_ref}": {
+      "parameters": [{ "name": "item_ref", "in": "path", "required": true, "schema": { "type": "string" } }],
+      "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } } } } },
+      "put": { "security": [{ "bearerAuth": [] }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NewLabel" } } } }, "responses": { "200": { "description": "OK" } } }
+    },
+    "/unknown": { "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } } } } } } } },
+    "/unknown/{item_ref}": {
+      "parameters": [{ "name": "item_ref", "in": "path", "required": true, "schema": { "type": "string" } }],
+      "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } } } } },
+      "put": { "security": [{ "bearerAuth": [] }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NewLabel" } } } }, "responses": { "200": { "description": "OK" } } }
+    }
+  }
+}
