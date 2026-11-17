@@ -746,5 +746,88 @@ def _print_report(engine: Mizan, violations: list[Any], directories: list[Path])
     )
 
 
+@main.command("postgres-evidence")
+@click.option(
+    "--dsn-env",
+    default="MIZAN_DATABASE_URL",
+    show_default=True,
+    help="Name of the environment variable holding the DSN.",
+)
+@click.option("--schema", "schemas", multiple=True, required=True, help="Schema to inspect (repeatable allowlist).")
+@click.option(
+    "--audit-schema", default=None, help="Schema holding the audit table (default: first allowlisted schema)."
+)
+@click.option("--install-audit", is_flag=True, help="Explicit opt-in: create audit table, function and triggers.")
+@click.option("--relationship-contract", "contract_path", default=None, type=click.Path(exists=True, dir_okay=False))
+@click.option("--out", "out_path", default=None, type=click.Path())
+def postgres_evidence(
+    dsn_env: str,
+    schemas: tuple[str, ...],
+    audit_schema: str | None,
+    install_audit: bool,
+    contract_path: str | None,
+    out_path: str | None,
+) -> None:
+    """Build ownership evidence from a PostgreSQL database (read-only).
+
+    This command does NOT attack the database. PostgreSQL attack/twin mode
+    fails closed because filesystem snapshots cannot restore a live database.
+    """
+    import os
+
+    from mizan.attribution import AttributionUnavailable
+    from mizan.ownership import RelationshipContract, RelationshipContractError, build_ownership_graph
+    from mizan.postgres_attribution import PostgresAttributor
+
+    dsn = os.environ.get(dsn_env)
+    if not dsn:
+        raise click.ClickException(f"environment variable {dsn_env} is not set")
+    allowlist = tuple(dict.fromkeys(schemas))
+    audit = audit_schema or allowlist[0]
+    try:
+        import psycopg
+
+        connection = psycopg.connect(dsn, connect_timeout=5)
+    except Exception:
+        # Never echo a DSN: passwords and hosts must not reach logs.
+        raise click.ClickException("cannot connect to PostgreSQL (check the DSN environment variable)")
+    try:
+        provider = PostgresAttributor(connection, schemas=allowlist, audit_schema=audit)
+        if install_audit:
+            provider.auditor.install()
+        try:
+            declared = provider.schema()
+        except AttributionUnavailable:
+            raise click.ClickException(
+                "the audit table is not installed; pass --install-audit explicitly to allow schema changes"
+            )
+        rows = {name: provider.rows(name) for name in declared.tables}
+        contract = None
+        if contract_path:
+            try:
+                contract = RelationshipContract.load(contract_path, strict=True)
+            except RelationshipContractError as exc:
+                raise click.ClickException(f"relationship contract error: {exc}")
+            if contract is not None:
+                try:
+                    contract.validate_schema(declared)
+                except RelationshipContractError as exc:
+                    raise click.ClickException(f"relationship contract error: {exc}")
+        graph = build_ownership_graph(
+            resources={}, traffic=[], ledger=[], schema=declared, rows=rows, contract=contract
+        )
+        report = graph.report()
+        report["schemas"] = list(allowlist)
+        report["verdict"] = "INCONCLUSIVE"
+        report["verdict_reason"] = "evidence only: no authorization probes were executed"
+        report["attack_mode"] = "unsupported: PostgreSQL has no verified disposable-target restoration"
+        rendered = json.dumps(report, indent=2, sort_keys=True)
+        if out_path:
+            Path(out_path).write_text(rendered + "\n", encoding="utf-8")
+        click.echo(rendered)
+    finally:
+        connection.close()
+
+
 if __name__ == "__main__":  # pragma: no cover
     main()

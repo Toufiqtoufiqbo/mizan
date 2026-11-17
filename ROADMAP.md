@@ -47,6 +47,15 @@
       composite); tables without a key are unidentified, never misattributed;
       `SET LOCAL` keeps the identity inside the transaction; the round trip is
       covered by real-server tests (15 of them, in CI and locally)
+- [x] **PostgreSQL ownership evidence**: schema-qualified introspection,
+      composite keys, a monotonic audit cursor, request correlation and an
+      explicit attribution state feed the existing ownership graph and L2/L3
+      evidence paths (Phase VI)
+- [ ] **PostgreSQL disposable-target restoration**: a verified per-probe
+      database clone is required before PostgreSQL attack/twin mode can be
+      exposed; until then that mode fails closed
+- [x] **An identity map in the CLI** (`--identity-map`): already implemented
+      with dedicated tests (`tests/test_identity_map.py`); this entry was stale
 - [x] **Proof bundles carry no secrets**: the bearer token is a placeholder,
       resolved from the environment when the bundle is replayed
 - [x] **A write without an author is not a finding**: missing or malformed
@@ -100,9 +109,6 @@ them a false positive on every successful request.
 - [ ] **The corpus across stacks**: the Flask fixture is the second stack;
       a FastAPI and an Express application follow, with a manifest so third
       parties can add cases
-- [ ] **An identity map in the CLI** (`--identity-map`): Mizan is blind against
-      opaque tokens unless it is told who is who
-
 ## Later (v0.3 - the rest of the laws)
 
 - [ ] **L7** - path confidentiality (cache, queue, logs, metrics)

@@ -79,6 +79,7 @@ jobs:
           --health-retries 20
     env:
       MIZAN_TEST_POSTGRES_DSN: postgresql://postgres:mizan@localhost:5432/postgres
+      MIZAN_PG_DSN: postgresql://postgres:mizan@localhost:5432/postgres
       # A missing database fails instead of skipping: the integration suite is
       # the only proof that attribution works.
       MIZAN_REQUIRE_POSTGRES: "1"
@@ -96,10 +97,16 @@ jobs:
       - name: PostgreSQL round trip
         run: python -m pytest -q tests/test_postgres_roundtrip.py
 
+      - name: PostgreSQL ownership evidence integration
+        run: python -m pytest -q tests/test_postgres_ownership_integration.py
+
+      - name: PostgreSQL ownership benchmark and independent checker
+        run: python -m benchmarks.postgres_ownership.run
+
       - name: No skipped tests
         # A skip here means the suite did not run - fail rather than pass.
         run: |
-          python -m pytest tests/test_postgres_roundtrip.py -rs --tb=no -q | tee out.txt
+          python -m pytest tests/test_postgres_roundtrip.py tests/test_postgres_ownership_integration.py -rs --tb=no -q | tee out.txt
           if grep -q "skipped" out.txt; then
             echo "::error::PostgreSQL tests were skipped"
             exit 1

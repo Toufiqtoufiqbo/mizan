@@ -378,3 +378,27 @@ authorization semantics:
    dropping the invalid entry and never creates an effective grant.
 
 See `PHASE_V2_2_COVERAGE_REPORT.md` for measurements and gates.
+
+### Phase VI addendum — PostgreSQL ownership evidence
+
+PostgreSQL uses a dedicated provider (`postgres_attribution.PostgresAttributor`)
+that implements the same small interface as `SqliteAttributor`: schema, rows,
+snapshot, diff and row identity. It supplies schema-qualified table keys,
+complete composite primary keys, foreign keys and uniqueness information to the
+**existing** `build_ownership_graph()`. Contract declarations may use a bare
+name resolved against the allowlist, or a qualified name; an ambiguous bare
+name is rejected. Ownership declarations may name the database table explicitly
+with `table`, which is how an API resource type with a nonstandard table name is
+matched.
+
+Writes are ordered by the audit table's monotonic `id`, never by timestamp. Each
+HTTP request carries a unique correlation header into a transaction-local
+PostgreSQL setting, which the trigger stores with the write. Correlation is not
+identity: missing correlation, unknown principals and mismatched principals are
+recorded as explicit attribution states and become inconclusive outcomes, never
+confirmed L3 findings. Database object changes require the explicit
+`--install-audit` opt-in and are confined to allowlisted schemas.
+
+PostgreSQL attack/twin mode is intentionally unsupported: filesystem snapshots
+cannot restore a live database. It fails closed; see
+`PHASE_VI_POSTGRES_GAP_AUDIT.md` and `PHASE_VI_POSTGRES_REPORT.md`.

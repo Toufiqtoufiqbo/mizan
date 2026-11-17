@@ -91,6 +91,8 @@ class AuditRow:
     row_id: str | None
     row_identity: str
     operation: str
+    request_id: str = ""
+    attribution: str = "confirmed"
     row_data: dict[str, Any] = field(default_factory=dict)
     old_row: dict[str, Any] = field(default_factory=dict)
 
@@ -140,6 +142,7 @@ class PostgresAuditor:
         with self.connection.cursor() as cursor:
             cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {quote_identifier(self.audit_schema)}")
             cursor.execute(self.audit_table_sql())
+            cursor.execute(self.audit_migration_sql())
             cursor.execute(self.audit_function_sql())
             cursor.execute(self.audit_index_sql())
             for schema, table in self.user_tables():
@@ -229,6 +232,7 @@ class PostgresAuditor:
             id BIGSERIAL PRIMARY KEY,
             occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             raw_principal TEXT,
+            request_id TEXT NOT NULL DEFAULT '',
             schema_name TEXT NOT NULL,
             table_name TEXT NOT NULL,
             row_id TEXT,
@@ -238,6 +242,10 @@ class PostgresAuditor:
             old_row JSONB NOT NULL DEFAULT '{{}}'::jsonb
         )
         """
+
+    def audit_migration_sql(self) -> str:
+        """Add request correlation to an audit table created by an older release."""
+        return f"ALTER TABLE {self.audit_table} ADD COLUMN IF NOT EXISTS request_id TEXT NOT NULL DEFAULT ''"
 
     def audit_index_sql(self) -> str:
         return f"""
@@ -286,9 +294,10 @@ class PostgresAuditor:
             END IF;
 
             INSERT INTO {self.audit_table}
-                (raw_principal, schema_name, table_name, row_id, row_identity, operation, row_data, old_row)
+                (raw_principal, request_id, schema_name, table_name, row_id, row_identity, operation, row_data, old_row)
             VALUES (
                 current_setting('application_name', true),
+                COALESCE(current_setting('mizan.request_id', true), ''),
                 TG_TABLE_SCHEMA,
                 TG_TABLE_NAME,
                 CASE WHEN TG_OP = 'DELETE' THEN old_id ELSE new_id END,
@@ -330,55 +339,98 @@ class PostgresAuditor:
 
     # -- reading ------------------------------------------------------------ #
 
-    def read(self, *, since: Any = None) -> list[WriteEvent]:
-        """The writes recorded so far, as write events."""
+    def read(self, *, since_id: int | None = None, since: Any = None) -> list[WriteEvent]:
+        """Writes recorded so far, ordered by the monotonic audit id.
+
+        ``since_id`` is the safe cursor. The legacy ``since`` argument is kept
+        for older callers: an integer is treated as an id, a timestamp as the
+        old time-based cursor (explicitly weaker, never used by the scan).
+        """
         with self.connection.cursor() as cursor:
-            if since is None:
-                cursor.execute(
-                    f"""
-                    SELECT occurred_at, raw_principal, schema_name, table_name, row_id,
-                           row_identity, operation, row_data, old_row
-                    FROM {self.audit_table}
-                    ORDER BY id
-                    """
-                )
+            columns = (
+                "id, occurred_at, raw_principal, request_id, schema_name, table_name, row_id, "
+                "row_identity, operation, row_data, old_row"
+            )
+            if since_id is not None:
+                cursor.execute(f"SELECT {columns} FROM {self.audit_table} WHERE id > %s ORDER BY id", (since_id,))
+            elif isinstance(since, int):
+                cursor.execute(f"SELECT {columns} FROM {self.audit_table} WHERE id > %s ORDER BY id", (since,))
+            elif since is not None:
+                cursor.execute(f"SELECT {columns} FROM {self.audit_table} WHERE occurred_at > %s ORDER BY id", (since,))
             else:
-                cursor.execute(
-                    f"""
-                    SELECT occurred_at, raw_principal, schema_name, table_name, row_id,
-                           row_identity, operation, row_data, old_row
-                    FROM {self.audit_table}
-                    WHERE occurred_at > %s
-                    ORDER BY id
-                    """,
-                    (since,),
-                )
+                cursor.execute(f"SELECT {columns} FROM {self.audit_table} ORDER BY id")
             rows = cursor.fetchall()
         return [self.to_event(row) for row in rows]
+
+    def latest_id(self) -> int:
+        """The current audit cursor; an empty audit table yields zero."""
+        with self.connection.cursor() as cursor:
+            cursor.execute(f"SELECT COALESCE(MAX(id), 0) FROM {self.audit_table}")
+            row = cursor.fetchone()
+        return int(row[0]) if row else 0
 
     # -- conversion --------------------------------------------------------- #
 
     def to_event(self, row: Iterable[Any]) -> WriteEvent:
-        """One audit record as a write event."""
-        (
-            occurred_at,
-            raw_principal,
-            schema_name,
-            table_name,
-            row_id,
-            row_identity,
-            operation,
-            row_data,
-            old_row,
-        ) = row
+        """One audit record as a write event.
+
+        Accepts both the current 11-column projection (with id and request id)
+        and the legacy 9-column one, so old tests and ledgers keep working.
+        """
+        values = tuple(row)
+        if len(values) >= 11:
+            (
+                _audit_id,
+                occurred_at,
+                raw_principal,
+                request_id,
+                schema_name,
+                table_name,
+                row_id,
+                row_identity,
+                operation,
+                row_data,
+                old_row,
+            ) = values[:11]
+        elif len(values) == 10:
+            (
+                occurred_at,
+                raw_principal,
+                request_id,
+                schema_name,
+                table_name,
+                row_id,
+                row_identity,
+                operation,
+                row_data,
+                old_row,
+            ) = values
+        else:
+            (
+                occurred_at,
+                raw_principal,
+                schema_name,
+                table_name,
+                row_id,
+                row_identity,
+                operation,
+                row_data,
+                old_row,
+            ) = values
+            request_id = ""
         current = _as_dict(row_data)
         previous = _as_dict(old_row)
         columns = _changed_columns(current, previous, operation)
         owner = _owner(current) or _owner(previous)
+        principal = self.principal_from(raw_principal)
+        # Legacy callers of ``auditor.read()`` keep their historical behavior.
+        # Explicit attribution states are set by PostgresAttributor, which owns
+        # the request-correlation semantics.
+        attribution = "confirmed"
         return WriteEvent(
             ts=occurred_at.timestamp() if hasattr(occurred_at, "timestamp") else 0.0,
-            request_id=str(row_id or ""),
-            principal=self.principal_from(raw_principal),
+            request_id=str(request_id or ""),
+            principal=principal,
             method=_method_for(operation),
             path=f"/{schema_name}.{table_name}",
             table=table_name,
@@ -387,10 +439,13 @@ class PostgresAuditor:
             # The database cannot know which fields the client sent.
             source_fields=set(),
             row_owner=owner,
+            attribution=attribution,
             method_args={
                 "operation": operation,
                 "row_identity": row_identity,
                 "schema": schema_name,
+                "row": current,
+                "old_row": previous,
             },
         )
 

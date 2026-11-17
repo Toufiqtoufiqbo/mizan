@@ -14,6 +14,7 @@ The flow is deliberately small:
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -1108,8 +1109,26 @@ class Mizan:
                     session = self.target.session_for(attacker)
                     response = self._request(session, method, url, json=probe_body, timeout=self.target.timeout)
                     new_events = self._ledger_events()[before:]
-                    tainted = [event for event in new_events if event.principal == attacker.id]
+                    tainted = [
+                        event
+                        for event in new_events
+                        if event.principal == attacker.id and event.attribution == "confirmed"
+                    ]
                     if not tainted:
+                        unconfirmed = [
+                            event
+                            for event in new_events
+                            if event.principal == attacker.id and event.attribution != "confirmed"
+                        ]
+                        if unconfirmed:
+                            self._inconclusive(
+                                "L3",
+                                resource.key,
+                                f"the write attribution is {unconfirmed[0].attribution!r}",
+                                action="write",
+                                principal=attacker.id,
+                            )
+                            continue
                         # No row changed: the application refused the write.
                         # This is a decided check, not an unresolved one.
                         self._outcome("L3", "write", resource.key, attacker.id, AuthorizationOutcome.DECIDED)
@@ -1556,19 +1575,30 @@ class Mizan:
         the request, and the difference becomes a write event. The application
         needs no instrumentation for this.
         """
-        before = self.attributor.snapshot() if self.attributor is not None else None
+        request_id = uuid.uuid4().hex
+        principal_id = self._principal_of(session)
+        before = (
+            self.attributor.snapshot(principal=principal_id, request_id=request_id)
+            if self.attributor is not None
+            else None
+        )
         if self.request_budget is not None and self.requests >= self.request_budget:
             raise RequestBudgetExhausted(f"the scan reached its budget of {self.request_budget} requests")
         self.requests += 1
-        response = session.request(method, url, **kwargs)
+        headers = dict(session.headers)
+        correlation_header = getattr(self.attributor, "request_header", "")
+        if before is not None and correlation_header:
+            headers[correlation_header] = request_id
+        response = session.request(method, url, headers=headers, **kwargs)
         if before is not None:
             payload = kwargs.get("json")
             source_fields = set(payload) if isinstance(payload, dict) else set()
             events = self.attributor.diff(
                 before,
-                principal=self._principal_of(session),
+                principal=principal_id,
                 method=method,
                 path=urlsplit(url).path,
+                request_id=request_id,
                 source_fields=source_fields,
             )
             self._attributed_events.extend(events)

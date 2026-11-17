@@ -1,0 +1,9 @@
+{
+  "clean": [],
+  "read": ["L2"],
+  "write": ["L3"],
+  "grant_read": [],
+  "grant_write": ["L3"],
+  "unknown": [],
+  "composite": []
+}

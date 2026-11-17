@@ -491,3 +491,40 @@ not yet. See `ROADMAP.md` for what comes next.
 ## License
 
 MIT.
+
+
+## PostgreSQL ownership evidence (Phase VI)
+
+PostgreSQL now supplies the same ownership-evidence inputs as SQLite:
+schema-qualified introspection (including composite keys), row access, a
+monotonic audit cursor, and request-level correlation. The data feeds the
+existing ownership graph and L2/L3 evidence paths; there is no second ownership
+engine.
+
+```bash
+export MIZAN_DATABASE_URL='postgresql://user:password@host/database'
+mizan postgres-evidence \
+  --dsn-env MIZAN_DATABASE_URL \
+  --schema app \
+  --schema audit \
+  --relationship-contract app/contract.json
+```
+
+The DSN is read from an environment variable, never printed, and database
+objects are only created with the explicit `--install-audit` opt-in. Trigger
+installation is limited to the allowlisted schemas.
+
+Three capabilities must not be confused:
+
+- **Write auditing** — trigger records with transaction-local identity and
+  request correlation.
+- **Ownership-graph evidence** — schema/rows/cursor supplied to the existing
+  graph; candidate, unknown and contradictory ownership remain unresolved.
+- **End-to-end attack support** — **not available for PostgreSQL**. `Twin`
+  restores filesystem snapshots, which cannot restore a live database, so
+  attack/twin mode fails closed until a disposable clone is implemented and
+  verified. The `postgres-evidence` command is read-only and reports
+  `INCONCLUSIVE` because it runs no authorization probes.
+
+Unattributed, missing-correlation and ambiguously attributed writes are
+reported as inconclusive outcomes, never as confirmed L3 violations.
