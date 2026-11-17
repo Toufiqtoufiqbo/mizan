@@ -11,6 +11,7 @@ import json
 import os
 import tempfile
 import uuid
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -42,14 +43,17 @@ def _server() -> str:
     return pgserver.get_server(pgdata=directory, cleanup_mode="delete").get_uri()
 
 
-DSN = _server()
+@lru_cache(maxsize=1)
+def dsn() -> str:
+    """Resolve the server only when an integration test actually executes."""
+    return _server()
 
 
 @pytest.fixture()
 def database():
     import psycopg
 
-    connection = psycopg.connect(DSN, autocommit=True)
+    connection = psycopg.connect(dsn(), autocommit=True)
     schema = f"mizan_v6_{uuid.uuid4().hex[:10]}"
     twin_schema = f"mizan_v6_twin_{uuid.uuid4().hex[:10]}"
     with connection.cursor() as cursor:
@@ -365,9 +369,9 @@ def test_fixture_verifies_its_own_behaviour(variant: str, read_status: int, writ
     spec.loader.exec_module(module)
 
     schema = f"mizan_app_{uuid.uuid4().hex[:10]}"
-    os.environ["MIZAN_PG_DSN"] = DSN
+    os.environ["MIZAN_PG_DSN"] = dsn()
     os.environ["MIZAN_PG_SCHEMA"] = schema
-    app = module.create_app(variant, dsn=DSN, schema=schema)
+    app = module.create_app(variant, dsn=dsn(), schema=schema)
     client = app.test_client()
     try:
         alice = client.post("/login", json={"username": "alice", "password": "alice-secret"}).get_json()["token"]
@@ -377,7 +381,7 @@ def test_fixture_verifies_its_own_behaviour(variant: str, read_status: int, writ
         response = client.put("/items/item-a1", json={"label": "changed"}, headers={"Authorization": f"Bearer {bob}"})
         assert response.status_code == write_status
     finally:
-        connection = psycopg.connect(DSN, autocommit=True)
+        connection = psycopg.connect(dsn(), autocommit=True)
         with connection.cursor() as cursor:
             cursor.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
         connection.close()
@@ -389,14 +393,14 @@ def test_cli_evidence_is_read_only_and_redacts_the_dsn(monkeypatch) -> None:
 
     from mizan.cli import main
 
-    connection = psycopg.connect(DSN, autocommit=True)
+    connection = psycopg.connect(dsn(), autocommit=True)
     schema = f"mizan_cli_{uuid.uuid4().hex[:10]}"
     with connection.cursor() as cursor:
         cursor.execute(f'CREATE SCHEMA "{schema}"')
         cursor.execute(f'CREATE TABLE "{schema}".items (item_ref TEXT PRIMARY KEY, label TEXT)')
     connection.close()
 
-    monkeypatch.setenv("MIZAN_DATABASE_URL", DSN)
+    monkeypatch.setenv("MIZAN_DATABASE_URL", dsn())
     runner = CliRunner()
     missing = runner.invoke(
         main,
@@ -414,9 +418,9 @@ def test_cli_evidence_is_read_only_and_redacts_the_dsn(monkeypatch) -> None:
     assert report["verdict"] == "INCONCLUSIVE"
     assert report["attack_mode"].startswith("unsupported")
     assert "password" not in result.output.lower()
-    assert DSN not in result.output
+    assert dsn() not in result.output
 
-    connection = psycopg.connect(DSN, autocommit=True)
+    connection = psycopg.connect(dsn(), autocommit=True)
     with connection.cursor() as cursor:
         cursor.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
     connection.close()
