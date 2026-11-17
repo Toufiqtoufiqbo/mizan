@@ -197,6 +197,18 @@ class AuthorizationOutcome(StrEnum):
         return self is not AuthorizationOutcome.INCONCLUSIVE
 
 
+#: Deterministic reconciliation order for provisional outcomes of one logical
+#: check. A proven violation is the strongest result; uncertainty is the
+#: weakest, so direct observations can replace it but can never be replaced by
+#: it. This maps the abstract outcome to a rank, not to a verdict.
+OUTCOME_PRECEDENCE: dict[AuthorizationOutcome, int] = {
+    AuthorizationOutcome.INCONCLUSIVE: 0,
+    AuthorizationOutcome.DECIDED: 1,
+    AuthorizationOutcome.ALLOWED_BY_GRANT: 2,
+    AuthorizationOutcome.VIOLATION: 3,
+}
+
+
 @dataclass
 class LawCoverage:
     """Per-law accounting for one authorization law.

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from mizan.core import (
+    OUTCOME_PRECEDENCE,
     UNKNOWN_PRINCIPAL,
     AuthorizationOutcome,
     Policy,
@@ -290,7 +291,7 @@ class TaintAnalyzer:
         #: resolved through a grant. This is the source for per-law coverage;
         #: an authorized check is never recorded as inconclusive.
         self.outcomes: list[dict[str, str]] = []
-        self._outcome_seen: set[tuple[str, str, str, str, str]] = set()
+        self._outcome_index: dict[tuple[str, str, str, str], int] = {}
 
     def analyze(self, events: Iterable[WriteEvent]) -> list[Violation]:
         violations: list[Violation] = []
@@ -307,21 +308,55 @@ class TaintAnalyzer:
 
     # -- individual checks ------------------------------------------------- #
 
-    def _outcome(self, event: WriteEvent, resource_key: str, outcome: AuthorizationOutcome) -> None:
-        """Record one decided outcome per (law, action, resource, principal, result)."""
-        key = ("L3", event.action, resource_key, event.principal, outcome.value)
-        if key in self._outcome_seen:
-            return
-        self._outcome_seen.add(key)
-        self.outcomes.append(
-            {
-                "law": "L3",
-                "action": event.action,
-                "resource": resource_key,
-                "principal": event.principal,
-                "outcome": outcome.value,
-            }
-        )
+    @staticmethod
+    def _check_key(event: WriteEvent, resource_key: str) -> tuple[str, str, str, str]:
+        return ("L3", event.action, str(resource_key), event.principal)
+
+    def _outcome(self, event: WriteEvent, resource_key: str, outcome: AuthorizationOutcome) -> AuthorizationOutcome:
+        """Store one FINAL outcome per logical (law, action, resource, principal)."""
+        key = self._check_key(event, resource_key)
+        position = self._outcome_index.get(key)
+        if position is None:
+            self._outcome_index[key] = len(self.outcomes)
+            self.outcomes.append(
+                {
+                    "law": "L3",
+                    "action": event.action,
+                    "resource": str(resource_key),
+                    "principal": event.principal,
+                    "outcome": outcome.value,
+                }
+            )
+            return outcome
+        previous = AuthorizationOutcome(self.outcomes[position]["outcome"])
+        if OUTCOME_PRECEDENCE[outcome] <= OUTCOME_PRECEDENCE[previous]:
+            return previous
+        self.outcomes[position] = {
+            "law": "L3",
+            "action": event.action,
+            "resource": str(resource_key),
+            "principal": event.principal,
+            "outcome": outcome.value,
+        }
+        if outcome is not AuthorizationOutcome.INCONCLUSIVE:
+            kept = [
+                item
+                for item in self.inconclusive
+                if (
+                    str(item.get("law")),
+                    str(item.get("action")),
+                    str(item.get("resource")),
+                    str(item.get("principal")),
+                )
+                != key
+            ]
+            if len(kept) != len(self.inconclusive):
+                self.inconclusive = kept
+                self._inconclusive_seen = {
+                    (str(item.get("law")), str(item.get("resource")), str(item.get("reason")))
+                    for item in self.inconclusive
+                }
+        return outcome
 
     def _record(self, event: WriteEvent, reason: str) -> None:
         """Keep one explicit reason per (table, row, reason)."""

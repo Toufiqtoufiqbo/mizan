@@ -10,6 +10,14 @@
       "denominator_cases": 23
     },
     "pending_checks": 0,
+    "unconfirmed_owner_hints": {
+      "neutralized": 0,
+      "denominator_cases": 23
+    },
+    "conflicting_outcomes": {
+      "count": 0,
+      "denominator_cases": 23
+    },
     "duplicate_outcomes": {
       "count": 0,
       "denominator_cases": 23
@@ -280,7 +288,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "orders:ord-0093b4263cc4",
+          "resource": "orders:ord-bb05c63bfb33",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -294,11 +302,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "orders:ord-0093b4263cc4",
+          "resource": "orders:ord-bb05c63bfb33",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 1,
       "sharing_semantics_ambiguous": 0
@@ -430,7 +440,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "orders:ord-0f8e1b20aa39",
+          "resource": "orders:ord-ae866d320ccb",
           "principal": "bob",
           "outcome": "VIOLATION"
         },
@@ -444,11 +454,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "orders:ord-0f8e1b20aa39",
+          "resource": "orders:ord-ae866d320ccb",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 1,
       "sharing_semantics_ambiguous": 0
@@ -580,7 +592,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "orders:ord-51995a17292e",
+          "resource": "orders:ord-053fb231ca5e",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -594,11 +606,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "orders:ord-51995a17292e",
+          "resource": "orders:ord-053fb231ca5e",
           "principal": "bob",
           "outcome": "VIOLATION"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 1,
       "sharing_semantics_ambiguous": 0
@@ -733,7 +747,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "documents:doc-alice-46c65d40",
+          "resource": "documents:doc-alice-904435b2",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -747,11 +761,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "documents:doc-alice-46c65d40",
+          "resource": "documents:doc-alice-904435b2",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 0
@@ -897,7 +913,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "documents:doc-alice-e37c3849",
+          "resource": "documents:doc-alice-0e3be39c",
           "principal": "bob",
           "outcome": "VIOLATION"
         },
@@ -918,11 +934,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "documents:doc-alice-e37c3849",
+          "resource": "documents:doc-alice-0e3be39c",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 0
@@ -1061,7 +1079,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "documents:doc-alice-02e03512",
+          "resource": "documents:doc-alice-921cc0e1",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -1075,11 +1093,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "documents:doc-alice-02e03512",
+          "resource": "documents:doc-alice-921cc0e1",
           "principal": "bob",
           "outcome": "VIOLATION"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 0
@@ -1228,7 +1248,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "documents:doc-alice-17c47018",
+          "resource": "documents:doc-alice-710bc8d2",
           "principal": "bob",
           "outcome": "VIOLATION"
         },
@@ -1249,11 +1269,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "documents:doc-alice-17c47018",
+          "resource": "documents:doc-alice-710bc8d2",
           "principal": "bob",
           "outcome": "VIOLATION"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 0
@@ -1395,7 +1417,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "documents:doc-alice-e6de4ed9",
+          "resource": "documents:doc-alice-09d5ea3a",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -1416,11 +1438,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "documents:doc-alice-e6de4ed9",
+          "resource": "documents:doc-alice-09d5ea3a",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 0
@@ -1548,7 +1572,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "documents:doc-alice-5c7e00ed",
+          "resource": "documents:doc-alice-0756ae8e",
           "principal": "bob",
           "outcome": "INCONCLUSIVE"
         },
@@ -1562,7 +1586,7 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "documents:doc-alice-5c7e00ed",
+          "resource": "documents:doc-alice-0756ae8e",
           "principal": "bob",
           "outcome": "INCONCLUSIVE"
         },
@@ -1574,6 +1598,8 @@
           "outcome": "INCONCLUSIVE"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 4,
       "sharing_semantics_ambiguous": 1
@@ -1708,7 +1734,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-2c6677",
+          "resource": "assets:item-alice-7c6a55",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -1722,11 +1748,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-2c6677",
+          "resource": "assets:item-alice-7c6a55",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 0
@@ -1872,7 +1900,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-b7f6cc",
+          "resource": "assets:item-alice-d061b3",
           "principal": "bob",
           "outcome": "VIOLATION"
         },
@@ -1893,11 +1921,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-b7f6cc",
+          "resource": "assets:item-alice-d061b3",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 2
@@ -2036,7 +2066,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-4f2962",
+          "resource": "assets:item-alice-5e8572",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -2050,11 +2080,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-4f2962",
+          "resource": "assets:item-alice-5e8572",
           "principal": "bob",
           "outcome": "VIOLATION"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 0
@@ -2196,7 +2228,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-b2a25a",
+          "resource": "assets:item-alice-fb754b",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -2217,11 +2249,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-b2a25a",
+          "resource": "assets:item-alice-fb754b",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 1
@@ -2367,7 +2401,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-df8ce2",
+          "resource": "assets:item-alice-331ac4",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -2388,11 +2422,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-df8ce2",
+          "resource": "assets:item-alice-331ac4",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 1
@@ -2534,7 +2570,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-d0ac85",
+          "resource": "assets:item-alice-305d14",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -2555,11 +2591,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-d0ac85",
+          "resource": "assets:item-alice-305d14",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 1
@@ -2705,7 +2743,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-5c0645",
+          "resource": "assets:item-alice-37c85f",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -2726,11 +2764,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-5c0645",
+          "resource": "assets:item-alice-37c85f",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 1
@@ -2876,7 +2916,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-f9dad3",
+          "resource": "assets:item-alice-20145c",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -2897,11 +2937,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-f9dad3",
+          "resource": "assets:item-alice-20145c",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 1
@@ -3047,7 +3089,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-951468",
+          "resource": "assets:item-alice-90a74d",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -3068,11 +3110,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-951468",
+          "resource": "assets:item-alice-90a74d",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 2
@@ -3218,7 +3262,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-ae99be",
+          "resource": "assets:item-alice-7121f7",
           "principal": "bob",
           "outcome": "DECIDED"
         },
@@ -3239,11 +3283,13 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-ae99be",
+          "resource": "assets:item-alice-7121f7",
           "principal": "bob",
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 0,
       "sharing_semantics_ambiguous": 1
@@ -3371,7 +3417,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-7bf60b",
+          "resource": "assets:item-alice-9a0019",
           "principal": "bob",
           "outcome": "INCONCLUSIVE"
         },
@@ -3385,7 +3431,7 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-7bf60b",
+          "resource": "assets:item-alice-9a0019",
           "principal": "bob",
           "outcome": "INCONCLUSIVE"
         },
@@ -3397,6 +3443,8 @@
           "outcome": "INCONCLUSIVE"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 4,
       "sharing_semantics_ambiguous": 0
@@ -3524,7 +3572,7 @@
         {
           "law": "L2",
           "action": "read",
-          "resource": "assets:item-alice-286233",
+          "resource": "assets:item-alice-da8313",
           "principal": "bob",
           "outcome": "INCONCLUSIVE"
         },
@@ -3538,7 +3586,7 @@
         {
           "law": "L3",
           "action": "write",
-          "resource": "assets:item-alice-286233",
+          "resource": "assets:item-alice-da8313",
           "principal": "bob",
           "outcome": "INCONCLUSIVE"
         },
@@ -3550,6 +3598,8 @@
           "outcome": "INCONCLUSIVE"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 4,
       "sharing_semantics_ambiguous": 0
@@ -3731,6 +3781,8 @@
           "outcome": "DECIDED"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 6,
       "sharing_semantics_ambiguous": 0
@@ -3916,6 +3968,8 @@
           "outcome": "VIOLATION"
         }
       ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
       "duplicate_outcomes": 0,
       "inconclusive_checks": 6,
       "sharing_semantics_ambiguous": 0

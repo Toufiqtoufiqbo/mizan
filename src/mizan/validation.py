@@ -726,6 +726,7 @@ def scan_application(
         result.ownership = engine.graph.report() if engine.graph is not None else {}
         result.ownership["inconclusive_checks"] = list(engine.inconclusive_checks)
         result.ownership["authorization_outcomes"] = list(engine.outcomes)
+        result.ownership["unconfirmed_owner_hints"] = sorted(engine.neutralized_owner_keys)
 
         result.finding_count = len(violations)
         result.law_types = sorted({violation.law for violation in violations})

@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 import requests
 
 from mizan.core import (
+    OUTCOME_PRECEDENCE,
     UNKNOWN_PRINCIPAL,
     AccessMatrix,
     AuthorizationOutcome,
@@ -128,13 +129,17 @@ class Mizan:
         self._attributed_events: list[WriteEvent] = []
         #: Phase V: the evidence-based ownership graph built by ``learn()``.
         self.graph: OwnershipGraph | None = None
+        #: Resource keys whose response-level owner hint was present but not
+        #: confirmed by the graph, and therefore neutralized before the probes.
+        self.neutralized_owner_keys: set[str] = set()
         #: Checks that could not be completed, with the reason (never a clean result).
         self.inconclusive_checks: list[dict[str, str]] = []
         #: Every authorization check and how it ended - resolved grants and
         #: decided checks included. The basis of per-law coverage; never a
         #: request count and never a merged L2/L3 counter.
         self.outcomes: list[dict[str, str]] = []
-        self._outcome_seen: set[tuple[str, str, str, str, str]] = set()
+        self._outcome_index: dict[tuple[str, str, str, str], int] = {}
+        self._inconclusive_index: dict[tuple[str, str, str, str], int] = {}
         self._inconclusive_seen: set[tuple[str, str, str, str]] = set()
         #: Eligible checks per law, computed before the probes run.
         self.eligible_by_law: dict[str, int] = {}
@@ -153,6 +158,7 @@ class Mizan:
 
     def learn(self) -> Policy:
         """Derive the application's laws from its own normal behaviour."""
+        self.neutralized_owner_keys = set()
         if self.traffic_path is not None and self.traffic_path.exists():
             self.traffic = TrafficLog.load(self.traffic_path)
         if self.ledger_path is not None and self.ledger_path.exists():
@@ -215,25 +221,32 @@ class Mizan:
         )
         for key, resource in list(policy.resources.items()):
             owner = self.graph.owner_of(key)
-            if owner is None:
-                if resource.owner and self.graph.owner_state(key) is EvidenceState.CONTRADICTED:
-                    policy.resources[key] = replace(resource, owner=None)
-                continue
-            if resource.owner is None:
-                policy.resources[key] = replace(resource, owner=owner)
-            elif resource.owner != owner:
+            confirmed = owner is not None and self.graph.owner_state(key) is EvidenceState.CONFIRMED
+            if confirmed:
+                # The graph is the authority: replace a differing response hint
+                # with the confirmed owner rather than trusting either blindly.
+                if resource.owner != owner:
+                    policy.resources[key] = replace(resource, owner=owner)
+            elif resource.owner is not None:
+                # A response-level claim is an evidence INPUT. A CANDIDATE,
+                # UNKNOWN, AMBIGUOUS or CONTRADICTED claim is not an ownership
+                # decision and must never reach L2/L3 as an authoritative owner.
+                self.neutralized_owner_keys.add(key)
                 policy.resources[key] = replace(resource, owner=None)
 
         # The probes iterate the traffic records, so their resource view must
-        # carry the same confirmed owner as the policy.
+        # carry the same confirmed owner as the policy. Unconfirmed hints are
+        # neutralized here too: the graph has already consumed them as evidence.
         for record in self.traffic.records:
             if not record.resource_type or not record.resource_id:
                 continue
             key = f"{record.resource_type}:{record.resource_id}"
             owner = self.graph.owner_of(key)
-            if owner is not None:
+            if owner is not None and self.graph.owner_state(key) is EvidenceState.CONFIRMED:
                 record.resource_owner = owner
-            elif record.resource_owner and self.graph.owner_state(key) is EvidenceState.CONTRADICTED:
+            else:
+                if record.resource_owner is not None:
+                    self.neutralized_owner_keys.add(key)
                 record.resource_owner = None
 
         # Ownership rules: a principal that only ever touched resources it owns.
@@ -316,7 +329,8 @@ class Mizan:
         self.probes_executed = 0
         self.inconclusive_checks = []
         self.outcomes = []
-        self._outcome_seen = set()
+        self._outcome_index = {}
+        self._inconclusive_index = {}
         self._inconclusive_seen = set()
         # Unresolved ownership is not silence: record it as an inconclusive
         # security check before the probes run, so it is part of the same
@@ -553,21 +567,66 @@ class Mizan:
 
     # -- check recording --------------------------------------------------- #
 
-    def _outcome(self, law: str, action: str, resource: str, principal: str, outcome: AuthorizationOutcome) -> None:
-        """Record one check result, deduplicated by its full identity."""
-        key = (law, action, str(resource), principal, outcome.value)
-        if key in self._outcome_seen:
+    @staticmethod
+    def _check_key(law: str, action: str, resource: str, principal: str) -> tuple[str, str, str, str]:
+        """The logical identity of one security check (no outcome component)."""
+        return (law, action, str(resource), principal)
+
+    def _drop_inconclusive(self, law: str, action: str, resource: str, principal: str) -> None:
+        """Remove a provisional uncertainty once the same check is decided."""
+        key = self._check_key(law, action, resource, principal)
+        index = self._inconclusive_index.pop(key, None)
+        if index is None:
             return
-        self._outcome_seen.add(key)
-        self.outcomes.append(
-            {
-                "law": law,
-                "action": action,
-                "resource": str(resource),
-                "principal": principal,
-                "outcome": outcome.value,
-            }
-        )
+        if 0 <= index < len(self.inconclusive_checks):
+            self.inconclusive_checks.pop(index)
+        self._inconclusive_index = {
+            self._check_key(
+                str(item.get("law", "")),
+                str(item.get("action", "")),
+                str(item.get("resource", "")),
+                str(item.get("principal", "")),
+            ): position
+            for position, item in enumerate(self.inconclusive_checks)
+        }
+
+    def _outcome(
+        self, law: str, action: str, resource: str, principal: str, outcome: AuthorizationOutcome
+    ) -> AuthorizationOutcome:
+        """Store exactly one FINAL outcome per logical check.
+
+        ``INCONCLUSIVE`` is provisional: a direct probe or the data-level
+        analyzer can replace it with a stronger, decided result. The reverse
+        never happens, and a proven violation can never be downgraded. Coverage
+        is computed only from this final state.
+        """
+        key = self._check_key(law, action, resource, principal)
+        position = self._outcome_index.get(key)
+        if position is None:
+            self._outcome_index[key] = len(self.outcomes)
+            self.outcomes.append(
+                {
+                    "law": law,
+                    "action": action,
+                    "resource": str(resource),
+                    "principal": principal,
+                    "outcome": outcome.value,
+                }
+            )
+            return outcome
+        previous = AuthorizationOutcome(self.outcomes[position]["outcome"])
+        if OUTCOME_PRECEDENCE[outcome] <= OUTCOME_PRECEDENCE[previous]:
+            return previous
+        self.outcomes[position] = {
+            "law": law,
+            "action": action,
+            "resource": str(resource),
+            "principal": principal,
+            "outcome": outcome.value,
+        }
+        if outcome is not AuthorizationOutcome.INCONCLUSIVE:
+            self._drop_inconclusive(law, action, resource, principal)
+        return outcome
 
     def _merge_outcomes(self, outcomes: Iterable[dict[str, str]]) -> None:
         """Fold the data-level analyzer's outcomes into engine accounting."""
@@ -594,25 +653,28 @@ class Mizan:
         principal: str = "",
     ) -> None:
         """Record an unresolved check once, and count it as unresolved."""
-        key = (law, str(resource), reason, principal)
-        if key not in self._inconclusive_seen:
-            self._inconclusive_seen.add(key)
-            self.inconclusive_checks.append(
-                {
-                    "law": law,
-                    "resource": str(resource),
-                    "reason": reason,
-                    "action": action or ("read" if law == "L2" else "write"),
-                    "principal": principal,
-                }
-            )
-        self._outcome(
-            law,
-            action or ("read" if law == "L2" else "write"),
-            resource,
-            principal,
-            AuthorizationOutcome.INCONCLUSIVE,
-        )
+        action = action or ("read" if law == "L2" else "write")
+        effective = self._outcome(law, action, resource, principal, AuthorizationOutcome.INCONCLUSIVE)
+        if effective is not AuthorizationOutcome.INCONCLUSIVE:
+            # A stronger final result already exists; the provisional reason
+            # must not survive as a contradictory unresolved check.
+            self._drop_inconclusive(law, action, resource, principal)
+            return
+        key = self._check_key(law, action, resource, principal)
+        record = {
+            "law": law,
+            "resource": str(resource),
+            "reason": reason,
+            "action": action,
+            "principal": principal,
+        }
+        position = self._inconclusive_index.get(key)
+        if position is None:
+            self._inconclusive_index[key] = len(self.inconclusive_checks)
+            self.inconclusive_checks.append(record)
+        else:
+            self.inconclusive_checks[position] = record
+        self._inconclusive_seen.add((law, str(resource), reason, principal))
 
     def probe_names(self) -> list[str]:
         """The names of the probes, in the order they run."""
@@ -770,9 +832,20 @@ class Mizan:
                 continue
             for record in records:
                 resource = record.resource
-                if resource is None or not resource.owner:
+                if resource is None:
                     continue
-                owner = resource.owner
+                if self.graph is not None:
+                    # The graph is the sole ownership authority. A candidate or
+                    # unknown owner must never drive an owner-control request or
+                    # an L2 accusation; the relevant unresolved check is already
+                    # recorded by ``_unresolved_checks``.
+                    owner = self.graph.owner_of(resource.key)
+                    if owner is None or self.graph.owner_state(resource.key) is not EvidenceState.CONFIRMED:
+                        continue
+                else:
+                    if not resource.owner:
+                        continue
+                    owner = resource.owner
                 owner_principal = self.target.principal(owner)
                 if owner_principal is None or not owner_principal.token:
                     self._inconclusive("L2", resource.key, "owner has no testable identity", principal=owner)

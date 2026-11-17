@@ -144,6 +144,14 @@ def _measure(fixture: str, variant: str, expected: tuple[str, ...]) -> dict[str,
         "unresolved_checks": result.coverage.unresolved_checks,
         "clean_with_unresolved": (result.verdict.value == "CLEAN" and result.coverage.unresolved_checks > 0),
         "authorization_outcomes": report.get("authorization_outcomes", []),
+        "unconfirmed_owner_hints": len(report.get("unconfirmed_owner_hints", [])),
+        "conflicting_outcomes": len(report.get("authorization_outcomes", []))
+        - len(
+            {
+                (item.get("law"), item.get("action"), item.get("resource"), item.get("principal"))
+                for item in report.get("authorization_outcomes", [])
+            }
+        ),
         "duplicate_outcomes": len(report.get("authorization_outcomes", []))
         - len(
             {
@@ -460,6 +468,8 @@ def main() -> None:
     duplicate_l2_findings = sum(max(0, m["l2_findings"] - m["l2_unique"]) for m in measurements)
     mixed_cases = [m for m in measurements if m["fixture"] == "mixed_ownership"]
     duplicate_outcomes = sum(m["duplicate_outcomes"] for m in measurements)
+    conflicting_outcomes = sum(m["conflicting_outcomes"] for m in measurements)
+    neutralized_hints = sum(m["unconfirmed_owner_hints"] for m in measurements)
     clean_false_positives = sum(1 for m in clean_controls if m["verdict"] == "CLEAN" and m["law_types"])
     clean_with_unresolved = sum(1 for m in measurements if m["clean_with_unresolved"])
 
@@ -474,6 +484,11 @@ def main() -> None:
             "denominator_cases": len(measurements),
         },
         "pending_checks": sum(m["pending_checks"] for m in measurements),
+        "unconfirmed_owner_hints": {
+            "neutralized": neutralized_hints,
+            "denominator_cases": len(measurements),
+        },
+        "conflicting_outcomes": {"count": conflicting_outcomes, "denominator_cases": len(measurements)},
         "duplicate_outcomes": {"count": duplicate_outcomes, "denominator_cases": len(measurements)},
         "clean_verdict_false_positives": {
             "with_findings": clean_false_positives,
