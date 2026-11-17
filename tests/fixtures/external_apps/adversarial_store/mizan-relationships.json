@@ -8,7 +8,8 @@
     "item_relations": {
       "resource_fk": "item_ref",
       "principal_fk": "collaborator_ref",
-      "semantics": "authorization_grant"
+      "semantics": "authorization_grant",
+      "actions": ["read"]
     }
   },
   "variants": {
@@ -19,7 +20,38 @@
         "item_relations": {
           "resource_fk": "item_ref",
           "principal_fk": "creator_ref",
-          "semantics": "authorization_grant"
+          "semantics": "authorization_grant",
+          "actions": ["read"]
+        }
+      }
+    },
+    "grant_write": {
+      "sharing": {
+        "item_relations": {
+          "resource_fk": "item_ref",
+          "principal_fk": "collaborator_ref",
+          "semantics": "authorization_grant",
+          "actions": ["read"]
+        }
+      }
+    },
+    "read_write_grant": {
+      "sharing": {
+        "item_relations": {
+          "resource_fk": "item_ref",
+          "principal_fk": "collaborator_ref",
+          "semantics": "authorization_grant",
+          "actions": ["read", "write"]
+        }
+      }
+    },
+    "write_only_grant": {
+      "sharing": {
+        "item_relations": {
+          "resource_fk": "item_ref",
+          "principal_fk": "collaborator_ref",
+          "semantics": "authorization_grant",
+          "actions": ["write"]
         }
       }
     }

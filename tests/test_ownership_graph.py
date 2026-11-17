@@ -189,8 +189,10 @@ def test_contradiction_is_preserved_and_not_an_owner() -> None:
 def test_sharing_explains_access_without_creating_ownership() -> None:
     graph = OwnershipGraph()
     evidence = graph.add_evidence(Evidence(source="association_table", principal="bob", resource="documents:d1"))
-    graph.add_relationship(RelationshipType.SHARED_WITH, "bob", "documents:d1", EvidenceState.CONFIRMED, [evidence])
-    assert graph.explained_by_sharing("alice", "bob", "documents:d1") is True
+    graph.add_relationship(
+        RelationshipType.SHARED_WITH, "bob", "documents:d1", EvidenceState.CONFIRMED, [evidence], actions=["read"]
+    )
+    assert graph.explained_by_sharing("alice", "bob", "documents:d1", "read") is True
     assert graph.owner_of("documents:d1") is None
 
 
@@ -359,6 +361,7 @@ def test_association_table_creates_sharing_not_ownership(tmp_path: Path) -> None
                     "resource_fk": "document_key",
                     "principal_fk": "person_ref",
                     "semantics": "authorization_grant",
+                    "actions": ["read"],
                 }
             },
         }
@@ -375,7 +378,7 @@ def test_association_table_creates_sharing_not_ownership(tmp_path: Path) -> None
         rows=rows,
         contract=contract,
     )
-    assert graph.explained_by_sharing("alice", "bob", "documents:d1") is True
+    assert graph.explained_by_sharing("alice", "bob", "documents:d1", "read") is True
     assert graph.owner_of("documents:d1") is None
 
 

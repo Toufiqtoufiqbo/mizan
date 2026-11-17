@@ -16,6 +16,7 @@ from typing import Any
 
 from mizan.core import (
     UNKNOWN_PRINCIPAL,
+    AuthorizationOutcome,
     Policy,
     Principal,
     Resource,
@@ -285,6 +286,11 @@ class TaintAnalyzer:
         #: coverage, never as a vulnerability and never as a clean result.
         self.inconclusive: list[dict[str, str]] = []
         self._inconclusive_seen: set[tuple[str, str, str]] = set()
+        #: One explicit outcome per authorization check, including checks that
+        #: resolved through a grant. This is the source for per-law coverage;
+        #: an authorized check is never recorded as inconclusive.
+        self.outcomes: list[dict[str, str]] = []
+        self._outcome_seen: set[tuple[str, str, str, str, str]] = set()
 
     def analyze(self, events: Iterable[WriteEvent]) -> list[Violation]:
         violations: list[Violation] = []
@@ -294,11 +300,28 @@ class TaintAnalyzer:
                 # prove: the write is kept, the breach is not claimed.
                 self.unattributed.append(event)
                 self._record(event, "the write could not be attributed to a principal")
+                self._outcome(event, event.resource_key, AuthorizationOutcome.INCONCLUSIVE)
                 continue
             violations.extend(self._analyze_event(event))
         return violations
 
     # -- individual checks ------------------------------------------------- #
+
+    def _outcome(self, event: WriteEvent, resource_key: str, outcome: AuthorizationOutcome) -> None:
+        """Record one decided outcome per (law, action, resource, principal, result)."""
+        key = ("L3", event.action, resource_key, event.principal, outcome.value)
+        if key in self._outcome_seen:
+            return
+        self._outcome_seen.add(key)
+        self.outcomes.append(
+            {
+                "law": "L3",
+                "action": event.action,
+                "resource": resource_key,
+                "principal": event.principal,
+                "outcome": outcome.value,
+            }
+        )
 
     def _record(self, event: WriteEvent, reason: str) -> None:
         """Keep one explicit reason per (table, row, reason)."""
@@ -306,7 +329,15 @@ class TaintAnalyzer:
         if key in self._inconclusive_seen:
             return
         self._inconclusive_seen.add(key)
-        self.inconclusive.append({"law": "L3", "resource": event.resource_key, "reason": reason})
+        self.inconclusive.append(
+            {
+                "law": "L3",
+                "resource": event.resource_key,
+                "reason": reason,
+                "action": event.action,
+                "principal": event.principal,
+            }
+        )
 
     def _identity_components(self, value: str) -> tuple[str, ...]:
         """Parse a ledger row identity: a JSON array or a legacy scalar."""
@@ -419,9 +450,12 @@ class TaintAnalyzer:
     def _legacy_l3(self, event: WriteEvent, principal: Principal, resource: Resource) -> list[Violation]:
         """The historical L3 check: only used when no graph is attached."""
         if resource.owner is None or resource.owner == principal.id:
+            self._outcome(event, resource.key, AuthorizationOutcome.DECIDED)
             return []
         if self.policy.permitted(principal, resource, event.action):
+            self._outcome(event, resource.key, AuthorizationOutcome.DECIDED)
             return []
+        self._outcome(event, resource.key, AuthorizationOutcome.VIOLATION)
         return [
             Violation(
                 law="L3",
@@ -452,24 +486,32 @@ class TaintAnalyzer:
                 event,
                 "the changed database row does not map uniquely to an API resource",
             )
+            self._outcome(event, event.resource_key, AuthorizationOutcome.INCONCLUSIVE)
             return []
         state = self.graph.owner_state(mapped)
         state_name = getattr(state, "value", str(state))
         if state_name != "CONFIRMED":
             self._record(event, f"ownership is {state_name}; a confirmed owner is required")
+            self._outcome(event, mapped, AuthorizationOutcome.INCONCLUSIVE)
             return []
         owner = self.graph.owner_of(mapped)
         if owner is None:
             self._record(event, "ownership is CONFIRMED but not unique")
+            self._outcome(event, mapped, AuthorizationOutcome.INCONCLUSIVE)
             return []
         if owner == principal.id:
+            self._outcome(event, mapped, AuthorizationOutcome.DECIDED)
             return []
-        if self.graph.explained_by_sharing(owner, principal.id, mapped):
-            self._record(event, "an explicit authorization grant explains the write")
+        if self.graph.explained_by_sharing(owner, principal.id, mapped, event.action):
+            # A confirmed grant for THIS action resolves the check. It is not
+            # uncertainty, and it can never explain a different operation.
+            self._outcome(event, mapped, AuthorizationOutcome.ALLOWED_BY_GRANT)
             return []
         resolved = self.policy.resource(mapped) or Resource(type=resource.type, id=resource.id, owner=owner)
         if self.policy.permitted(principal, replace(resolved, owner=owner), event.action):
+            self._outcome(event, mapped, AuthorizationOutcome.DECIDED)
             return []
+        self._outcome(event, mapped, AuthorizationOutcome.VIOLATION)
         return [self._graph_violation(event, principal, owner, mapped)]
 
     def _analyze_event(self, event: WriteEvent) -> list[Violation]:

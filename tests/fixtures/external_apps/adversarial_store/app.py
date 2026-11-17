@@ -13,6 +13,9 @@ Variants:
   read               - cross-user read allowed, with an unrelated observer row
   write              - cross-user write allowed, with an unrelated observer row
   grant              - access granted through the declared collaborator column
+  grant_write        - collaborator may read and write, but the contract grants only read
+  read_write_grant   - collaborator may read and write, and the contract grants both
+  write_only_grant   - collaborator may read, but the contract grants only write
   creator_only       - access granted through the creator column (not a grant)
   observer_only      - access granted through the observer column (not a grant)
   declared_creator   - the contract names the creator column, access uses the collaborator
@@ -61,6 +64,9 @@ VARIANTS = (
     "read",
     "write",
     "grant",
+    "grant_write",
+    "read_write_grant",
+    "write_only_grant",
     "creator_only",
     "observer_only",
     "declared_creator",
@@ -188,7 +194,7 @@ def create_app(database: str | Path, *, vulnerability: str = "clean") -> Flask:
         variant = app.config["VULNERABILITY"]
         if variant == "read":
             return True
-        if variant in {"grant", "declared_creator"}:
+        if variant in {"grant", "declared_creator", "grant_write", "read_write_grant", "write_only_grant"}:
             return row["originator_ref"] == key or related(key, "collaborator_ref", row["item_ref"])
         if variant == "creator_only":
             return row["originator_ref"] == key or related(key, "creator_ref", row["item_ref"])
@@ -246,7 +252,16 @@ def create_app(database: str | Path, *, vulnerability: str = "clean") -> Flask:
         row = find_item(item_ref)
         if row is None:
             return jsonify({"error": "not found"}), 404
-        if app.config["VULNERABILITY"] != "write" and row["originator_ref"] != key:
+        variant = app.config["VULNERABILITY"]
+        if variant == "write":
+            allow_write = True  # the intentionally vulnerable control
+        elif row["originator_ref"] == key:
+            allow_write = True
+        elif variant in {"grant_write", "read_write_grant"} and related(key, "collaborator_ref", row["item_ref"]):
+            allow_write = True
+        else:
+            allow_write = False
+        if not allow_write:
             return jsonify({"error": "not found"}), 404
         connection = connect()
         with connection:
@@ -264,7 +279,7 @@ def _relation_row(variant: str) -> tuple[str, str, str | None, str | None, str |
         return ("link-1", "item-alice-1", "bob", None, None)
     if variant == "observer_only":
         return ("link-1", "item-alice-1", "alice", None, "bob")
-    if variant in {"grant", "declared_creator"}:
+    if variant in {"grant", "declared_creator", "grant_write", "read_write_grant", "write_only_grant"}:
         return ("link-1", "item-alice-1", "alice", "bob", None)
     # An unrelated observer row: it must never explain or suppress anything.
     return ("link-1", "item-alice-1", "alice", None, "bob")

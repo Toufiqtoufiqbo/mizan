@@ -25,6 +25,8 @@ import requests
 from mizan.core import (
     UNKNOWN_PRINCIPAL,
     AccessMatrix,
+    AuthorizationOutcome,
+    LawCoverage,
     Policy,
     Principal,
     RequestBudgetExhausted,
@@ -127,6 +129,14 @@ class Mizan:
         self.graph: OwnershipGraph | None = None
         #: Checks that could not be completed, with the reason (never a clean result).
         self.inconclusive_checks: list[dict[str, str]] = []
+        #: Every authorization check and how it ended - resolved grants and
+        #: decided checks included. The basis of per-law coverage; never a
+        #: request count and never a merged L2/L3 counter.
+        self.outcomes: list[dict[str, str]] = []
+        self._outcome_seen: set[tuple[str, str, str, str, str]] = set()
+        self._inconclusive_seen: set[tuple[str, str, str, str]] = set()
+        #: Eligible checks per law, computed before the probes run.
+        self.eligible_by_law: dict[str, int] = {}
         #: How many requests the engine sent - the cost of a finding.
         self.requests = 0
         #: The number of requests the engine may send. ``None`` means no limit.
@@ -300,8 +310,13 @@ class Mizan:
         """
         violations: list[Violation] = []
         candidates = self._eligible_probe_targets()
+        self.eligible_by_law = dict(candidates)
         self.probe_candidates = sum(candidates.values())
         self.probes_executed = 0
+        self.inconclusive_checks = []
+        self.outcomes = []
+        self._outcome_seen = set()
+        self._inconclusive_seen = set()
         for name, probe in self.probe_groups():
             if groups is not None and name not in groups:
                 continue
@@ -332,7 +347,6 @@ class Mizan:
         """
         examples = self._examples()
         attackers = [p for p in self.target.principals if self._is_testable(p)]
-        testable_ids = {a.id for a in attackers}
 
         owned = {
             resource.key for record in self.traffic if (resource := record.resource) is not None and resource.owner
@@ -351,28 +365,42 @@ class Mizan:
         # L1 - an identity endpoint per testable principal.
         counts["L1"] = len(self._identity_endpoints()) * len(attackers)
 
-        # L2 - a read of an owned object by somebody who does not own it.
+        # L2 - one check per (observed read of an owned object, other
+        # testable principal). A probe group is not a check: the group can
+        # contain several objects and several identities.
         reads = 0
         for (method, _template), records in examples.items():
             if method not in {"GET", "HEAD"}:
                 continue
-            for key in {r.resource.key for r in records if r.resource is not None and r.resource.key in owned}:
-                owner = self.policy.resource(key).owner if self.policy.resource(key) else None
-                if owner and testable_ids - {owner}:
-                    reads += 1
+            for record in records:
+                resource = record.resource
+                if resource is None or not resource.owner:
+                    continue
+                owner = resource.owner
+                for attacker in attackers:
+                    if attacker.id != owner and attacker.token:
+                        reads += 1
         counts["L2"] = reads
 
-        # L3 - a write into an owned object by somebody who does not own it.
+        # L3 - one check per unique (attacker, object, write method), the same
+        # identity the write probe uses to deduplicate its attempts.
         writes = 0
-        for (method, _template), records in examples.items():
+        seen_writes: set[tuple[str, str, str]] = set()
+        for (method, template), records in examples.items():
             if method not in {"POST", "PUT", "PATCH"}:
                 continue
-            for record in records:
-                if not isinstance(record.body, dict):
+            if not any(isinstance(record.body, dict) for record in records):
+                continue
+            for _url, resource in self._candidate_urls(method, template, records):
+                if resource is None or not resource.owner:
                     continue
-                if record.resource is not None and record.resource.key in owned:
-                    writes += 1
-                    break
+                for attacker in attackers:
+                    if attacker.id == resource.owner or not attacker.token:
+                        continue
+                    key = (attacker.id, resource.key, method)
+                    if key not in seen_writes:
+                        seen_writes.add(key)
+                        writes += 1
         counts["L3"] = writes
 
         # L4 - an authority-carrying field to try writing.
@@ -383,6 +411,69 @@ class Mizan:
         counts["T"] = 1 if self._ledger_events() or owned else 0
 
         return counts
+
+    # -- check recording --------------------------------------------------- #
+
+    def _outcome(self, law: str, action: str, resource: str, principal: str, outcome: AuthorizationOutcome) -> None:
+        """Record one check result, deduplicated by its full identity."""
+        key = (law, action, str(resource), principal, outcome.value)
+        if key in self._outcome_seen:
+            return
+        self._outcome_seen.add(key)
+        self.outcomes.append(
+            {
+                "law": law,
+                "action": action,
+                "resource": str(resource),
+                "principal": principal,
+                "outcome": outcome.value,
+            }
+        )
+
+    def _merge_outcomes(self, outcomes: Iterable[dict[str, str]]) -> None:
+        """Fold the data-level analyzer's outcomes into engine accounting."""
+        for item in outcomes:
+            try:
+                outcome = AuthorizationOutcome(str(item["outcome"]))
+            except ValueError:
+                continue
+            self._outcome(
+                str(item.get("law", "L3")),
+                str(item.get("action", "write")),
+                str(item.get("resource", "")),
+                str(item.get("principal", "")),
+                outcome,
+            )
+
+    def _inconclusive(
+        self,
+        law: str,
+        resource: str,
+        reason: str,
+        *,
+        action: str | None = None,
+        principal: str = "",
+    ) -> None:
+        """Record an unresolved check once, and count it as unresolved."""
+        key = (law, str(resource), reason, principal)
+        if key not in self._inconclusive_seen:
+            self._inconclusive_seen.add(key)
+            self.inconclusive_checks.append(
+                {
+                    "law": law,
+                    "resource": str(resource),
+                    "reason": reason,
+                    "action": action or ("read" if law == "L2" else "write"),
+                    "principal": principal,
+                }
+            )
+        self._outcome(
+            law,
+            action or ("read" if law == "L2" else "write"),
+            resource,
+            principal,
+            AuthorizationOutcome.INCONCLUSIVE,
+        )
 
     def probe_names(self) -> list[str]:
         """The names of the probes, in the order they run."""
@@ -409,6 +500,26 @@ class Mizan:
         )
         report = self.graph.report() if self.graph is not None else {}
         reasons = list((self.graph.inconclusive if self.graph else {}).items())
+        # L2 and L3 are accounted separately. A completed read check is never
+        # allowed to stand in for an unresolved write check (or vice versa).
+        laws: dict[str, LawCoverage] = {}
+        for law in ScanCoverage.required_laws:
+            records = [item for item in self.outcomes if item.get("law") == law]
+            eligible = self.eligible_by_law.get(law, 0)
+            if not eligible and not records:
+                continue
+            counter = LawCoverage(eligible=eligible, attempted=len(records))
+            for item in records:
+                value = item.get("outcome")
+                if value == AuthorizationOutcome.DECIDED.value:
+                    counter.decided += 1
+                elif value == AuthorizationOutcome.ALLOWED_BY_GRANT.value:
+                    counter.allowed_by_grant += 1
+                elif value == AuthorizationOutcome.VIOLATION.value:
+                    counter.findings += 1
+                elif value == AuthorizationOutcome.INCONCLUSIVE.value:
+                    counter.inconclusive += 1
+            laws[law] = counter
         return ScanCoverage(
             resources_discovered=len(resources),
             resources_owned=len(usable),
@@ -419,6 +530,7 @@ class Mizan:
             resources_corroborated=corroborated,
             ownership_candidates=report.get("candidate_ownership_edges", 0),
             ownership_ambiguous=report.get("ambiguous_relationships", 0) + report.get("contradicted_relationships", 0),
+            sharing_explained=sum(law.allowed_by_grant for law in laws.values()),
             inconclusive_checks=len(self.inconclusive_checks),
             identity_anchors_unresolved=sum(1 for key, _ in reasons if key.startswith("identity:")),
             ownership_semantics_missing=sum(
@@ -428,6 +540,7 @@ class Mizan:
             ),
             resource_row_mapping_ambiguous=sum(1 for _, reason in reasons if "mapping" in reason.lower()),
             sharing_semantics_ambiguous=sum(1 for key, _ in reasons if key.startswith("sharing:")),
+            laws=laws,
         )
 
     def attack_groups(self, groups: list[str]) -> list[Violation]:
@@ -470,7 +583,15 @@ class Mizan:
         """
         analyzer = TaintAnalyzer(self.policy, graph=self._data_view_graph())
         violations = analyzer.analyze(self._ledger_events())
-        self.inconclusive_checks.extend(analyzer.inconclusive)
+        for item in analyzer.inconclusive:
+            self._inconclusive(
+                str(item.get("law", "L3")),
+                str(item.get("resource", "")),
+                str(item.get("reason", "")),
+                action=str(item.get("action", "write")),
+                principal=str(item.get("principal", "")),
+            )
+        self._merge_outcomes(analyzer.outcomes)
         return violations
 
     def _is_testable(self, principal: Principal) -> bool:
@@ -510,9 +631,7 @@ class Mizan:
                 owner = resource.owner
                 owner_principal = self.target.principal(owner)
                 if owner_principal is None or not owner_principal.token:
-                    self.inconclusive_checks.append(
-                        {"law": "L2", "resource": resource.key, "reason": "owner has no testable identity"}
-                    )
+                    self._inconclusive("L2", resource.key, "owner has no testable identity", principal=owner)
                     continue
                 # Control: the alleged owner must actually be able to read the
                 # exact object. Without it the accusation is unverified.
@@ -524,9 +643,7 @@ class Mizan:
                 )
                 control_body = _json(control)
                 if not (200 <= control.status_code < 300) or not contains_object(control_body, resource.id):
-                    self.inconclusive_checks.append(
-                        {"law": "L2", "resource": resource.key, "reason": "owner control could not read the object"}
-                    )
+                    self._inconclusive("L2", resource.key, "owner control could not read the object", principal=owner)
                     continue
                 ownership_evidence = (
                     sorted(
@@ -552,11 +669,14 @@ class Mizan:
                     # transmitted.
                     response = self._request(session, READ_METHOD, url, timeout=self.target.timeout)
                     if not (200 <= response.status_code < 300):
+                        # The application refused the read: a decided check.
+                        self._outcome("L2", "read", resource.key, attacker.id, AuthorizationOutcome.DECIDED)
                         continue
                     body = _json(response)
                     if not contains_object(body, resource.id):
                         # The request was accepted, but the object was not
                         # returned: nothing was disclosed.
+                        self._outcome("L2", "read", resource.key, attacker.id, AuthorizationOutcome.DECIDED)
                         continue
                     returned_owner = None
                     if isinstance(body, dict):
@@ -565,18 +685,17 @@ class Mizan:
                                 returned_owner = str(body[key])
                                 break
                     if returned_owner is not None and returned_owner == attacker.id:
+                        self._outcome("L2", "read", resource.key, attacker.id, AuthorizationOutcome.DECIDED)
                         continue
-                    if self.graph is not None and self.graph.explained_by_sharing(owner, attacker.id, resource.key):
-                        # An explicit sharing/membership relationship explains
-                        # the access: it is not an authorization failure.
-                        self.inconclusive_checks.append(
-                            {
-                                "law": "L2",
-                                "resource": resource.key,
-                                "reason": "explicit sharing relationship explains the access",
-                            }
-                        )
+                    if self.graph is not None and self.graph.explained_by_sharing(
+                        owner, attacker.id, resource.key, "read"
+                    ):
+                        # A confirmed READ grant resolves this L2 check. It is
+                        # evidence, not uncertainty, and it does not authorize
+                        # a write on the same resource.
+                        self._outcome("L2", "read", resource.key, attacker.id, AuthorizationOutcome.ALLOWED_BY_GRANT)
                         continue
+                    self._outcome("L2", "read", resource.key, attacker.id, AuthorizationOutcome.VIOLATION)
                     self.observed.grant(attacker.id, resource.key, "read")
                     violations.append(
                         Violation(
@@ -774,6 +893,9 @@ class Mizan:
                     new_events = self._ledger_events()[before:]
                     tainted = [event for event in new_events if event.principal == attacker.id]
                     if not tainted:
+                        # No row changed: the application refused the write.
+                        # This is a decided check, not an unresolved one.
+                        self._outcome("L3", "write", resource.key, attacker.id, AuthorizationOutcome.DECIDED)
                         continue
                     event = tainted[0]
                     # The write event's database identity is mapped to an API
@@ -795,12 +917,12 @@ class Mizan:
                         if len(candidates) == 1:
                             mapped_resource = candidates[0]
                     if mapped_resource is None:
-                        self.inconclusive_checks.append(
-                            {
-                                "law": "L3",
-                                "resource": event.resource_key,
-                                "reason": "the changed database row does not map uniquely to an API resource",
-                            }
+                        self._inconclusive(
+                            "L3",
+                            event.resource_key,
+                            "the changed database row does not map uniquely to an API resource",
+                            action=event.action,
+                            principal=attacker.id,
                         )
                         continue
                     row_key = mapped_resource
@@ -809,18 +931,22 @@ class Mizan:
                         # source. A legacy row_owner hint never decides here.
                         state = self.graph.owner_state(row_key)
                         if state is not EvidenceState.CONFIRMED:
-                            self.inconclusive_checks.append(
-                                {"law": "L3", "resource": row_key, "reason": f"ownership is {state.value}"}
+                            self._inconclusive(
+                                "L3",
+                                row_key,
+                                f"ownership is {state.value}",
+                                action=event.action,
+                                principal=attacker.id,
                             )
                             continue
                         owner = self.graph.owner_of(row_key)
                         if owner is None:
-                            self.inconclusive_checks.append(
-                                {
-                                    "law": "L3",
-                                    "resource": row_key,
-                                    "reason": "ownership is CONFIRMED but not unique",
-                                }
+                            self._inconclusive(
+                                "L3",
+                                row_key,
+                                "ownership is CONFIRMED but not unique",
+                                action=event.action,
+                                principal=attacker.id,
                             )
                             continue
                     else:
@@ -828,17 +954,26 @@ class Mizan:
                         if owner is None:
                             known = self.policy.resource(row_key) or self.policy.resource(event.resource_key)
                             owner = known.owner if known else None
-                    if owner is None or owner == attacker.id:
-                        continue
-                    if self.graph is not None and self.graph.explained_by_sharing(owner, attacker.id, row_key):
-                        self.inconclusive_checks.append(
-                            {
-                                "law": "L3",
-                                "resource": row_key,
-                                "reason": "explicit sharing relationship explains the write",
-                            }
+                    if owner is None:
+                        self._inconclusive(
+                            "L3",
+                            row_key,
+                            "the write owner cannot be established",
+                            action=event.action,
+                            principal=attacker.id,
                         )
                         continue
+                    if owner == attacker.id:
+                        self._outcome("L3", event.action, row_key, attacker.id, AuthorizationOutcome.DECIDED)
+                        continue
+                    if self.graph is not None and self.graph.explained_by_sharing(
+                        owner, attacker.id, row_key, event.action
+                    ):
+                        # A confirmed WRITE grant resolves this L3 check. A
+                        # read-only grant never reaches this branch.
+                        self._outcome("L3", event.action, row_key, attacker.id, AuthorizationOutcome.ALLOWED_BY_GRANT)
+                        continue
+                    self._outcome("L3", event.action, row_key, attacker.id, AuthorizationOutcome.VIOLATION)
                     # The reported resource key stays compatible with the
                     # ledger/proof conventions so the data-level view of the
                     # same row deduplicates with this finding. The real PK
@@ -1126,7 +1261,15 @@ class Mizan:
                 )
         data_analyzer = TaintAnalyzer(self.policy, graph=self._data_view_graph())
         violations.extend(data_analyzer.analyze(new_events))
-        self.inconclusive_checks.extend(data_analyzer.inconclusive)
+        for item in data_analyzer.inconclusive:
+            self._inconclusive(
+                str(item.get("law", "L3")),
+                str(item.get("resource", "")),
+                str(item.get("reason", "")),
+                action=str(item.get("action", "write")),
+                principal=str(item.get("principal", "")),
+            )
+        self._merge_outcomes(data_analyzer.outcomes)
 
         # L1 - did the server act as the identity the token claims?
         claims = decode_token(principal.token) if principal.token else None
@@ -1282,6 +1425,7 @@ class Mizan:
             "server_managed_fields": {k: sorted(v) for k, v in self.policy.server_managed_fields.items()},
             "ownership": self.graph.report() if self.graph is not None else {},
             "inconclusive_checks": list(self.inconclusive_checks),
+            "authorization_outcomes": list(self.outcomes),
         }
 
     def write_bundles(self, violations: Iterable[Violation], root: str | Path) -> list[Path]:

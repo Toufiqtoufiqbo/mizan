@@ -39,6 +39,10 @@ CASES: list[tuple[str, str, tuple[str, ...], bool]] = [
     ("adversarial_store", "read", ("L2",), True),
     ("adversarial_store", "write", ("L3",), True),
     ("adversarial_store", "grant", (), True),
+    # Phase V.2.1 action-scoped grant cases.
+    ("adversarial_store", "grant_write", ("L3",), True),
+    ("adversarial_store", "read_write_grant", (), True),
+    ("adversarial_store", "write_only_grant", ("L2",), True),
     ("adversarial_store", "creator_only", ("L2",), True),
     ("adversarial_store", "observer_only", ("L2",), True),
     ("adversarial_store", "declared_creator", ("L2",), True),
@@ -68,11 +72,17 @@ def _ground_truth(workspace: Path, fixture: str) -> dict[str, str]:
 
 
 def _measure(fixture: str, variant: str, expected: tuple[str, ...]) -> dict[str, Any]:
-    workspace = Path(__file__).resolve().parent / f"workspace-{fixture}-{variant}"
-    result = scan_application(
-        FIXTURES / fixture, variant=variant, budget=BUDGET, workspace=workspace, keep_workspace=True
-    )
-    truth = _ground_truth(workspace, fixture)
+    import tempfile
+
+    # A fresh workspace per measurement: reusing one would let a previous
+    # scan's created rows change what the next scan can map, which would make
+    # the denominators non-reproducible.
+    with tempfile.TemporaryDirectory(prefix=f"mizan-bench-{fixture}-{variant}-") as directory:
+        workspace = Path(directory)
+        result = scan_application(
+            FIXTURES / fixture, variant=variant, budget=BUDGET, workspace=workspace, keep_workspace=True
+        )
+        truth = _ground_truth(workspace, fixture)
     # The graph's confirmed ownership edges are counted per resource by the
     # engine; precision/recall below use the fixture's own database rows.
     report = result.ownership
@@ -110,6 +120,18 @@ def _measure(fixture: str, variant: str, expected: tuple[str, ...]) -> dict[str,
                 if finding.get("law") == "L3"
             }
         ),
+        "l2_findings": sum(1 for finding in result.findings if finding.get("law") == "L2"),
+        "l2_unique": len(
+            {
+                (finding.get("principal"), finding.get("resource"))
+                for finding in result.findings
+                if finding.get("law") == "L2"
+            }
+        ),
+        "l2_detected": "L2" in result.law_types,
+        "l3_detected": "L3" in result.law_types,
+        "law_coverage": result.coverage.to_dict()["laws"],
+        "authorization_outcomes": report.get("authorization_outcomes", []),
         "inconclusive_checks": len(result.ownership.get("inconclusive_checks", [])),
         "sharing_semantics_ambiguous": result.coverage.sharing_semantics_ambiguous,
     }
@@ -214,7 +236,14 @@ def _contract_validation() -> dict[str, Any]:
             json.dumps(
                 {
                     "version": 1,
-                    "sharing": {"t": {"resource_fk": "x", "principal_fk": "x", "semantics": "authorization_grant"}},
+                    "sharing": {
+                        "t": {
+                            "resource_fk": "x",
+                            "principal_fk": "x",
+                            "semantics": "authorization_grant",
+                            "actions": ["read"],
+                        }
+                    },
                 }
             ),
         ),
@@ -228,6 +257,64 @@ def _contract_validation() -> dict[str, Any]:
                             "resource_fk": "a",
                             "principal_fk": "b",
                             "semantics": "authorization_grant",
+                            "actions": ["read"],
+                        }
+                    },
+                }
+            ),
+        ),
+        (
+            "missing_actions",
+            json.dumps(
+                {
+                    "version": 1,
+                    "sharing": {"t": {"resource_fk": "a", "principal_fk": "b", "semantics": "authorization_grant"}},
+                }
+            ),
+        ),
+        (
+            "empty_actions",
+            json.dumps(
+                {
+                    "version": 1,
+                    "sharing": {
+                        "t": {
+                            "resource_fk": "a",
+                            "principal_fk": "b",
+                            "semantics": "authorization_grant",
+                            "actions": [],
+                        }
+                    },
+                }
+            ),
+        ),
+        (
+            "unknown_action",
+            json.dumps(
+                {
+                    "version": 1,
+                    "sharing": {
+                        "t": {
+                            "resource_fk": "a",
+                            "principal_fk": "b",
+                            "semantics": "authorization_grant",
+                            "actions": ["read", "delete"],
+                        }
+                    },
+                }
+            ),
+        ),
+        (
+            "wrong_action_type",
+            json.dumps(
+                {
+                    "version": 1,
+                    "sharing": {
+                        "t": {
+                            "resource_fk": "a",
+                            "principal_fk": "b",
+                            "semantics": "authorization_grant",
+                            "actions": "read",
                         }
                     },
                 }
@@ -251,7 +338,14 @@ def _contract_validation() -> dict[str, Any]:
         contract = RelationshipContract.from_dict(
             {
                 "version": 1,
-                "sharing": {"t": {"resource_fk": "a", "principal_fk": "missing", "semantics": "authorization_grant"}},
+                "sharing": {
+                    "t": {
+                        "resource_fk": "a",
+                        "principal_fk": "missing",
+                        "semantics": "authorization_grant",
+                        "actions": ["read"],
+                    }
+                },
             },
             strict=True,
         )
@@ -272,7 +366,27 @@ def _contract_validation() -> dict[str, Any]:
         except RelationshipContractError:
             rejected += 1
         total = len(cases) + 1
-    return {"rejected": rejected, "invalid_contracts": total}
+        duplicates = RelationshipContract.from_dict(
+            {
+                "version": 1,
+                "sharing": {
+                    "t": {
+                        "resource_fk": "a",
+                        "principal_fk": "b",
+                        "semantics": "authorization_grant",
+                        "actions": ["write", "write"],
+                    }
+                },
+            },
+            strict=True,
+        )
+        normalized = int(duplicates.sharing["t"][4] == frozenset({"write"}))
+    return {
+        "rejected": rejected,
+        "invalid_contracts": total,
+        "duplicate_actions_normalized": normalized,
+        "normalization_cases": 1,
+    }
 
 
 def main() -> None:
@@ -304,9 +418,56 @@ def main() -> None:
     cli_propagation = _cli_contract_propagation()
     contract_gate = _contract_validation()
 
+    # V.2.1 denominators: each rate below is a count over an explicit set of
+    # cases, and the per-law counters are summed over all scan cases.
+    l2_eligible = [m for m in measurements if "L2" in m["expected_laws"]]
+    l3_eligible = [m for m in measurements if "L3" in m["expected_laws"]]
+    l2_detected = sum(1 for m in l2_eligible if m["l2_detected"])
+    l3_detected = sum(1 for m in l3_eligible if m["l3_detected"])
+    read_only = [m for m in measurements if m["variant"] in {"grant", "grant_write"}]
+    read_write = [m for m in measurements if m["variant"] == "read_write_grant"]
+    write_only = [m for m in measurements if m["variant"] == "write_only_grant"]
+    action_scope_cases = read_only + read_write + write_only
+    incorrect_suppression = sum(
+        1 for m in action_scope_cases if any(law not in m["law_types"] for law in m["expected_laws"])
+    )
+    per_law: dict[str, dict[str, int]] = {}
+    for law in ("L2", "L3"):
+        entries = [m["law_coverage"].get(law, {}) for m in measurements]
+        per_law[law] = {
+            field: sum(int(entry.get(field, 0)) for entry in entries)
+            for field in ("eligible", "attempted", "decided", "allowed_by_grant", "findings", "inconclusive")
+        }
+    duplicate_l2_findings = sum(max(0, m["l2_findings"] - m["l2_unique"]) for m in measurements)
+
     summary = {
         "seed": "fixed fixture identifiers; no random sampling in the inference",
         "budget_per_scan": BUDGET,
+        "case_count": len(measurements),
+        "l2_detection": {"detected": l2_detected, "eligible_cases": len(l2_eligible)},
+        "l3_detection": {"detected": l3_detected, "eligible_cases": len(l3_eligible)},
+        "read_only_grant_behavior": {
+            "cases": len(read_only),
+            "l3_findings": sum(m["l3_findings"] for m in read_only),
+            "l2_findings": sum(m["l2_findings"] for m in read_only),
+            "allowed_by_grant_l2": sum(m["law_coverage"].get("L2", {}).get("allowed_by_grant", 0) for m in read_only),
+            "allowed_by_grant_l3": sum(m["law_coverage"].get("L3", {}).get("allowed_by_grant", 0) for m in read_only),
+        },
+        "read_write_grant_behavior": {
+            "cases": len(read_write),
+            "false_positive_findings": sum(m["l2_findings"] + m["l3_findings"] for m in read_write),
+        },
+        "write_only_grant_behavior": {
+            "cases": len(write_only),
+            "l2_findings": sum(m["l2_findings"] for m in write_only),
+            "l3_allowed_by_grant": sum(m["law_coverage"].get("L3", {}).get("allowed_by_grant", 0) for m in write_only),
+        },
+        "action_scoped_incorrect_suppression": {
+            "suppressed": incorrect_suppression,
+            "eligible_cases": len(action_scope_cases),
+        },
+        "per_law_coverage": per_law,
+        "duplicate_findings": {"l2": duplicate_l2_findings, "l3": duplicate_l3_findings},
         "law_detection": {"detected": detected, "eligible": len(expected_cases)},
         "clean_control_false_positives": {"count": false_positives, "controls": len(clean_controls)},
         "ownership_edges_confirmed": total_confirmed,
@@ -335,6 +496,8 @@ def main() -> None:
         "contract_validation": {
             "rejected": contract_gate["rejected"],
             "invalid_contracts": contract_gate["invalid_contracts"],
+            "duplicate_actions_normalized": contract_gate["duplicate_actions_normalized"],
+            "normalization_cases": contract_gate["normalization_cases"],
         },
         "principal_fk_selection": {
             "detected": grant_inheritance_detected,

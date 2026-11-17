@@ -163,3 +163,16 @@ Local: `pytest` → **508 passed / 0 failed / 0 skipped** (476 from Phase V.1 + 
 ## 14. Final SHA and PR status
 
 Recorded in the delivery message after the final commit/push; PR #9 remains open and unmerged, `main` untouched.
+
+## 15. Phase V.2.1 supersession
+
+Phase V.2.1 supersedes the action-agnostic parts of this report. Sharing
+declarations now require an explicit `actions` array; a grant without a scope
+is a configuration error in strict mode, and a legacy declaration without one
+is dropped in lenient mode. `explained_by_sharing` takes an action and only a
+confirmed grant whose scope contains that action resolves a check. A new
+per-law outcome model distinguishes `DECIDED`, `ALLOWED_BY_GRANT`,
+`VIOLATION` and `INCONCLUSIVE`; grants are resolved, not unresolved, and
+`CLEAN` requires every relevant eligible L2/L3 check to be attempted and
+resolved. The fixture contracts were updated accordingly. See
+`PHASE_V2_1_SOUNDNESS_REPORT.md` for the current measurements and gates.

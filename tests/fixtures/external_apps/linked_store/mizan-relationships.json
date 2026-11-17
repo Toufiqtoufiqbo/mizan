@@ -8,7 +8,8 @@
     "document_grants": {
       "resource_fk": "document_key",
       "principal_fk": "identity_key",
-      "semantics": "authorization_grant"
+      "semantics": "authorization_grant",
+      "actions": ["read"]
     }
   }
 }

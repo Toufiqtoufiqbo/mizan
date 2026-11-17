@@ -336,3 +336,20 @@ assumptions of sections 3–6**:
 
 See `PHASE_V2_INTEGRATION_REPORT.md` for the reproductions and the
 denominator-based re-measurement.
+
+### Phase V.2.1 addendum
+
+Phase V.2.1 narrows the semantics above in two places:
+
+1. A grant declaration must carry an explicit, non-empty `actions` array using
+   the engine's operation vocabulary (`read`, `write`). The confirmed tuple is
+   now `(table, resource_fk, principal_fk, authorization_grant, actions)`.
+   `OwnershipGraph.explained_by_sharing(owner, other, resource_key, action)`
+   requires the action to be in that scope, so a read grant can never explain a
+   write. `MEMBER_OF` and unscoped relationships never suppress a finding.
+2. Outcome accounting uses four explicit states (`DECIDED`,
+   `ALLOWED_BY_GRANT`, `VIOLATION`, `INCONCLUSIVE`) and per-law coverage for L2
+   and L3. A resolved grant is not an inconclusive check. `CLEAN` requires every
+   relevant eligible L2/L3 check to have been attempted and resolved; a proven
+   finding keeps `FINDINGS` precedence over incomplete coverage. See
+   `PHASE_V2_1_SOUNDNESS_REPORT.md`.

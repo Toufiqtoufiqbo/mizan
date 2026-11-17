@@ -191,6 +191,7 @@ def test_cli_rejects_a_contract_naming_an_unknown_table(tmp_path: Path, monkeypa
                         "resource_fk": "a",
                         "principal_fk": "b",
                         "semantics": "authorization_grant",
+                        "actions": ["read"],
                     }
                 },
             }
@@ -260,13 +261,14 @@ GRANT = {
         "resource_fk": "artifact_ref",
         "principal_fk": "collaborator_ref",
         "semantics": "authorization_grant",
+        "actions": ["read"],
     }
 }
 
 
 def test_only_the_declared_principal_fk_confirms_a_grant(multi_fk_graph) -> None:
     graph = multi_fk_graph(GRANT)
-    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1") is True
+    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1", "read") is True
     confirmed = {
         (relation.subject, relation.object)
         for relation in graph.relationships
@@ -283,7 +285,7 @@ def test_a_creator_fk_never_inherits_the_grant(multi_fk_graph) -> None:
         "artifact_links": [("a1", "bob", None, None)],
     }
     graph = multi_fk_graph(GRANT, rows)
-    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1") is False
+    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1", "read") is False
     assert any(
         relation.type is RelationshipType.SHARED_WITH
         and relation.subject == "bob"
@@ -299,7 +301,7 @@ def test_a_watcher_fk_never_inherits_the_grant(multi_fk_graph) -> None:
         "artifact_links": [("a1", None, None, "bob")],
     }
     graph = multi_fk_graph(GRANT, rows)
-    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1") is False
+    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1", "read") is False
 
 
 def test_an_incorrect_principal_fk_stays_unconfirmed(multi_fk_graph) -> None:
@@ -308,6 +310,7 @@ def test_an_incorrect_principal_fk_stays_unconfirmed(multi_fk_graph) -> None:
             "resource_fk": "artifact_ref",
             "principal_fk": "creator_ref",
             "semantics": "authorization_grant",
+            "actions": ["read"],
         }
     }
     rows = {
@@ -316,7 +319,7 @@ def test_an_incorrect_principal_fk_stays_unconfirmed(multi_fk_graph) -> None:
         "artifact_links": [("a1", None, "bob", None)],
     }
     graph = multi_fk_graph(wrong, rows)
-    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1") is False
+    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1", "read") is False
 
 
 def test_an_incorrect_resource_fk_cannot_produce_a_grant(multi_fk_graph) -> None:
@@ -325,10 +328,11 @@ def test_an_incorrect_resource_fk_cannot_produce_a_grant(multi_fk_graph) -> None
             "resource_fk": "creator_ref",
             "principal_fk": "collaborator_ref",
             "semantics": "authorization_grant",
+            "actions": ["read"],
         }
     }
     graph = multi_fk_graph(wrong)
-    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1") is False
+    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1", "read") is False
 
 
 def test_multiple_identity_fks_do_not_duplicate_a_grant(multi_fk_graph) -> None:
@@ -366,7 +370,7 @@ def test_a_missing_anchor_creates_no_confirmed_grant(multi_fk_graph) -> None:
         rows=rows,
         contract=contract,
     )
-    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1") is False
+    assert graph.explained_by_sharing("alice", "bob", "artifacts:a1", "read") is False
 
 
 # --------------------------------------------------------------------------- #
@@ -525,7 +529,14 @@ def test_contract_rejects_the_same_column_for_both_roles(tmp_path: Path) -> None
         json.dumps(
             {
                 "version": 1,
-                "sharing": {"t": {"resource_fk": "x", "principal_fk": "x", "semantics": "authorization_grant"}},
+                "sharing": {
+                    "t": {
+                        "resource_fk": "x",
+                        "principal_fk": "x",
+                        "semantics": "authorization_grant",
+                        "actions": ["read"],
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -548,6 +559,7 @@ def test_contract_schema_validation_rejects_unknown_columns(tmp_path: Path) -> N
                     "resource_fk": "artifact_ref",
                     "principal_fk": "does_not_exist",
                     "semantics": "authorization_grant",
+                    "actions": ["read"],
                 }
             },
         },

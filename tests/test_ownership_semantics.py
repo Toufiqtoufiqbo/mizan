@@ -194,7 +194,7 @@ def test_undeclared_association_is_candidate_sharing_not_permission(tmp_path: Pa
         _identity_observations(),
         contract,
     )
-    assert graph.explained_by_sharing("alice", "bob", "artifacts:art-1") is False
+    assert graph.explained_by_sharing("alice", "bob", "artifacts:art-1", "read") is False
     assert any(
         relation.type is RelationshipType.SHARED_WITH and relation.state is EvidenceState.CANDIDATE
         for relation in graph.relationships
@@ -216,6 +216,7 @@ def test_declared_grant_is_confirmed_sharing(tmp_path: Path) -> None:
                     "resource_fk": "artifact_ref",
                     "principal_fk": "person_ref",
                     "semantics": "authorization_grant",
+                    "actions": ["read"],
                 }
             },
         }
@@ -226,7 +227,7 @@ def test_declared_grant_is_confirmed_sharing(tmp_path: Path) -> None:
         _identity_observations(),
         contract,
     )
-    assert graph.explained_by_sharing("alice", "bob", "artifacts:art-1") is True
+    assert graph.explained_by_sharing("alice", "bob", "artifacts:art-1", "read") is True
 
 
 # --- Issue C: API resource vs database row, composite keys, WITHOUT ROWID ---

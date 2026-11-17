@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from mizan.attribution import DatabaseSchema
-from mizan.core import UNKNOWN_PRINCIPAL, Resource
+from mizan.core import GRANT_ACTIONS, UNKNOWN_PRINCIPAL, Resource
 from mizan.taint import WriteEvent
 
 
@@ -70,6 +70,50 @@ class RelationshipContractError(ValueError):
 OWNERSHIP_SOURCES = frozenset({"database_foreign_key", "response_field"})
 
 
+def _parse_grant_actions(table: str, declaration: dict[str, Any], *, strict: bool) -> frozenset[str] | None:
+    """Parse the explicit action scope of a sharing declaration.
+
+    A grant without a declared scope is not interpreted as permission for
+    everything: in strict mode it is a configuration error, and in lenient mode
+    the declaration is dropped (the least permissive interpretation). Unknown
+    actions, non-string values and an empty list are rejected for the same
+    reason - a permission the scan cannot name is a permission it cannot use.
+    """
+    raw = declaration.get("actions")
+    if raw is None:
+        if strict:
+            raise RelationshipContractError(
+                f"sharing declaration for {table!r} must declare 'actions' "
+                f"({sorted(GRANT_ACTIONS)}); a grant without an action scope is not a grant"
+            )
+        return None
+    if isinstance(raw, str) or not isinstance(raw, (list, tuple)):
+        if strict:
+            raise RelationshipContractError(f"sharing declaration for {table!r} must declare 'actions' as a JSON array")
+        return None
+    actions: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            if strict:
+                raise RelationshipContractError(f"sharing declaration for {table!r} has a non-string action {item!r}")
+            return None
+        action = item.strip().lower()
+        if action not in GRANT_ACTIONS:
+            if strict:
+                raise RelationshipContractError(
+                    f"unsupported action {item!r} for sharing declaration {table!r}; "
+                    f"expected one of {sorted(GRANT_ACTIONS)}"
+                )
+            return None
+        actions.append(action)
+    if not actions:
+        if strict:
+            raise RelationshipContractError(f"sharing declaration for {table!r} declares an empty 'actions' list")
+        return None
+    # Duplicates are normalized deterministically; the scope is a set.
+    return frozenset(actions)
+
+
 @dataclass(frozen=True)
 class RelationshipContract:
     """Explicit, trusted semantic declarations about an application.
@@ -87,7 +131,10 @@ class RelationshipContract:
     version: int = 1
     identity: tuple[str, str] | None = None
     ownership: dict[str, tuple[str, str]] = field(default_factory=dict)
-    sharing: dict[str, tuple[str, str, str, str]] = field(default_factory=dict)
+    #: table -> (resource_fk, principal_fk, semantics, table, actions).
+    #: ``actions`` is the explicit, non-empty scope of the grant: a grant is
+    #: never interpreted as permission for an operation it does not declare.
+    sharing: dict[str, tuple[str, str, str, str, frozenset[str]]] = field(default_factory=dict)
     variants: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def for_variant(self, name: str | None, *, strict: bool = False) -> RelationshipContract:
@@ -103,6 +150,7 @@ class RelationshipContract:
                     "resource_fk": value[0],
                     "principal_fk": value[1],
                     "semantics": value[2],
+                    "actions": sorted(value[4]),
                 }
                 for key, value in self.sharing.items()
             },
@@ -161,7 +209,7 @@ class RelationshipContract:
                     f"expected one of {sorted(OWNERSHIP_SOURCES)}"
                 )
             ownership[str(resource_type)] = (source, str(name))
-        sharing: dict[str, tuple[str, str, str, str]] = {}
+        sharing: dict[str, tuple[str, str, str, str, frozenset[str]]] = {}
         sharing_data = data.get("sharing") or {}
         if strict and not isinstance(sharing_data, dict):
             raise RelationshipContractError("sharing must be an object")
@@ -188,7 +236,16 @@ class RelationshipContract:
                 raise RelationshipContractError(
                     f"sharing declaration for {table!r} names the same column for both foreign keys"
                 )
-            sharing[str(table)] = (str(resource_fk), str(principal_fk), "authorization_grant", str(table))
+            actions = _parse_grant_actions(str(table), declaration, strict=strict)
+            if actions is None:
+                continue
+            sharing[str(table)] = (
+                str(resource_fk),
+                str(principal_fk),
+                "authorization_grant",
+                str(table),
+                actions,
+            )
         variants = {}
         if isinstance(data.get("variants"), dict):
             variants = {str(key): value for key, value in data["variants"].items() if isinstance(value, dict)}
@@ -204,7 +261,7 @@ class RelationshipContract:
         looks legitimate. Every problem raises, with the offending name.
         """
         problems: list[str] = []
-        for table, (resource_fk, principal_fk, _semantics, _name) in sorted(self.sharing.items()):
+        for table, (resource_fk, principal_fk, _semantics, _name, _actions) in sorted(self.sharing.items()):
             declared = schema.get(table) if schema is not None else None
             if declared is None:
                 problems.append(f"sharing declares unknown table {table!r}")
@@ -369,6 +426,10 @@ class Relationship:
     object: str
     state: EvidenceState
     evidence: tuple[str, ...] = ()
+    #: For a ``SHARED_WITH`` grant, the operations it actually authorizes.
+    #: An empty set means "no operation is authorized": a relationship that
+    #: names no scope can never explain access.
+    actions: frozenset[str] = frozenset()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -377,6 +438,7 @@ class Relationship:
             "object": self.object,
             "state": str(self.state),
             "evidence": list(self.evidence),
+            "actions": sorted(self.actions),
         }
 
     @classmethod
@@ -387,6 +449,7 @@ class Relationship:
             object=str(data["object"]),
             state=EvidenceState(str(data.get("state", "UNKNOWN"))),
             evidence=tuple(data.get("evidence", ())),
+            actions=frozenset(str(action) for action in data.get("actions", ())),
         )
 
 
@@ -420,7 +483,14 @@ class OwnershipGraph:
         return evidence_id
 
     def add_relationship(
-        self, type_: RelationshipType, subject: str, object_: str, state: EvidenceState, evidence: Iterable[str] = ()
+        self,
+        type_: RelationshipType,
+        subject: str,
+        object_: str,
+        state: EvidenceState,
+        evidence: Iterable[str] = (),
+        *,
+        actions: Iterable[str] = (),
     ) -> Relationship:
         existing = next(
             (r for r in self.relationships if r.type == type_ and r.subject == subject and r.object == object_),
@@ -436,12 +506,13 @@ class OwnershipGraph:
             EvidenceState.CONFIRMED: 3,
         }
         if existing is None:
-            existing = Relationship(type_, subject, object_, state, ())
+            existing = Relationship(type_, subject, object_, state, (), frozenset(actions))
             self.relationships.append(existing)
         elif existing.state != state and {existing.state, state} <= {EvidenceState.CONFIRMED, EvidenceState.CANDIDATE}:
             existing.state = max(existing.state, state, key=lambda s: order[s])
         elif existing.state != state:
             existing.state = EvidenceState.CONTRADICTED
+        existing.actions = frozenset(set(existing.actions) | set(actions))
         ids = set(existing.evidence)
         ids.update(evidence)
         existing.evidence = tuple(sorted(ids))
@@ -469,17 +540,27 @@ class OwnershipGraph:
         states = {r.state for r in relationships}
         return states.pop() if len(states) == 1 else EvidenceState.CONTRADICTED
 
-    def explained_by_sharing(self, owner: str, other: str, resource_key: str) -> bool:
-        """Whether an explicit relationship explains this principal's access.
+    def explained_by_sharing(self, owner: str, other: str, resource_key: str, action: str) -> bool:
+        """Whether a confirmed, action-scoped grant explains this access.
 
-        Sharing is an explanation for access, not permission and not
-        ownership. Only confirmed associations suppress a finding.
+        ``action`` is mandatory on purpose: a permission to read is never a
+        permission to write. Only a ``CONFIRMED`` ``SHARED_WITH`` relationship
+        for this exact principal and resource, whose declared actions contain
+        this exact action, can explain an access. Candidates, ambiguous and
+        contradicted relationships and unscoped relationships explain nothing.
+
+        ``owner`` is part of the API because callers reason about an
+        owner/other pair; the decision itself binds the *other* principal and
+        the resource, so a grant can never be borrowed by another identity.
         """
+        if action not in GRANT_ACTIONS:
+            return False
         return any(
-            r.type in {RelationshipType.SHARED_WITH, RelationshipType.MEMBER_OF}
+            r.type is RelationshipType.SHARED_WITH
             and r.state is EvidenceState.CONFIRMED
             and r.subject == other
             and r.object == resource_key
+            and action in r.actions
             for r in self.relationships
         )
 
@@ -957,6 +1038,7 @@ def discover_associations(
         grant = contract.sharing.get(table) if contract is not None else None
         declared_resource_fk = grant[0] if grant is not None else None
         declared_principal_fk = grant[1] if grant is not None else None
+        declared_actions = grant[4] if grant is not None else frozenset()
         if grant is not None and not any(fk.column == declared_principal_fk for fk in identity_fks):
             graph.inconclusive.setdefault(
                 f"sharing:{table}",
@@ -1000,7 +1082,14 @@ def discover_associations(
                             detail=detail,
                         )
                     )
-                    graph.add_relationship(RelationshipType.SHARED_WITH, principal, resource_key, state, [evidence])
+                    graph.add_relationship(
+                        RelationshipType.SHARED_WITH,
+                        principal,
+                        resource_key,
+                        state,
+                        [evidence],
+                        actions=declared_actions if exact_grant else (),
+                    )
                     if state is EvidenceState.CANDIDATE:
                         graph.inconclusive.setdefault(
                             f"sharing:{principal}:{resource_key}",

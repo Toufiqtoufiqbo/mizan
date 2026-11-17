@@ -399,20 +399,31 @@ class ValidationResult:
     def verdict(self) -> Verdict:
         """What the scan concluded.
 
-        The order matters. A failed setup is ``ERROR`` even when nothing was
-        found, because a scan that could not start proved nothing. A proven
-        finding is ``FINDINGS`` even when the coverage was incomplete - the
-        finding is real, and the missing coverage stays visible in
-        ``coverage``. Only a scan that both ran its checks *and* found nothing
-        is ``CLEAN``; anything else is ``INCONCLUSIVE``.
+        The order matters and each branch is a distinct claim:
+
+        * a failed setup or execution is ``ERROR`` - a scan that could not run
+          proved nothing, even if it saw no finding;
+        * a proven finding is ``FINDINGS`` - a real violation keeps precedence
+          over incomplete coverage, which stays visible;
+        * ``CLEAN`` requires meaningful coverage **and** every relevant required
+          check (L2/L3) to have reached a decision. An eligible check that was
+          never attempted, or an attempted check that remains unresolved, is
+          not evidence of safety;
+        * a confirmed, action-scoped grant is a *resolved* decision, not an
+          unresolved check. It is counted as such in the per-law counters;
+        * everything else is ``INCONCLUSIVE``, including a truncated budget and
+          a scan with no meaningful eligible security checks.
         """
         if self.error is not None or self.setup_error is not None:
             return Verdict.ERROR
         if self.finding_count > 0:
             return Verdict.FINDINGS
-        if self.coverage.meaningful:
-            return Verdict.CLEAN
-        return Verdict.INCONCLUSIVE
+        coverage = self.coverage
+        if not coverage.meaningful or not coverage.has_law_coverage:
+            return Verdict.INCONCLUSIVE
+        if coverage.unresolved_checks > 0 or coverage.pending_checks > 0:
+            return Verdict.INCONCLUSIVE
+        return Verdict.CLEAN
 
     @property
     def clean(self) -> bool:
@@ -707,6 +718,7 @@ def scan_application(
         result.coverage = coverage
         result.ownership = engine.graph.report() if engine.graph is not None else {}
         result.ownership["inconclusive_checks"] = list(engine.inconclusive_checks)
+        result.ownership["authorization_outcomes"] = list(engine.outcomes)
 
         result.finding_count = len(violations)
         result.law_types = sorted({violation.law for violation in violations})
