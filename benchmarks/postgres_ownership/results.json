@@ -7,14 +7,14 @@
       "debug_mapping": {
         "resource_rows": {
           "items:a1": [
-            "mizan_bench_92228a2c4b.items",
+            "mizan_bench_1b70e3f550.items",
             [
               "a1"
             ]
           ]
         },
         "row_key": "a1",
-        "table": "mizan_bench_92228a2c4b.items"
+        "table": "mizan_bench_1b70e3f550.items"
       },
       "expected": {
         "findings": 0,
@@ -40,14 +40,14 @@
       "debug_mapping": {
         "resource_rows": {
           "items:a1": [
-            "mizan_bench_33f64ce938.items",
+            "mizan_bench_59da203e93.items",
             [
               "a1"
             ]
           ]
         },
         "row_key": "a1",
-        "table": "mizan_bench_33f64ce938.items"
+        "table": "mizan_bench_59da203e93.items"
       },
       "expected": {
         "findings": 0,
@@ -75,14 +75,14 @@
       "debug_mapping": {
         "resource_rows": {
           "items:a1": [
-            "mizan_bench_22e6fdec9f.items",
+            "mizan_bench_aa50dcac4c.items",
             [
               "a1"
             ]
           ]
         },
         "row_key": "a1",
-        "table": "mizan_bench_22e6fdec9f.items"
+        "table": "mizan_bench_aa50dcac4c.items"
       },
       "expected": {
         "findings": 1,
@@ -110,14 +110,14 @@
       "debug_mapping": {
         "resource_rows": {
           "items:a1": [
-            "mizan_bench_4480dba337.items",
+            "mizan_bench_9faa3951de.items",
             [
               "a1"
             ]
           ]
         },
         "row_key": "a1",
-        "table": "mizan_bench_4480dba337.items"
+        "table": "mizan_bench_9faa3951de.items"
       },
       "expected": {
         "findings": 0,
@@ -145,14 +145,14 @@
       "debug_mapping": {
         "resource_rows": {
           "items:a1": [
-            "mizan_bench_27ce14d617.items",
+            "mizan_bench_ebd1eb93cb.items",
             [
               "a1"
             ]
           ]
         },
         "row_key": "a1",
-        "table": "mizan_bench_27ce14d617.items"
+        "table": "mizan_bench_ebd1eb93cb.items"
       },
       "expected": {
         "findings": 1,
@@ -180,14 +180,14 @@
       "debug_mapping": {
         "resource_rows": {
           "items:a1": [
-            "mizan_bench_ae0dd4efc0.items",
+            "mizan_bench_922f4fb86f.items",
             [
               "a1"
             ]
           ]
         },
         "row_key": "a1",
-        "table": "mizan_bench_ae0dd4efc0.items"
+        "table": "mizan_bench_922f4fb86f.items"
       },
       "expected": {
         "findings": 0,
@@ -213,7 +213,7 @@
       "debug_mapping": {
         "resource_rows": {
           "items:a1": [
-            "mizan_bench_927b091194.items",
+            "mizan_bench_e04819ec3c.items",
             [
               "a1"
             ]
@@ -246,7 +246,7 @@
       "debug_mapping": {
         "resource_rows": {
           "items:[\"t1\",\"a1\"]": [
-            "mizan_bench_83956064dd.items",
+            "mizan_bench_6fd0f892d6.items",
             [
               "t1",
               "a1"
@@ -254,7 +254,7 @@
           ]
         },
         "row_key": "[\"t1\",\"a1\"]",
-        "table": "mizan_bench_83956064dd.items"
+        "table": "mizan_bench_6fd0f892d6.items"
       },
       "expected": {
         "findings": 1,

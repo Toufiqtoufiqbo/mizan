@@ -149,6 +149,12 @@ message. Local and remote heads match after the final push. `main` and
   as a skip when stage A deselected `postgres_integration`. No test failed.
 - This was fixed by resolving the DSN lazily inside executing fixtures only.
   Local stage A now reports `593 passed, 31 deselected`, zero skipped.
+- A second CI run exposed a timing-dependent `INCONCLUSIVE` in the adversarial
+  `clean` control: writes to rows created only by mutation probes, with no
+  discovered API resource, were counted as unresolved checks. Their relevance
+  filter now requires a known resource key, table, or row identity; genuinely
+  ambiguous mappings for known resources remain inconclusive. Local stage A,
+  V.2.x soundness suites and both benchmarks pass after the fix.
 - The CI run ID and conclusions for the final HEAD are recorded in the final
   delivery message. The optional external-target job remains `SKIPPED`, not
   `PASSED`.
