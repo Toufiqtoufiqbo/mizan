@@ -1,0 +1,3 @@
+# Generated scan workspaces from `python -m benchmarks.ownership.run`.
+/workspace-*/
+__pycache__/

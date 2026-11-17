@@ -11,7 +11,7 @@ import math
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, ClassVar
 
 # --------------------------------------------------------------------------- #
 # Laws
@@ -158,6 +158,127 @@ class Verdict(StrEnum):
     """The setup or the execution failed."""
 
 
+#: The action vocabulary of the authorization model.
+#:
+#: It mirrors :func:`actions_for` exactly: every read method maps to ``read``
+#: and every mutating method maps to ``write``. Authorization grants are
+#: declared in the same vocabulary, so a grant can never be written for one
+#: operation and silently applied to another.
+READ_ACTION = "read"
+WRITE_ACTION = "write"
+GRANT_ACTIONS = frozenset({READ_ACTION, WRITE_ACTION})
+
+
+class AuthorizationOutcome(StrEnum):
+    """How one authorization check ended.
+
+    These four states are deliberately distinct. ``ALLOWED_BY_GRANT`` is a
+    *resolved* check: the access was explained by an explicit, action-scoped
+    grant. ``INCONCLUSIVE`` is the opposite: the evidence was insufficient.
+    Collapsing either of them into the other turns a permission to read into a
+    permission to write, or an unknown into a clean result.
+    """
+
+    DECIDED = "DECIDED"
+    """The check completed with a defensible decision and no grant."""
+
+    ALLOWED_BY_GRANT = "ALLOWED_BY_GRANT"
+    """A confirmed, action-scoped grant explains the observed access."""
+
+    VIOLATION = "VIOLATION"
+    """The check proved a violation."""
+
+    INCONCLUSIVE = "INCONCLUSIVE"
+    """The check could not be decided from the available evidence."""
+
+    @property
+    def resolved(self) -> bool:
+        """Whether this outcome is a real decision rather than uncertainty."""
+        return self is not AuthorizationOutcome.INCONCLUSIVE
+
+
+#: Deterministic reconciliation order for provisional outcomes of one logical
+#: check. A proven violation is the strongest result; uncertainty is the
+#: weakest, so direct observations can replace it but can never be replaced by
+#: it. This maps the abstract outcome to a rank, not to a verdict.
+OUTCOME_PRECEDENCE: dict[AuthorizationOutcome, int] = {
+    AuthorizationOutcome.INCONCLUSIVE: 0,
+    AuthorizationOutcome.DECIDED: 1,
+    AuthorizationOutcome.ALLOWED_BY_GRANT: 2,
+    AuthorizationOutcome.VIOLATION: 3,
+}
+
+
+@dataclass
+class LawCoverage:
+    """Per-law accounting for one authorization law.
+
+    Every count answers a different question, and none of them is a request
+    count:
+
+    ``eligible``
+        checks the scan could legitimately perform (the denominator);
+    ``attempted``
+        eligible checks that were actually started;
+    ``decided``
+        attempts that reached a defensible decision without a grant;
+    ``allowed_by_grant``
+        attempts resolved as legitimate, action-scoped shared access;
+    ``findings``
+        attempts that proved a violation;
+    ``inconclusive``
+        attempts that could not be decided.
+
+    ``eligible`` is the denominator for every rate. A check that never had a
+    valid target is never counted as attempted, and a resolved grant is never
+    counted as unresolved.
+    """
+
+    eligible: int = 0
+    attempted: int = 0
+    decided: int = 0
+    allowed_by_grant: int = 0
+    findings: int = 0
+    inconclusive: int = 0
+
+    @property
+    def resolved(self) -> int:
+        """Attempts that ended in a decision (including a resolved grant)."""
+        return self.decided + self.allowed_by_grant + self.findings
+
+    @property
+    def unresolved(self) -> int:
+        """Eligible-and-attempted checks that remain undecided."""
+        return self.inconclusive
+
+    @property
+    def pending(self) -> int:
+        """Eligible checks that were never attempted."""
+        return max(0, self.eligible - self.attempted)
+
+    @property
+    def relevant(self) -> bool:
+        """Whether this law carried any security check for this scan."""
+        return bool(self.eligible or self.attempted or self.resolved or self.inconclusive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "eligible": self.eligible,
+            "attempted": self.attempted,
+            "decided": self.decided,
+            "allowed_by_grant": self.allowed_by_grant,
+            "findings": self.findings,
+            "inconclusive": self.inconclusive,
+            "resolved": self.resolved,
+            "unresolved": self.unresolved,
+            "pending": self.pending,
+            # Explicit denominators: every rate is over ``eligible`` and is
+            # reported with the count it was computed from.
+            "attempt_rate": round(self.attempted / self.eligible, 4) if self.eligible else None,
+            "resolution_rate": round(self.resolved / self.eligible, 4) if self.eligible else None,
+        }
+
+
 @dataclass
 class ScanCoverage:
     """What the scan actually managed to look at.
@@ -190,6 +311,75 @@ class ScanCoverage:
     budget_exhausted: bool = False
     """Whether the request budget cut the scan short."""
 
+    # Phase V: ownership evidence is a separate dimension from raw discovery.
+    resources_with_ownership_evidence: int = 0
+    """Discovered resources with any confirmed ownership evidence."""
+
+    resources_corroborated: int = 0
+    """Ownership edges supported by more than one independent source."""
+
+    ownership_candidates: int = 0
+    """Resources whose owner is only a candidate - never a finding basis."""
+
+    ownership_ambiguous: int = 0
+    """Relationships whose evidence is ambiguous or contradictory."""
+
+    sharing_explained: int = 0
+    """Cross-principal accesses explained by an explicit sharing relationship."""
+
+    inconclusive_checks: int = 0
+    """Checks that could not be completed, with a recorded reason."""
+
+    identity_anchors_unresolved: int = 0
+    """Principals with no confirmed database identity anchor."""
+
+    ownership_semantics_missing: int = 0
+    """Resources whose ownership evidence is only structural/candidate."""
+
+    resource_row_mapping_ambiguous: int = 0
+    """Resources whose API id does not map uniquely to a database row."""
+
+    sharing_semantics_ambiguous: int = 0
+    """Associations whose permission semantics are unproven."""
+
+    laws: dict[str, LawCoverage] = field(default_factory=dict)
+    """Per-law coverage, keyed by law (``L2``, ``L3``).
+
+    L2 and L3 are never merged: a completed read check says nothing about an
+    unresolved write check, and the verdict has to look at each of them.
+    """
+
+    #: The laws whose *own* coverage decides whether a clean claim is allowed.
+    #: Other laws (L1, L4, L5) keep their historical probe-level accounting;
+    #: their eligible/executed counters live in this object already.
+    required_laws: ClassVar[tuple[str, ...]] = ("L2", "L3")
+
+    @property
+    def relevant_laws(self) -> dict[str, LawCoverage]:
+        """The per-law counters that describe an actual check."""
+        return {law: coverage for law, coverage in self.laws.items() if coverage.relevant}
+
+    @property
+    def has_law_coverage(self) -> bool:
+        """Whether at least one authorization law had something to check."""
+        return any(coverage.eligible > 0 for coverage in self.laws.values())
+
+    @property
+    def resolved_checks(self) -> int:
+        """Decided checks, including checks resolved by a confirmed grant."""
+        return sum(coverage.resolved for coverage in self.laws.values())
+
+    @property
+    def unresolved_checks(self) -> int:
+        """Checks that remain undecided, including legacy recorded reasons."""
+        recorded = sum(coverage.inconclusive for coverage in self.laws.values())
+        return max(self.inconclusive_checks, recorded)
+
+    @property
+    def pending_checks(self) -> int:
+        """Eligible checks that were never attempted."""
+        return sum(coverage.pending for coverage in self.laws.values())
+
     @property
     def meaningful(self) -> bool:
         """Whether the scan established enough coverage to make a clean claim."""
@@ -210,6 +400,20 @@ class ScanCoverage:
             "probes_executed": self.probes_executed,
             "budget_exhausted": self.budget_exhausted,
             "meaningful": self.meaningful,
+            "resources_with_ownership_evidence": self.resources_with_ownership_evidence,
+            "resources_corroborated": self.resources_corroborated,
+            "ownership_candidates": self.ownership_candidates,
+            "ownership_ambiguous": self.ownership_ambiguous,
+            "sharing_explained": self.sharing_explained,
+            "inconclusive_checks": self.inconclusive_checks,
+            "identity_anchors_unresolved": self.identity_anchors_unresolved,
+            "ownership_semantics_missing": self.ownership_semantics_missing,
+            "resource_row_mapping_ambiguous": self.resource_row_mapping_ambiguous,
+            "sharing_semantics_ambiguous": self.sharing_semantics_ambiguous,
+            "laws": {law: coverage.to_dict() for law, coverage in sorted(self.laws.items())},
+            "resolved_checks": self.resolved_checks,
+            "unresolved_checks": self.unresolved_checks,
+            "pending_checks": self.pending_checks,
         }
 
 

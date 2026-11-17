@@ -86,6 +86,7 @@ class Recorder:
 
         response = self.app(environ, start_response_wrapper)
         payload = _decode(response)
+        resource_type, resource_id, resource_owner = infer_resource(payload, to_template(path), path=path)
         record = TrafficRecord(
             method=method,
             path=path,
@@ -94,9 +95,9 @@ class Recorder:
             principal=principal,
             body=body,
             response=payload,
-            resource_type=infer_resource(payload, to_template(path))[0],
-            resource_id=infer_resource(payload, to_template(path))[1],
-            resource_owner=infer_resource(payload, to_template(path))[2],
+            resource_type=resource_type,
+            resource_id=resource_id,
+            resource_owner=resource_owner,
         )
         self._write(record)
         return response

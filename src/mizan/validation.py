@@ -43,12 +43,30 @@ from mizan.proxy import RecordingProxy
 from mizan.twin import Twin, TwinSpec, script_command
 
 #: The variants of an application, and the laws each of them must produce.
-VARIANTS: dict[str, tuple[str, ...]] = {
+#: The default variants of a fixture. A fixture with additional variants
+#: declares them in its own ``variants.json``; production code never names a
+#: particular fixture or guesses which variants it implements.
+DEFAULT_EXPECTED: dict[str, tuple[str, ...]] = {
     "clean": (),
     "read": ("L2",),
     "write": ("L3",),
     "both": ("L2", "L3"),
 }
+
+
+def expected_variants(application: str | Path) -> dict[str, tuple[str, ...]]:
+    """The variants a fixture declares, or the standard contract by default."""
+    manifest = Path(application) / "variants.json"
+    if not manifest.exists():
+        return dict(DEFAULT_EXPECTED)
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return dict(DEFAULT_EXPECTED)
+    if not isinstance(data, dict):
+        return dict(DEFAULT_EXPECTED)
+    return {str(name): tuple(str(law) for law in laws) for name, laws in data.items()}
+
 
 #: The principals that L2 and L3 validation require. Cross-user testing is
 #: meaningless with fewer than two unprivileged identities, so a scan that
@@ -258,6 +276,24 @@ LAUNCH_FLASK = LaunchSpec(
     spec_source=SpecSource.from_file("{fixture}/openapi.json"),
 )
 
+#: The launch specification for the nonstandard-ownership fixture (Phase V).
+LAUNCH_LINKED = LaunchSpec(
+    command=[sys.executable, "{fixture}/app.py"],
+    spec_source=SpecSource.from_file("{fixture}/openapi.json"),
+)
+
+#: The Phase V.1 adversarial fixture.
+LAUNCH_ADVERSARIAL = LaunchSpec(
+    command=[sys.executable, "{fixture}/app.py"],
+    spec_source=SpecSource.from_file("{fixture}/openapi.json"),
+)
+
+#: The Phase V.2.2 mixed-ownership fixture (confirmed/candidate/unknown).
+LAUNCH_MIXED = LaunchSpec(
+    command=[sys.executable, "{fixture}/app.py"],
+    spec_source=SpecSource.from_file("{fixture}/openapi.json"),
+)
+
 
 def launch_for(fixture_dir: Path) -> LaunchSpec | None:
     """Return the ``LaunchSpec`` for a fixture directory, or ``None`` if unknown."""
@@ -265,6 +301,9 @@ def launch_for(fixture_dir: Path) -> LaunchSpec | None:
         "fastapi_store": LAUNCH_FASTAPI,
         "express_store": LAUNCH_EXPRESS,
         "flask_store": LAUNCH_FLASK,
+        "linked_store": LAUNCH_LINKED,
+        "adversarial_store": LAUNCH_ADVERSARIAL,
+        "mixed_ownership": LAUNCH_MIXED,
     }
     return _FIXTURE_LAUNCH.get(fixture_dir.name)
 
@@ -360,25 +399,38 @@ class ValidationResult:
     workspace: str | None = None
     requests: RequestAccounting = field(default_factory=RequestAccounting)
     coverage: ScanCoverage = field(default_factory=ScanCoverage)
+    #: Phase V: the ownership graph report for this scan (explainability).
+    ownership: dict[str, Any] = field(default_factory=dict)
 
     @property
     def verdict(self) -> Verdict:
         """What the scan concluded.
 
-        The order matters. A failed setup is ``ERROR`` even when nothing was
-        found, because a scan that could not start proved nothing. A proven
-        finding is ``FINDINGS`` even when the coverage was incomplete - the
-        finding is real, and the missing coverage stays visible in
-        ``coverage``. Only a scan that both ran its checks *and* found nothing
-        is ``CLEAN``; anything else is ``INCONCLUSIVE``.
+        The order matters and each branch is a distinct claim:
+
+        * a failed setup or execution is ``ERROR`` - a scan that could not run
+          proved nothing, even if it saw no finding;
+        * a proven finding is ``FINDINGS`` - a real violation keeps precedence
+          over incomplete coverage, which stays visible;
+        * ``CLEAN`` requires meaningful coverage **and** every relevant required
+          check (L2/L3) to have reached a decision. An eligible check that was
+          never attempted, or an attempted check that remains unresolved, is
+          not evidence of safety;
+        * a confirmed, action-scoped grant is a *resolved* decision, not an
+          unresolved check. It is counted as such in the per-law counters;
+        * everything else is ``INCONCLUSIVE``, including a truncated budget and
+          a scan with no meaningful eligible security checks.
         """
         if self.error is not None or self.setup_error is not None:
             return Verdict.ERROR
         if self.finding_count > 0:
             return Verdict.FINDINGS
-        if self.coverage.meaningful:
-            return Verdict.CLEAN
-        return Verdict.INCONCLUSIVE
+        coverage = self.coverage
+        if not coverage.meaningful or not coverage.has_law_coverage:
+            return Verdict.INCONCLUSIVE
+        if coverage.unresolved_checks > 0 or coverage.pending_checks > 0:
+            return Verdict.INCONCLUSIVE
+        return Verdict.CLEAN
 
     @property
     def clean(self) -> bool:
@@ -421,6 +473,7 @@ class ValidationResult:
             "clean": self.clean,
             "inconclusive": self.inconclusive,
             "coverage": self.coverage.to_dict(),
+            "ownership": self.ownership,
             "evidence_complete": self.evidence_complete,
             "traffic_lines": self.traffic_lines,
             "missing_identities": list(self.missing_identities),
@@ -517,9 +570,13 @@ def scan_application(
     ``launch``: the launch contract. When given, it overrides the fixture
     convention entirely.
     """
-    if variant not in VARIANTS:
-        raise ValueError(f"unknown variant {variant!r}; expected one of {sorted(VARIANTS)}")
-    app_dir = Path(application).resolve()
+    application_path = Path(application).resolve()
+    if variant not in expected_variants(application_path):
+        raise ValueError(
+            f"unknown variant {variant!r} for this fixture; expected one of "
+            f"{sorted(expected_variants(application_path))}"
+        )
+    app_dir = application_path
     root = Path(workspace) if workspace else Path(tempfile.mkdtemp(prefix=f"mizan-validate-{variant}-"))
     root.mkdir(parents=True, exist_ok=True)
 
@@ -634,13 +691,23 @@ def scan_application(
         ]
 
         from mizan.attribution import SqliteAttributor
+        from mizan.ownership import RelationshipContract, RelationshipContractError
 
+        # A contract file present in the application directory is trusted
+        # metadata: if it is malformed the scan stops, rather than continuing
+        # with semantics the operator did not ask for.
+        try:
+            contract = RelationshipContract.load(app_dir / "mizan-relationships.json", variant, strict=True)
+        except RelationshipContractError as exc:
+            result.setup_error = f"relationship contract error: {exc}"
+            return result
         engine = Mizan(
             Target(base_url=proxy.base_url, principals=principals),
             traffic_path=traffic_path,
             spec_document=document,
             twin=twin,
             attributor=SqliteAttributor(database),
+            relationship_contract=contract,
             request_budget=max(0, budget - accounting.bootstrap - accounting.learning),
         )
 
@@ -656,6 +723,10 @@ def scan_application(
         coverage.learning_operations = len(learned)
         coverage.budget_exhausted = accounting.budget_exhausted
         result.coverage = coverage
+        result.ownership = engine.graph.report() if engine.graph is not None else {}
+        result.ownership["inconclusive_checks"] = list(engine.inconclusive_checks)
+        result.ownership["authorization_outcomes"] = list(engine.outcomes)
+        result.ownership["unconfirmed_owner_hints"] = sorted(engine.neutralized_owner_keys)
 
         result.finding_count = len(violations)
         result.law_types = sorted({violation.law for violation in violations})
@@ -690,7 +761,7 @@ def validate_application(
     "vulnerable" application that is vulnerable in more ways than intended is
     caught.
     """
-    expected = expected or {"clean": (), "read": ("L2",), "write": ("L3",), "both": ("L2", "L3")}
+    expected = expected or expected_variants(application)
     root = Path(tempfile.mkdtemp(prefix="mizan-validate-"))
     checks: list[dict[str, Any]] = []
     variants: dict[str, Any] = {}

@@ -1,0 +1,3978 @@
+{
+  "summary": {
+    "seed": "fixed fixture identifiers; no random sampling in the inference",
+    "budget_per_scan": 90,
+    "case_count": 23,
+    "ownership_evidence": {
+      "confirmed_checks": 46,
+      "candidate_checks": 4,
+      "unknown_checks": 10,
+      "denominator_cases": 23
+    },
+    "pending_checks": 0,
+    "unconfirmed_owner_hints": {
+      "neutralized": 0,
+      "denominator_cases": 23
+    },
+    "conflicting_outcomes": {
+      "count": 0,
+      "denominator_cases": 23
+    },
+    "duplicate_outcomes": {
+      "count": 0,
+      "denominator_cases": 23
+    },
+    "clean_verdict_false_positives": {
+      "with_findings": 0,
+      "with_unresolved": 0,
+      "controls": 10
+    },
+    "mixed_ownership_fixture": {
+      "cases": 2,
+      "l2_inconclusive": 6,
+      "l3_inconclusive": 6,
+      "l3_findings": 1
+    },
+    "l2_detection": {
+      "detected": 8,
+      "eligible_cases": 8
+    },
+    "l3_detection": {
+      "detected": 6,
+      "eligible_cases": 6
+    },
+    "read_only_grant_behavior": {
+      "cases": 2,
+      "l3_findings": 1,
+      "l2_findings": 0,
+      "allowed_by_grant_l2": 2,
+      "allowed_by_grant_l3": 0
+    },
+    "read_write_grant_behavior": {
+      "cases": 1,
+      "false_positive_findings": 0
+    },
+    "write_only_grant_behavior": {
+      "cases": 1,
+      "l2_findings": 1,
+      "l3_allowed_by_grant": 0
+    },
+    "action_scoped_incorrect_suppression": {
+      "suppressed": 0,
+      "eligible_cases": 4
+    },
+    "per_law_coverage": {
+      "L2": {
+        "eligible": 58,
+        "attempted": 58,
+        "decided": 28,
+        "allowed_by_grant": 4,
+        "findings": 14,
+        "inconclusive": 12
+      },
+      "L3": {
+        "eligible": 61,
+        "attempted": 61,
+        "decided": 35,
+        "allowed_by_grant": 1,
+        "findings": 10,
+        "inconclusive": 15
+      }
+    },
+    "duplicate_findings": {
+      "l2": 0,
+      "l3": 0
+    },
+    "law_detection": {
+      "detected": 13,
+      "eligible": 13
+    },
+    "clean_control_false_positives": {
+      "count": 0,
+      "controls": 10
+    },
+    "ownership_edges_confirmed": 46,
+    "ownership_edges_candidates": 4,
+    "resources_discovered": 56,
+    "unresolved_rate": 0.17857142857142858,
+    "probes_executed": 40,
+    "probe_candidates": 165,
+    "requests_consumed": 496,
+    "identity_anchor_false_positives": {
+      "count": 0,
+      "ambiguous_cases": 1
+    },
+    "association_to_sharing_false_positives": {
+      "count": 0,
+      "unauthorized_cases": 1
+    },
+    "resource_row_mapping": {
+      "resolved": 46,
+      "discovered": 56
+    },
+    "inconclusive_outcomes": {
+      "correct": 4,
+      "expected": 4
+    },
+    "cli_contract_propagation": {
+      "propagated": 1,
+      "cases": 1,
+      "invented_ownership_without_contract": {
+        "count": 0,
+        "controls": 1
+      },
+      "detail": {
+        "with_contract": {
+          "exit_code": 0,
+          "laws": [
+            "L2"
+          ]
+        },
+        "without_contract": {
+          "exit_code": 0,
+          "laws": []
+        }
+      }
+    },
+    "contract_validation": {
+      "rejected": 9,
+      "invalid_contracts": 9,
+      "duplicate_actions_normalized": 1,
+      "normalization_cases": 1
+    },
+    "principal_fk_selection": {
+      "detected": 3,
+      "eligible": 3,
+      "declared_grants_confirmed": 6,
+      "candidate_associations": 10
+    },
+    "incorrect_grant_suppression": {
+      "suppressed": 0,
+      "eligible": 3
+    },
+    "duplicate_l3": {
+      "findings": 0,
+      "affected_cases": 0
+    },
+    "unresolved_attribution": {
+      "inconclusive_cases": 4,
+      "expected_cases": 4,
+      "inconclusive_checks": 27
+    },
+    "limitations": [
+      "Ownership precision/recall need per-resource labels from a held-out app; the seeded fixture rows are the ground truth here, so they are reported as edge counts rather than claimed as independent generalization.",
+      "One fixture family per ownership convention: no claim of generalization beyond conventional and nonstandard-field SQLite applications."
+    ]
+  },
+  "cases": [
+    {
+      "fixture": "flask_store",
+      "variant": "clean",
+      "verdict": "INCONCLUSIVE",
+      "error": null,
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 1,
+      "resources_owned": 1,
+      "confirmed_ownership_edges": 1,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 2,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 7,
+        "attack": 4,
+        "total": 13,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 7,
+        "resources_discovered": 1,
+        "resources_owned": 1,
+        "probe_candidates": 7,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 1,
+        "resources_corroborated": 0,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 1,
+        "identity_anchors_unresolved": 2,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 1,
+            "attempted": 1,
+            "decided": 1,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 1,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 1,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 1,
+            "resolved": 1,
+            "unresolved": 1,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.5
+          }
+        },
+        "resolved_checks": 2,
+        "unresolved_checks": 1,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 1,
+          "attempted": 1,
+          "decided": 1,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 1,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 1,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 1,
+          "resolved": 1,
+          "unresolved": 1,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.5
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 2,
+      "unresolved_checks": 1,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "orders:ord-bb05c63bfb33",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "orders:2",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "orders:ord-bb05c63bfb33",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 1,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "flask_store",
+      "variant": "read",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 1,
+      "resources_owned": 1,
+      "confirmed_ownership_edges": 1,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 2,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 7,
+        "attack": 4,
+        "total": 13,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 7,
+        "resources_discovered": 1,
+        "resources_owned": 1,
+        "probe_candidates": 7,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 1,
+        "resources_corroborated": 0,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 1,
+        "identity_anchors_unresolved": 2,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 1,
+            "attempted": 1,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 1,
+            "inconclusive": 0,
+            "resolved": 1,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 1,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 1,
+            "resolved": 1,
+            "unresolved": 1,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.5
+          }
+        },
+        "resolved_checks": 2,
+        "unresolved_checks": 1,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 1,
+      "l2_unique": 1,
+      "l2_detected": true,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 1,
+          "attempted": 1,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 1,
+          "inconclusive": 0,
+          "resolved": 1,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 1,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 1,
+          "resolved": 1,
+          "unresolved": 1,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.5
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 2,
+      "unresolved_checks": 1,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "orders:ord-ae866d320ccb",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "orders:2",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "orders:ord-ae866d320ccb",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 1,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "flask_store",
+      "variant": "write",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L3"
+      ],
+      "expected_laws": [
+        "L3"
+      ],
+      "law_detection": {
+        "L3": true
+      },
+      "resources_discovered": 1,
+      "resources_owned": 1,
+      "confirmed_ownership_edges": 1,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 2,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 7,
+        "attack": 4,
+        "total": 13,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 7,
+        "resources_discovered": 1,
+        "resources_owned": 1,
+        "probe_candidates": 7,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 1,
+        "resources_corroborated": 0,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 1,
+        "identity_anchors_unresolved": 2,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 1,
+            "attempted": 1,
+            "decided": 1,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 1,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 1,
+            "inconclusive": 1,
+            "resolved": 1,
+            "unresolved": 1,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.5
+          }
+        },
+        "resolved_checks": 2,
+        "unresolved_checks": 1,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 1,
+      "l3_unique": 1,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": true,
+      "law_coverage": {
+        "L2": {
+          "eligible": 1,
+          "attempted": 1,
+          "decided": 1,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 1,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 1,
+          "inconclusive": 1,
+          "resolved": 1,
+          "unresolved": 1,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.5
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 2,
+      "unresolved_checks": 1,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "orders:ord-053fb231ca5e",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "orders:2",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "orders:ord-053fb231ca5e",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 1,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "clean",
+      "verdict": "CLEAN",
+      "error": null,
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 2,
+      "resources_owned": 2,
+      "confirmed_ownership_edges": 2,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 8,
+        "attack": 8,
+        "total": 18,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 8,
+        "resources_discovered": 2,
+        "resources_owned": 2,
+        "probe_candidates": 6,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 2,
+        "resources_corroborated": 2,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 2,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 2,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 4,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 2,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 2,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 4,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-alice-904435b2",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-alice-904435b2",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "read",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 3,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 3,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 3,
+      "l2_unique": 3,
+      "l2_detected": true,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 3,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 3,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-alice-1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-alice-0e3be39c",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-alice-1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-alice-0e3be39c",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "write",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L3"
+      ],
+      "expected_laws": [
+        "L3"
+      ],
+      "law_detection": {
+        "L3": true
+      },
+      "resources_discovered": 2,
+      "resources_owned": 2,
+      "confirmed_ownership_edges": 2,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 8,
+        "attack": 8,
+        "total": 18,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 8,
+        "resources_discovered": 2,
+        "resources_owned": 2,
+        "probe_candidates": 6,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 2,
+        "resources_corroborated": 2,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 2,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 2,
+            "inconclusive": 0,
+            "resolved": 2,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 4,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 2,
+      "l3_unique": 2,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": true,
+      "law_coverage": {
+        "L2": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 2,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 2,
+          "inconclusive": 0,
+          "resolved": 2,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 4,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-alice-921cc0e1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-alice-921cc0e1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "both",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2",
+        "L3"
+      ],
+      "expected_laws": [
+        "L2",
+        "L3"
+      ],
+      "law_detection": {
+        "L2": true,
+        "L3": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 3,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 3,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 3,
+      "l3_unique": 3,
+      "l2_findings": 3,
+      "l2_unique": 3,
+      "l2_detected": true,
+      "l3_detected": true,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 3,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 3,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-alice-1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-alice-710bc8d2",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-alice-1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-alice-710bc8d2",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "collaborator",
+      "verdict": "CLEAN",
+      "error": null,
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 1,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 2,
+            "allowed_by_grant": 1,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 3,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 1,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 2,
+          "allowed_by_grant": 1,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 3,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-alice-1",
+          "principal": "bob",
+          "outcome": "ALLOWED_BY_GRANT"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-alice-09d5ea3a",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-alice-1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-alice-09d5ea3a",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "linked_store",
+      "variant": "ambiguous",
+      "verdict": "INCONCLUSIVE",
+      "error": null,
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 2,
+      "resources_owned": 0,
+      "confirmed_ownership_edges": 0,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 2,
+      "resources_with_ground_truth": 3,
+      "unresolved_resources": 2,
+      "unresolved_rate": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 8,
+        "attack": 2,
+        "total": 12,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 8,
+        "resources_discovered": 2,
+        "resources_owned": 0,
+        "probe_candidates": 4,
+        "probes_executed": 0,
+        "budget_exhausted": false,
+        "meaningful": false,
+        "resources_with_ownership_evidence": 0,
+        "resources_corroborated": 0,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 4,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 2,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 1,
+        "laws": {
+          "L2": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 2,
+            "resolved": 0,
+            "unresolved": 2,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.0
+          },
+          "L3": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 2,
+            "resolved": 0,
+            "unresolved": 2,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.0
+          }
+        },
+        "resolved_checks": 0,
+        "unresolved_checks": 4,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": true,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 2,
+          "resolved": 0,
+          "unresolved": 2,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.0
+        },
+        "L3": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 2,
+          "resolved": 0,
+          "unresolved": 2,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 0,
+      "unresolved_checks": 4,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-alice-0756ae8e",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-alice-0756ae8e",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "documents:doc-bob-1",
+          "principal": "alice",
+          "outcome": "INCONCLUSIVE"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 4,
+      "sharing_semantics_ambiguous": 1
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "clean",
+      "verdict": "CLEAN",
+      "error": null,
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 2,
+      "resources_owned": 2,
+      "confirmed_ownership_edges": 2,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 8,
+        "attack": 8,
+        "total": 18,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 8,
+        "resources_discovered": 2,
+        "resources_owned": 2,
+        "probe_candidates": 6,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 2,
+        "resources_corroborated": 2,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 2,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 2,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 4,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 2,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 2,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 4,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-7c6a55",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-7c6a55",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "read",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 2,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 3,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 3,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 2,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 3,
+      "l2_unique": 3,
+      "l2_detected": true,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 3,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 3,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-d061b3",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-d061b3",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 2
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "write",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L3"
+      ],
+      "expected_laws": [
+        "L3"
+      ],
+      "law_detection": {
+        "L3": true
+      },
+      "resources_discovered": 2,
+      "resources_owned": 2,
+      "confirmed_ownership_edges": 2,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 8,
+        "attack": 8,
+        "total": 18,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 8,
+        "resources_discovered": 2,
+        "resources_owned": 2,
+        "probe_candidates": 6,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 2,
+        "resources_corroborated": 2,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 2,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 2,
+            "inconclusive": 0,
+            "resolved": 2,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 4,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 2,
+      "l3_unique": 2,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": true,
+      "law_coverage": {
+        "L2": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 2,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 2,
+          "inconclusive": 0,
+          "resolved": 2,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 4,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-5e8572",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-5e8572",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "grant",
+      "verdict": "CLEAN",
+      "error": null,
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 1,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 1,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 2,
+            "allowed_by_grant": 1,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 3,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": true,
+      "declared_grants": 1,
+      "candidate_associations": 1,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 2,
+          "allowed_by_grant": 1,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 3,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "ALLOWED_BY_GRANT"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-fb754b",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-fb754b",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 1
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "grant_write",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L3"
+      ],
+      "expected_laws": [
+        "L3"
+      ],
+      "law_detection": {
+        "L3": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 1,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 1,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 2,
+            "allowed_by_grant": 1,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 1,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 1,
+      "candidate_associations": 1,
+      "l3_findings": 1,
+      "l3_unique": 1,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": true,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 2,
+          "allowed_by_grant": 1,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 1,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "ALLOWED_BY_GRANT"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-331ac4",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-331ac4",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 1
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "read_write_grant",
+      "verdict": "CLEAN",
+      "error": null,
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 2,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 1,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 2,
+            "allowed_by_grant": 1,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 2,
+            "allowed_by_grant": 1,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 1,
+      "candidate_associations": 1,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 2,
+          "allowed_by_grant": 1,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 2,
+          "allowed_by_grant": 1,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "ALLOWED_BY_GRANT"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-305d14",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "ALLOWED_BY_GRANT"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-305d14",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 1
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "write_only_grant",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 1,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 1,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 3,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 1,
+      "candidate_associations": 1,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 1,
+      "l2_unique": 1,
+      "l2_detected": true,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 1,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 3,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-37c85f",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-37c85f",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 1
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "creator_only",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 1,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 1,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 3,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 1,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 1,
+      "l2_unique": 1,
+      "l2_detected": true,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 1,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 3,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-20145c",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-20145c",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 1
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "observer_only",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 2,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 1,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 3,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 2,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 1,
+      "l2_unique": 1,
+      "l2_detected": true,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 1,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 3,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-90a74d",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-90a74d",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 2
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "declared_creator",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L2"
+      ],
+      "expected_laws": [
+        "L2"
+      ],
+      "law_detection": {
+        "L2": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 3,
+      "confirmed_ownership_edges": 3,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 0,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 0,
+      "unresolved_rate": 0.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 10,
+        "attack": 11,
+        "total": 23,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 10,
+        "resources_discovered": 3,
+        "resources_owned": 3,
+        "probe_candidates": 8,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 3,
+        "resources_corroborated": 3,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 0,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 0,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 1,
+        "laws": {
+          "L2": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 2,
+            "allowed_by_grant": 0,
+            "findings": 1,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          },
+          "L3": {
+            "eligible": 3,
+            "attempted": 3,
+            "decided": 3,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 0,
+            "resolved": 3,
+            "unresolved": 0,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 1.0
+          }
+        },
+        "resolved_checks": 6,
+        "unresolved_checks": 0,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 1,
+      "candidate_associations": 1,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 1,
+      "l2_unique": 1,
+      "l2_detected": true,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 2,
+          "allowed_by_grant": 0,
+          "findings": 1,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        },
+        "L3": {
+          "eligible": 3,
+          "attempted": 3,
+          "decided": 3,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 0,
+          "resolved": 3,
+          "unresolved": 0,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 1.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 6,
+      "unresolved_checks": 0,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-7121f7",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-7121f7",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 0,
+      "sharing_semantics_ambiguous": 1
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "provenance",
+      "verdict": "INCONCLUSIVE",
+      "error": null,
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 2,
+      "resources_owned": 0,
+      "confirmed_ownership_edges": 0,
+      "candidate_ownership_edges": 2,
+      "unknown_ownership_resources": 2,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 2,
+      "unresolved_rate": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 8,
+        "attack": 2,
+        "total": 12,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 8,
+        "resources_discovered": 2,
+        "resources_owned": 0,
+        "probe_candidates": 4,
+        "probes_executed": 0,
+        "budget_exhausted": false,
+        "meaningful": false,
+        "resources_with_ownership_evidence": 0,
+        "resources_corroborated": 0,
+        "ownership_candidates": 2,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 4,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 2,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 2,
+            "resolved": 0,
+            "unresolved": 2,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.0
+          },
+          "L3": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 2,
+            "resolved": 0,
+            "unresolved": 2,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.0
+          }
+        },
+        "resolved_checks": 0,
+        "unresolved_checks": 4,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": true,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 2,
+          "resolved": 0,
+          "unresolved": 2,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.0
+        },
+        "L3": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 2,
+          "resolved": 0,
+          "unresolved": 2,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 0,
+      "unresolved_checks": 4,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-9a0019",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-9a0019",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "INCONCLUSIVE"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 4,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "adversarial_store",
+      "variant": "ambiguous_identity",
+      "verdict": "INCONCLUSIVE",
+      "error": null,
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 2,
+      "resources_owned": 0,
+      "confirmed_ownership_edges": 0,
+      "candidate_ownership_edges": 0,
+      "unknown_ownership_resources": 2,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 2,
+      "unresolved_rate": 1.0,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 8,
+        "attack": 2,
+        "total": 12,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 8,
+        "resources_discovered": 2,
+        "resources_owned": 0,
+        "probe_candidates": 4,
+        "probes_executed": 0,
+        "budget_exhausted": false,
+        "meaningful": false,
+        "resources_with_ownership_evidence": 0,
+        "resources_corroborated": 0,
+        "ownership_candidates": 0,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 4,
+        "identity_anchors_unresolved": 2,
+        "ownership_semantics_missing": 2,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 2,
+            "resolved": 0,
+            "unresolved": 2,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.0
+          },
+          "L3": {
+            "eligible": 2,
+            "attempted": 2,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 2,
+            "resolved": 0,
+            "unresolved": 2,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.0
+          }
+        },
+        "resolved_checks": 0,
+        "unresolved_checks": 4,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": true,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 2,
+          "resolved": 0,
+          "unresolved": 2,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.0
+        },
+        "L3": {
+          "eligible": 2,
+          "attempted": 2,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 2,
+          "resolved": 0,
+          "unresolved": 2,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.0
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 0,
+      "unresolved_checks": 4,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-alice-da8313",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-alice-da8313",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "assets:item-bob-1",
+          "principal": "alice",
+          "outcome": "INCONCLUSIVE"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 4,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "mixed_ownership",
+      "variant": "clean",
+      "verdict": "INCONCLUSIVE",
+      "error": null,
+      "law_types": [],
+      "expected_laws": [],
+      "law_detection": {
+        "<none>": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 1,
+      "confirmed_ownership_edges": 1,
+      "candidate_ownership_edges": 1,
+      "unknown_ownership_resources": 2,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 2,
+      "unresolved_rate": 0.6666666666666666,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 41,
+        "attack": 5,
+        "total": 48,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 41,
+        "resources_discovered": 3,
+        "resources_owned": 1,
+        "probe_candidates": 10,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 1,
+        "resources_corroborated": 1,
+        "ownership_candidates": 1,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 6,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 2,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 4,
+            "attempted": 4,
+            "decided": 1,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 3,
+            "resolved": 1,
+            "unresolved": 3,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.25
+          },
+          "L3": {
+            "eligible": 4,
+            "attempted": 4,
+            "decided": 1,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 3,
+            "resolved": 1,
+            "unresolved": 3,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.25
+          }
+        },
+        "resolved_checks": 2,
+        "unresolved_checks": 6,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": true,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 0,
+      "l3_unique": 0,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": false,
+      "law_coverage": {
+        "L2": {
+          "eligible": 4,
+          "attempted": 4,
+          "decided": 1,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 3,
+          "resolved": 1,
+          "unresolved": 3,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.25
+        },
+        "L3": {
+          "eligible": 4,
+          "attempted": 4,
+          "decided": 1,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 3,
+          "resolved": 1,
+          "unresolved": 3,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.25
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 2,
+      "unresolved_checks": 6,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "candidate:item-b1",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "unknown:item-c1",
+          "principal": "alice",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "unknown:item-c1",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "candidate:item-b1",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "unknown:item-c1",
+          "principal": "alice",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "unknown:item-c1",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "confirmed:item-a1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "confirmed:item-a1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 6,
+      "sharing_semantics_ambiguous": 0
+    },
+    {
+      "fixture": "mixed_ownership",
+      "variant": "finding",
+      "verdict": "FINDINGS",
+      "error": null,
+      "law_types": [
+        "L3"
+      ],
+      "expected_laws": [
+        "L3"
+      ],
+      "law_detection": {
+        "L3": true
+      },
+      "resources_discovered": 3,
+      "resources_owned": 1,
+      "confirmed_ownership_edges": 1,
+      "candidate_ownership_edges": 1,
+      "unknown_ownership_resources": 2,
+      "resources_with_ground_truth": 0,
+      "unresolved_resources": 2,
+      "unresolved_rate": 0.6666666666666666,
+      "requests": {
+        "bootstrap": 2,
+        "learning": 41,
+        "attack": 5,
+        "total": 48,
+        "budget": 90,
+        "budget_exhausted": false
+      },
+      "coverage": {
+        "learning_operations": 41,
+        "resources_discovered": 3,
+        "resources_owned": 1,
+        "probe_candidates": 10,
+        "probes_executed": 2,
+        "budget_exhausted": false,
+        "meaningful": true,
+        "resources_with_ownership_evidence": 1,
+        "resources_corroborated": 1,
+        "ownership_candidates": 1,
+        "ownership_ambiguous": 0,
+        "sharing_explained": 0,
+        "inconclusive_checks": 6,
+        "identity_anchors_unresolved": 0,
+        "ownership_semantics_missing": 2,
+        "resource_row_mapping_ambiguous": 0,
+        "sharing_semantics_ambiguous": 0,
+        "laws": {
+          "L2": {
+            "eligible": 4,
+            "attempted": 4,
+            "decided": 1,
+            "allowed_by_grant": 0,
+            "findings": 0,
+            "inconclusive": 3,
+            "resolved": 1,
+            "unresolved": 3,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.25
+          },
+          "L3": {
+            "eligible": 4,
+            "attempted": 4,
+            "decided": 0,
+            "allowed_by_grant": 0,
+            "findings": 1,
+            "inconclusive": 3,
+            "resolved": 1,
+            "unresolved": 3,
+            "pending": 0,
+            "attempt_rate": 1.0,
+            "resolution_rate": 0.25
+          }
+        },
+        "resolved_checks": 2,
+        "unresolved_checks": 6,
+        "pending_checks": 0
+      },
+      "false_finding_on_clean_control": false,
+      "expected_inconclusive": false,
+      "sharing_should_be_confirmed": false,
+      "declared_grants": 0,
+      "candidate_associations": 0,
+      "l3_findings": 1,
+      "l3_unique": 1,
+      "l2_findings": 0,
+      "l2_unique": 0,
+      "l2_detected": false,
+      "l3_detected": true,
+      "law_coverage": {
+        "L2": {
+          "eligible": 4,
+          "attempted": 4,
+          "decided": 1,
+          "allowed_by_grant": 0,
+          "findings": 0,
+          "inconclusive": 3,
+          "resolved": 1,
+          "unresolved": 3,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.25
+        },
+        "L3": {
+          "eligible": 4,
+          "attempted": 4,
+          "decided": 0,
+          "allowed_by_grant": 0,
+          "findings": 1,
+          "inconclusive": 3,
+          "resolved": 1,
+          "unresolved": 3,
+          "pending": 0,
+          "attempt_rate": 1.0,
+          "resolution_rate": 0.25
+        }
+      },
+      "pending_checks": 0,
+      "resolved_checks": 2,
+      "unresolved_checks": 6,
+      "clean_with_unresolved": false,
+      "authorization_outcomes": [
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "candidate:item-b1",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "unknown:item-c1",
+          "principal": "alice",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "unknown:item-c1",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "candidate:item-b1",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "unknown:item-c1",
+          "principal": "alice",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "unknown:item-c1",
+          "principal": "bob",
+          "outcome": "INCONCLUSIVE"
+        },
+        {
+          "law": "L2",
+          "action": "read",
+          "resource": "confirmed:item-a1",
+          "principal": "bob",
+          "outcome": "DECIDED"
+        },
+        {
+          "law": "L3",
+          "action": "write",
+          "resource": "confirmed:item-a1",
+          "principal": "bob",
+          "outcome": "VIOLATION"
+        }
+      ],
+      "unconfirmed_owner_hints": 0,
+      "conflicting_outcomes": 0,
+      "duplicate_outcomes": 0,
+      "inconclusive_checks": 6,
+      "sharing_semantics_ambiguous": 0
+    }
+  ]
+}

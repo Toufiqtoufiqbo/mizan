@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "identity": { "endpoint": "/whoami", "field": "p_key" },
+  "ownership": {
+    "assets": { "source": "database_foreign_key", "column": "originator_ref" }
+  },
+  "sharing": {
+    "item_relations": {
+      "resource_fk": "item_ref",
+      "principal_fk": "collaborator_ref",
+      "semantics": "authorization_grant",
+      "actions": ["read"]
+    }
+  },
+  "variants": {
+    "provenance": { "ownership": null },
+    "ambiguous_identity": { "identity": { "endpoint": "/whoami", "field": "item_ref" } },
+    "declared_creator": {
+      "sharing": {
+        "item_relations": {
+          "resource_fk": "item_ref",
+          "principal_fk": "creator_ref",
+          "semantics": "authorization_grant",
+          "actions": ["read"]
+        }
+      }
+    },
+    "grant_write": {
+      "sharing": {
+        "item_relations": {
+          "resource_fk": "item_ref",
+          "principal_fk": "collaborator_ref",
+          "semantics": "authorization_grant",
+          "actions": ["read"]
+        }
+      }
+    },
+    "read_write_grant": {
+      "sharing": {
+        "item_relations": {
+          "resource_fk": "item_ref",
+          "principal_fk": "collaborator_ref",
+          "semantics": "authorization_grant",
+          "actions": ["read", "write"]
+        }
+      }
+    },
+    "write_only_grant": {
+      "sharing": {
+        "item_relations": {
+          "resource_fk": "item_ref",
+          "principal_fk": "collaborator_ref",
+          "semantics": "authorization_grant",
+          "actions": ["write"]
+        }
+      }
+    }
+  }
+}

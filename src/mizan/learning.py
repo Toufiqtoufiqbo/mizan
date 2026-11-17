@@ -14,7 +14,7 @@ consumes.
 from __future__ import annotations
 
 import json
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -109,7 +109,13 @@ def operations(document: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]
                 continue
             if not isinstance(operation, dict):
                 continue
-            result.append((method.upper(), path, operation))
+            # Path-level parameters are part of every operation below them in
+            # a valid OpenAPI document. Merge them so the learner can fill
+            # nonstandard path parameters such as {document_key}.
+            merged = dict(operation)
+            if "parameters" not in merged and isinstance(item.get("parameters"), list):
+                merged["parameters"] = item["parameters"]
+            result.append((method.upper(), path, merged))
     return result
 
 
@@ -164,6 +170,15 @@ def learn_from_spec(
     if not principals:
         principals = [(f"identity-{index}", token) for index, token in enumerate(tokens or [])]
 
+    # The OpenAPI document names the path parameters, so those names are the
+    # identifiers to look for in responses - no application-specific list.
+    identifier_fields = {
+        str(parameter.get("name"))
+        for _, _, operation in operations(document)
+        for parameter in operation.get("parameters", []) or []
+        if isinstance(parameter, dict) and parameter.get("in") == "path" and parameter.get("name")
+    }
+
     for index, (method, path, operation) in enumerate(operations(document)):
         if path in exclude_paths:
             continue
@@ -177,7 +192,7 @@ def learn_from_spec(
             break
         result = _send(session, method, base_url, path, operation, document, token, timeout)
         results.append(result)
-        for identifier in _identifiers_in(result.get("response")):
+        for identifier in _identifiers_in(result.get("response"), field_names=identifier_fields):
             if identifier not in discovered.setdefault(principal, []):
                 discovered[principal].append(identifier)
 
@@ -201,7 +216,7 @@ def learn_from_spec(
                         continue
                     result = _send(session, method, base_url, concrete, operation, document, token, timeout)
                     results.append(result)
-                    for found in _identifiers_in(result.get("response")):
+                    for found in _identifiers_in(result.get("response"), field_names=identifier_fields):
                         if found not in discovered[principal]:
                             discovered[principal].append(found)
     return results
@@ -255,20 +270,27 @@ def _send(
         return {"method": method, "path": path, "error": str(exc)}
 
 
-def _identifiers_in(payload: Any, depth: int = 0) -> list[str]:
-    """Identifiers found in a response body."""
+def _identifiers_in(payload: Any, depth: int = 0, field_names: Iterable[str] = ()) -> list[str]:
+    """Identifiers found in a response body.
+
+    Besides the conventional names, the caller passes the path-parameter names
+    declared by the OpenAPI document. A resource whose id is called
+    ``document_key`` is then discoverable without hardcoding that name into
+    the learner.
+    """
     if depth > 4:
         return []
+    names = set(field_names) | {"id", "order_id", "user_id", "uuid"}
     found: list[str] = []
     if isinstance(payload, dict):
         for key, value in payload.items():
-            if key in {"id", "order_id", "user_id", "uuid"} and isinstance(value, (str, int)):
+            if key in names and isinstance(value, (str, int)) and not isinstance(value, bool):
                 found.append(str(value))
             else:
-                found.extend(_identifiers_in(value, depth + 1))
+                found.extend(_identifiers_in(value, depth + 1, names))
     elif isinstance(payload, list):
         for item in payload[:20]:
-            found.extend(_identifiers_in(item, depth + 1))
+            found.extend(_identifiers_in(item, depth + 1, names))
     return found
 
 

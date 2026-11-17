@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "identity": { "endpoint": "/whoami", "field": "p_key" },
+  "ownership": {
+    "confirmed": { "source": "database_foreign_key", "column": "originator_ref" }
+  }
+}

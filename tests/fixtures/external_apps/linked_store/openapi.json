@@ -1,0 +1,93 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Linked Store", "version": "1.0.0", "description": "An independent store with nonstandard ownership fields." },
+  "servers": [{ "url": "/" }],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" }
+    },
+    "schemas": {
+      "Login": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "examples": ["alice"] },
+          "password": { "type": "string", "examples": ["alice-secret"] }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "identity_key": { "type": "string", "examples": ["alice"] },
+          "display_name": { "type": "string", "examples": ["Alice"] }
+        }
+      },
+      "Document": {
+        "type": "object",
+        "properties": {
+          "document_key": { "type": "string", "examples": ["doc-alice-1"] },
+          "title": { "type": "string", "examples": ["Notes"] },
+          "state": { "type": "string", "examples": ["draft"] }
+        }
+      },
+      "NewDocument": {
+        "type": "object",
+        "required": ["title"],
+        "properties": { "title": { "type": "string", "examples": ["Notes"] } }
+      },
+      "DocumentUpdate": {
+        "type": "object",
+        "required": ["state"],
+        "properties": { "state": { "type": "string", "examples": ["review"] } }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": { "summary": "Health", "responses": { "200": { "description": "OK" } } }
+    },
+    "/login": {
+      "post": {
+        "summary": "Exchange credentials for an opaque token",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Login" } } } },
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/session": {
+      "get": {
+        "summary": "The caller's identity record",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Session" } } } } }
+      }
+    },
+    "/documents": {
+      "get": {
+        "summary": "List visible documents",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "summary": "Create a document",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NewDocument" } } } },
+        "responses": { "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Document" } } } } }
+      }
+    },
+    "/documents/{document_key}": {
+      "parameters": [
+        { "name": "document_key", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Read one document",
+        "security": [{ "bearerAuth": [] }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Document" } } } } }
+      },
+      "put": {
+        "summary": "Update one document",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DocumentUpdate" } } } },
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Document" } } } } }
+      }
+    }
+  }
+}

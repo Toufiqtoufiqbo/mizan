@@ -1,0 +1,8 @@
+{
+  "clean": [],
+  "read": ["L2"],
+  "write": ["L3"],
+  "both": ["L2", "L3"],
+  "collaborator": [],
+  "ambiguous": []
+}
