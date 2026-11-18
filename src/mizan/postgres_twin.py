@@ -258,14 +258,22 @@ class PostgresSource:
         """Create an immutable seed without modifying the source."""
         before = self.fingerprint()
         dump_tool = find_tool("pg_dump")
-        restore_tool = find_tool("pg_restore")
+        restore_tool = find_tool("psql")
         if not dump_tool or not restore_tool:
-            raise TwinLifecycleError("pg_dump and pg_restore are required to prepare a baseline")
+            raise TwinLifecycleError("pg_dump and psql are required to prepare a baseline")
         root = Path(workspace)
         root.mkdir(parents=True, exist_ok=True)
-        archive = root / f"seed-{self.run_id}.dump"
+        archive = root / f"seed-{self.run_id}.sql"
         result = subprocess.run(
-            [dump_tool, "-Fc", "--no-owner", "--no-privileges", "-f", str(archive), self.dsn],
+            [
+                dump_tool,
+                "--format=plain",
+                "--no-owner",
+                "--no-privileges",
+                "-f",
+                str(archive),
+                self.dsn,
+            ],
             capture_output=True,
             text=True,
             timeout=300,
@@ -281,16 +289,24 @@ class PostgresSource:
                 cursor.execute(f'CREATE DATABASE "{self.seed_name}"')
         finally:
             admin.close()
+        # Newer pg_dump clients emit SET commands for parameters that older
+        # servers do not know (for example transaction_timeout). Drop those
+        # lines: they are session configuration, not schema or data.
+        sql = archive.read_text(encoding="utf-8")
+        filtered = "\n".join(line for line in sql.splitlines() if "transaction_timeout" not in line.lower())
+        filtered_path = root / f"seed-{self.run_id}-filtered.sql"
+        filtered_path.write_text(filtered + "\n", encoding="utf-8")
         try:
             restored = subprocess.run(
                 [
                     restore_tool,
-                    "--exit-on-error",
-                    "--no-owner",
-                    "--no-privileges",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-q",
                     "-d",
                     database_dsn(self.dsn, self.seed_name),
-                    str(archive),
+                    "-f",
+                    str(filtered_path),
                 ],
                 capture_output=True,
                 text=True,
