@@ -265,7 +265,7 @@ class PostgresSource:
         root.mkdir(parents=True, exist_ok=True)
         archive = root / f"seed-{self.run_id}.dump"
         result = subprocess.run(
-            [dump_tool, "-Fc", "-f", str(archive), self.dsn],
+            [dump_tool, "-Fc", "--no-owner", "--no-privileges", "-f", str(archive), self.dsn],
             capture_output=True,
             text=True,
             timeout=300,
@@ -281,14 +281,28 @@ class PostgresSource:
                 cursor.execute(f'CREATE DATABASE "{self.seed_name}"')
         finally:
             admin.close()
-        restored = subprocess.run(
-            [restore_tool, "--exit-on-error", "-d", database_dsn(self.dsn, self.seed_name), str(archive)],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
+        try:
+            restored = subprocess.run(
+                [
+                    restore_tool,
+                    "--exit-on-error",
+                    "--no-owner",
+                    "--no-privileges",
+                    "-d",
+                    database_dsn(self.dsn, self.seed_name),
+                    str(archive),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except Exception:
+            self._drop_seed()
+            raise
         if restored.returncode != 0:
-            raise TwinLifecycleError("the seed restore failed")
+            detail = restored.stderr.strip()[:500].replace(self.dsn, "<redacted>")
+            self._drop_seed()
+            raise TwinLifecycleError(f"the seed restore failed: {detail}")
         digest = self.fingerprint(database_dsn(self.dsn, self.seed_name))
         if digest != before:
             raise BaselineVerificationError("the seed does not match the source fingerprint")
@@ -304,6 +318,14 @@ class PostgresSource:
         )
         self._baseline = baseline
         return baseline
+
+    def _drop_seed(self) -> None:
+        admin = self.admin()
+        try:
+            with admin.cursor() as cursor:
+                cursor.execute(f'DROP DATABASE IF EXISTS "{self.seed_name}"')
+        finally:
+            admin.close()
 
     def assert_unchanged(self) -> None:
         if self._baseline is None:
