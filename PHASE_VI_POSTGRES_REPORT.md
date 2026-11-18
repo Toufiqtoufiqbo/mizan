@@ -97,6 +97,13 @@ of general PostgreSQL accuracy.
 
 ## 6. Database restoration guarantees
 
+**Phase VI.1 addendum:** a disposable PostgreSQL Twin now exists
+(`postgres_twin.py`) with immutable seed cloning, per-worker databases,
+canonical baseline verification and idempotent cleanup. PostgreSQL attack/twin
+execution is available through `mizan postgres-twin --allow-disposable`; see
+`PHASE_VI_1_POSTGRES_TWIN_REPORT.md` for the demonstrated guarantees. The
+statements below describe Phase VI at the time it was written.
+
 **PostgreSQL attack/twin mode is not implemented and fails closed.** `Twin`
 restores filesystem snapshots of file-backed data; a live PostgreSQL database
 cannot be restored that way. No disposable clone, no per-worker schema restore

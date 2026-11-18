@@ -528,3 +528,33 @@ Three capabilities must not be confused:
 
 Unattributed, missing-correlation and ambiguously attributed writes are
 reported as inconclusive outcomes, never as confirmed L3 violations.
+
+
+## PostgreSQL disposable Twin (Phase VI.1)
+
+`mizan postgres-twin` prepares an immutable seed from the configured source,
+clones one disposable database per worker, verifies each worker against a
+canonical baseline digest, executes L2/L3 probes on an isolated clone, and
+cleans up only databases with a recorded ownership for the current run.
+
+```bash
+export MIZAN_DATABASE_URL='postgresql://user:password@host/source'
+mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --schema app \
+  --allow-disposable --workers 2 --exercise
+```
+
+`--dry-run` prepares and verifies the seed only. `--cleanup-run RUN_ID` drops
+only databases recorded as owned by that run. The source DSN is never printed;
+passwords and tokens never appear in CLI arguments, logs, reports or proof
+bundles. `--allow-disposable` is mandatory before any database is created.
+
+The source database is never an attack target, never receives audit triggers,
+and its canonical fingerprint is asserted before and after the run. Workers use
+distinct cloned databases; a restore stops the application, closes this run's
+connections, re-clones from the seed, reinstalls audit infrastructure, restarts
+the application and only then marks the worker READY. Cleanup is idempotent and
+refuses databases without a matching ownership record.
+
+Still unsupported: arbitrary production databases without the required
+privileges, cluster-wide role/tablespace changes, and non-disposable target
+execution. A skipped external target is always reported as SKIPPED, not PASSED.

@@ -70,6 +70,15 @@ class PostgresAttributor:
         self._table_map: dict[str, tuple[str, str]] = {}
         self._pk_columns: dict[str, tuple[str, ...]] = {}
 
+    def rebind(self, connection: Any) -> None:
+        """Point the provider at a freshly restored database connection."""
+        if self.connection is not None and not self.connection.closed:
+            self.connection.close()
+        self.connection = connection
+        self.auditor = PostgresAuditor(connection, audit_schema=self.audit_schema, schemas=self.schemas)
+        self._table_map = {}
+        self._pk_columns = {}
+
     # -- availability ------------------------------------------------------- #
 
     def _require_installed(self) -> None:

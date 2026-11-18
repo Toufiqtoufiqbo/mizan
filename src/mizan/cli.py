@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -827,6 +828,180 @@ def postgres_evidence(
         click.echo(rendered)
     finally:
         connection.close()
+
+
+@main.command("postgres-twin")
+@click.option(
+    "--dsn-env", default="MIZAN_DATABASE_URL", show_default=True, help="Environment variable holding the DSN."
+)
+@click.option("--schema", "schemas", multiple=True, required=True, help="Schema allowlist (repeatable).")
+@click.option(
+    "--fixture", default=None, type=click.Path(exists=True, file_okay=False), help="Independent fixture directory."
+)
+@click.option("--variant", default="clean", show_default=True)
+@click.option("--workers", default=2, show_default=True)
+@click.option(
+    "--allow-disposable", is_flag=True, help="Explicit authorization to create and drop disposable databases."
+)
+@click.option("--dry-run", is_flag=True, help="Prepare and verify the baseline without creating worker databases.")
+@click.option("--cleanup-run", default=None, help="Drop only databases owned by this run id.")
+@click.option("--exercise", is_flag=True, help="Execute L2/L3 probes against the disposable twin.")
+@click.option("--workspace", default=None, type=click.Path())
+def postgres_twin(
+    dsn_env: str,
+    schemas: tuple[str, ...],
+    fixture: str | None,
+    variant: str,
+    workers: int,
+    allow_disposable: bool,
+    dry_run: bool,
+    cleanup_run: str | None,
+    exercise: bool,
+    workspace: str | None,
+) -> None:
+    """Prepare and exercise a disposable PostgreSQL Twin lifecycle."""
+    import time
+
+    from mizan.postgres_twin import (
+        DatabaseRegistry,
+        PostgresSource,
+        PostgresTwin,
+        SourceProtectionError,
+        TwinLifecycleError,
+    )
+    from mizan.postgres_twin import (
+        cleanup_run as drop_run,
+    )
+
+    root = Path(workspace) if workspace else Path(tempfile.mkdtemp(prefix="mizan-v61-"))
+    root.mkdir(parents=True, exist_ok=True)
+    registry = DatabaseRegistry(root / "ownership.json")
+
+    if cleanup_run:
+        cleaned = drop_run(dsn_env, root, cleanup_run)
+        click.echo(json.dumps({"run_id": cleanup_run, "cleaned": cleaned, "status": "CLEANED"}))
+        return
+
+    if not allow_disposable:
+        raise click.ClickException("pass --allow-disposable to authorize disposable database creation")
+    if workers < 1:
+        raise click.ClickException("at least one worker is required")
+
+    fixture_dir = (
+        Path(fixture)
+        if fixture
+        else Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "external_apps" / "postgres_store"
+    )
+    app = fixture_dir / "app.py"
+    if not app.exists():
+        raise click.ClickException("the fixture application was not found")
+    command = [
+        sys.executable,
+        str(app),
+        "--port",
+        "{port}",
+        "--vulnerability",
+        variant,
+    ]
+
+    source = PostgresSource(dsn_env, schemas=tuple(schemas))
+    started: list[PostgresTwin] = []
+    baseline = None
+    timings: dict[str, float] = {}
+    try:
+        begin = time.monotonic()
+        baseline = source.prepare_baseline(root)
+        timings["baseline_seconds"] = round(time.monotonic() - begin, 3)
+        evidence: dict[str, Any] = {
+            "run_id": source.run_id,
+            "source_database": source.source_name(),
+            "seed_database": baseline.name,
+            "baseline_fingerprint": baseline.fingerprint,
+            "schemas": list(schemas),
+            "workers": workers,
+            "dry_run": dry_run,
+        }
+        if dry_run:
+            evidence["status"] = "VERIFIED"
+            click.echo(json.dumps(evidence, indent=2, sort_keys=True))
+            return
+
+        for index in range(workers):
+            begin = time.monotonic()
+            twin = PostgresTwin(
+                source,
+                baseline,
+                registry,
+                f"w{index}",
+                command=command,
+                workdir=root,
+                variant=variant,
+                env={"MIZAN_TOKEN_ALICE": "twin-alice", "MIZAN_TOKEN_BOB": "twin-bob"},
+            )
+            twin.start()
+            timings[f"worker_{index}_start_seconds"] = round(time.monotonic() - begin, 3)
+            started.append(twin)
+
+        # Isolation proof: mutate worker 0 and verify worker 1 is unaffected.
+        first = started[0]
+        mutator = first.database.connect()
+        with mutator.cursor() as cursor:
+            cursor.execute(
+                "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = ANY(%s)",
+                (list(schemas),),
+            )
+            tables = cursor.fetchall()
+        if tables:
+            schema, _table = tables[0]
+            with mutator.cursor() as cursor:
+                cursor.execute(f'CREATE TABLE "{schema}"."mizan_twin_proof" (id TEXT PRIMARY KEY)')
+                cursor.execute(f'INSERT INTO "{schema}"."mizan_twin_proof" VALUES (%s)', ("proof",))
+        fingerprints = {twin.worker_id: source.fingerprint(twin.database.dsn) for twin in started}
+        if len(set(fingerprints.values())) != len(started):
+            raise TwinLifecycleError("worker databases are not isolated")
+
+        begin = time.monotonic()
+        first.restore()
+        timings["restore_seconds"] = round(time.monotonic() - begin, 3)
+        source.assert_unchanged()
+        if exercise:
+            from mizan.postgres_twin import run_l2_l3_probes
+
+            begin = time.monotonic()
+            evidence["probe_results"] = run_l2_l3_probes(
+                first,
+                schemas=tuple(schemas),
+                tokens={"alice": "twin-alice", "bob": "twin-bob"},
+                contract_path=fixture_dir / "mizan-relationships.json",
+            )
+            timings["probe_seconds"] = round(time.monotonic() - begin, 3)
+            source.assert_unchanged()
+        evidence.update(
+            {
+                "status": "VERIFIED",
+                "worker_fingerprints_after_mutation": fingerprints,
+                "restored_fingerprint": source.fingerprint(first.database.dsn),
+                "source_unchanged": True,
+                "timings": timings,
+            }
+        )
+        click.echo(json.dumps(evidence, indent=2, sort_keys=True))
+    except (SourceProtectionError, TwinLifecycleError) as exc:
+        click.echo(json.dumps({"run_id": getattr(source, "run_id", ""), "status": "FAILED", "error": str(exc)}))
+        raise SystemExit(2) from None
+    finally:
+        for twin in reversed(started):
+            try:
+                twin.cleanup()
+            except Exception as exc:
+                click.echo(f"cleanup error for {twin.worker_id}: {exc}", err=True)
+        if baseline is not None:
+            admin = source.admin()
+            try:
+                with admin.cursor() as cursor:
+                    cursor.execute(f'DROP DATABASE IF EXISTS "{baseline.name}"')
+            finally:
+                admin.close()
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1580,6 +1580,12 @@ class Mizan:
         """Bring the application back to the state it had before the probes."""
         if self.twin is not None:
             self.twin.restore()
+            # A PostgreSQL twin replaces the disposable database on restore.
+            # Providers that hold a connection must rebind to the new one.
+            database = getattr(self.twin, "database", None)
+            rebind = getattr(self.attributor, "rebind", None)
+            if database is not None and rebind is not None:
+                rebind(database.connect())
 
     def _principal_of(self, session: requests.Session) -> str:
         """The identity of the request the session makes.

@@ -1,0 +1,29 @@
+{
+  "denominators": {
+    "cleanups": 2,
+    "mutations": 1,
+    "restores": 1,
+    "workers": 2
+  },
+  "environment": {
+    "conditions": "local disposable pgserver",
+    "dataset": "postgres_store fixture, pgstore schema",
+    "postgres": "16.2",
+    "python": "3.11.9",
+    "workers": 2
+  },
+  "measurements": {
+    "baseline_prepare_seconds": 1.329,
+    "cleanup_seconds": 4.703,
+    "mutation_seconds": 0.016,
+    "restore_seconds": 8.171,
+    "worker_0_startup_seconds": 3.734,
+    "worker_1_startup_seconds": 4.109
+  },
+  "verification": {
+    "cleanup_idempotent": true,
+    "restore_matches_baseline": true,
+    "source_unchanged": true,
+    "workers_isolated": true
+  }
+}

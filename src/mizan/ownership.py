@@ -313,38 +313,43 @@ class RelationshipContract:
         """
         problems: list[str] = []
         for table, (resource_fk, principal_fk, _semantics, _name, _actions) in sorted(self.sharing.items()):
-            declared = schema.get(table) if schema is not None else None
+            try:
+                declared = _resolve_declared_table(schema.tables, table) if schema is not None else None
+            except RelationshipContractError as exc:
+                problems.append(str(exc))
+                continue
             if declared is None:
                 raise RelationshipContractError(f"sharing declares unknown table {table!r}")
+            resolved_table = declared.name
             resource_column = declared.column(resource_fk)
             principal_column = declared.column(principal_fk)
             if resource_column is None:
-                problems.append(f"{table!r} has no resource_fk column {resource_fk!r}")
+                problems.append(f"{resolved_table!r} has no resource_fk column {resource_fk!r}")
             if principal_column is None:
-                problems.append(f"{table!r} has no principal_fk column {principal_fk!r}")
+                problems.append(f"{resolved_table!r} has no principal_fk column {principal_fk!r}")
             if resource_column is None or principal_column is None:
                 continue
             resource_target = next((fk for fk in declared.foreign_keys if fk.column == resource_fk), None)
             principal_target = next((fk for fk in declared.foreign_keys if fk.column == principal_fk), None)
             if resource_target is None:
-                problems.append(f"{table}.{resource_fk} is not a declared foreign key")
+                problems.append(f"{resolved_table}.{resource_fk} is not a declared foreign key")
             if principal_target is None:
-                problems.append(f"{table}.{principal_fk} is not a declared foreign key")
+                problems.append(f"{resolved_table}.{principal_fk} is not a declared foreign key")
             if resource_target is not None and principal_target is not None:
                 if getattr(resource_target, "composite", False) or getattr(principal_target, "composite", False):
                     problems.append(
-                        f"{table} declares a composite foreign key; only single-column grants are supported"
+                        f"{resolved_table} declares a composite foreign key; only single-column grants are supported"
                     )
                 elif resource_target.table == principal_target.table:
                     problems.append(
-                        f"{table} references {resource_target.table!r} for both the resource and the principal"
+                        f"{resolved_table} references {resource_target.table!r} for both the resource and the principal"
                     )
                 target = schema.get(resource_target.table) if schema is not None else None
                 if target is None or not target.primary_key:
-                    problems.append(f"{table}.{resource_fk} does not reference a table with a primary key")
+                    problems.append(f"{resolved_table}.{resource_fk} does not reference a table with a primary key")
                 principal_entity = schema.get(principal_target.table) if schema is not None else None
                 if principal_entity is None or not principal_entity.primary_key:
-                    problems.append(f"{table}.{principal_fk} does not reference a table with a primary key")
+                    problems.append(f"{resolved_table}.{principal_fk} does not reference a table with a primary key")
         for resource_type, (source, column, declared_table) in sorted(self.ownership.items()):
             lookup = declared_table or resource_type
             try:

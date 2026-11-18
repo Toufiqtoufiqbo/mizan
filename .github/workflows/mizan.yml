@@ -100,13 +100,19 @@ jobs:
       - name: PostgreSQL ownership evidence integration
         run: python -m pytest -q tests/test_postgres_ownership_integration.py
 
+      - name: PostgreSQL disposable Twin lifecycle
+        run: python -m pytest -q tests/test_postgres_twin.py
+
+      - name: PostgreSQL Twin benchmark
+        run: python -m benchmarks.postgres_twin.run
+
       - name: PostgreSQL ownership benchmark and independent checker
         run: python -m benchmarks.postgres_ownership.run
 
       - name: No skipped tests
         # A skip here means the suite did not run - fail rather than pass.
         run: |
-          python -m pytest tests/test_postgres_roundtrip.py tests/test_postgres_ownership_integration.py -rs --tb=no -q | tee out.txt
+          python -m pytest tests/test_postgres_roundtrip.py tests/test_postgres_ownership_integration.py tests/test_postgres_twin.py -rs --tb=no -q | tee out.txt
           if grep -q "skipped" out.txt; then
             echo "::error::PostgreSQL tests were skipped"
             exit 1

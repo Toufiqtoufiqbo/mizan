@@ -51,9 +51,10 @@
       composite keys, a monotonic audit cursor, request correlation and an
       explicit attribution state feed the existing ownership graph and L2/L3
       evidence paths (Phase VI)
-- [ ] **PostgreSQL disposable-target restoration**: a verified per-probe
-      database clone is required before PostgreSQL attack/twin mode can be
-      exposed; until then that mode fails closed
+- [x] **PostgreSQL disposable-target restoration**: immutable seed plus
+      per-worker template clones, canonical baseline verification and safe
+      cleanup (Phase VI.1); PostgreSQL attack/twin mode is available only with
+      explicit `--allow-disposable` authorization
 - [x] **An identity map in the CLI** (`--identity-map`): already implemented
       with dedicated tests (`tests/test_identity_map.py`); this entry was stale
 - [x] **Proof bundles carry no secrets**: the bearer token is a placeholder,
