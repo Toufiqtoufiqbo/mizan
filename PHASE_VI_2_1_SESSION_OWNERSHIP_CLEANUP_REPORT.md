@@ -180,8 +180,13 @@ CI uses the `postgres:16-alpine` service.
 Stages A–G, B2 and S are preserved. The destructive PostgreSQL job B2 adds
 named steps for the spoofed-session test, the invalid worker/seed marker tests,
 partial-cleanup/coordination tests, and still fails on any skip. The external
-target remains opt-in and SKIPPED when not configured. Final run evidence is
-recorded in the delivery message with the exact run URL and job conclusions.
+target remains opt-in and SKIPPED when not configured.
+
+CI on implementation commit `b27f94682893dd4991c2cd8c11c942a6e5ab2cc1`:
+workflow run **44570972080** (#241), conclusion **success**. Jobs A, B, B2,
+C, D, E, F, G and S all succeeded; `G - external target (opt-in)` was SKIPPED,
+never passed. A second run on the final documentation commit is recorded in the
+delivery message.
 
 ## 8. Documentation and compatibility
 
@@ -227,3 +232,7 @@ CI evidence is recorded in section 7 and in the delivery message.
 - Cluster-wide roles, tablespaces, extensions and publications remain outside
   the clone and fingerprint guarantee.
 - The external target is not exercised in ordinary CI.
+
+## 11. Final verdict
+
+**Verdict: READY FOR REVIEW.**
