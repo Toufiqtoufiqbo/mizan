@@ -1,5 +1,10 @@
 # Phase VI.1 — Disposable PostgreSQL Twin: Mandatory Design Audit
 
+> Historical design audit. Section 3's assumption that restoring must terminate
+> sessions and section 10's privilege list were superseded by Phase VI.2.1:
+> Mīzān never terminates a PostgreSQL session; it stops its own process, waits
+> for backends to disconnect, and refuses the drop while any session remains.
+
 Starting state verified: branch `feat/postgres-ownership-graph` at
 `09a28db07d6fbc11f6bcb972418d544e42b1ad19`; `main` at
 `0ffc1f606f9e3e40b60f9fcd23bb54afb2d3d238`; clean tree; `stash@{0}` intact.

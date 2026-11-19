@@ -1,11 +1,9 @@
 # Mīzān Phase VI.1 — Disposable PostgreSQL Twin
 
-> **Phase VI.2 supersedes the lifecycle guarantees described here.** This report
-> is kept as the record of what VI.1 delivered. VI.2 replaced the local-JSON-only
-> cleanup boundary, applied the schema allowlist to the dump, moved credentials
-> out of child-process arguments, made process shutdown mandatory, separated
-> session identity from the principal and rebuilt the fingerprint. See
-> `PHASE_VI_2_SECURITY_HARDENING_REPORT.md` for the current guarantees.
+> **Phase VI.2.1 supersedes the session and cleanup guarantees described here.**
+> The cleanup path now uses a whole-run preflight and never terminates sessions
+> by `application_name`; see `PHASE_VI_2_1_SESSION_OWNERSHIP_CLEANUP_REPORT.md`.
+> This report is kept as the record of what VI.1 delivered.
 
 ## 1. Executive summary
 
@@ -72,13 +70,12 @@ did not change worker 1. Fingerprints after mutation differed.
 ## 6. Restoration procedure
 
 `restore()`: stop and reap the application (the exit is observed, not assumed),
-close Mīzān-owned connections, terminate only sessions whose stable
-`application_name` is exactly `mizan:<run_id>:<worker_id>`, drop and re-clone the
-worker database from the seed, reinstall audit triggers, restart the
-application, wait for a real health check, compare the canonical fingerprint,
-then mark `VERIFIED`/`READY`. A connection pool of any size is therefore
-released before the drop; an unrelated session aborts the drop. Cleanup is
-idempotent.
+close Mīzān-owned connections, wait for its backends to disconnect on their own
+and refuse if any session remains, re-clone from the seed, reinstall audit
+triggers, restart the application, wait for a real health check, compare the
+canonical fingerprint, then mark `VERIFIED`/`READY`. A connection pool of any
+size is therefore released before the drop; any remaining session aborts the
+drop and is never terminated (Phase VI.2.1). Cleanup is idempotent.
 
 ## 7. Attribution model
 

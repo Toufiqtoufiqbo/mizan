@@ -544,6 +544,9 @@ mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --schema app \
 mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --cleanup-run RUN_ID
 ```
 
+`--cleanup-run` reports `CLEANED`, `PREFLIGHT_FAILED`, `PARTIAL_CLEANUP` or
+`CLEANUP_FAILED`; only `CLEANED` means every resource was verified absent.
+
 `--dry-run` validates the DSN, tools, allowlist and fingerprint **without
 creating any database** and reports `DRY_RUN_OK` (never `VERIFIED`).
 `--workers N` provisions N isolated databases and processes; `--exercise`
@@ -555,20 +558,24 @@ bundles — `pg_dump`/`psql` receive credentials through a temporary `PGPASSFILE
 
 The source database is never an attack target, never receives audit triggers,
 and its canonical fingerprint is asserted before and after the run. Only the
-configured schemas are dumped, fingerprinted and cloned. Workers use distinct
-cloned databases with a stable session identity (`mizan:<run_id>:<worker_id>`);
-the principal and request id travel in transaction-local settings. A restore
-stops the application and observes its exit, closes this run's connections,
-terminates only its exact owned sessions (a pool of any size is released),
-re-clones from the seed, reinstalls audit infrastructure, restarts the
-application and only then marks the worker READY. An unrelated session aborts
-the drop; it is never terminated.
+configured schemas are dumped, fingerprinted and cloned. The label
+`mizan:<run_id>:<worker_id>` is client-controlled metadata, not a credential:
+Mīzān never terminates a session because of it. A restore stops the application
+and observes its exit, closes this run's connections, lets the backends
+disconnect on their own and refuses the drop if any session remains, re-clones
+from the seed, reinstalls audit infrastructure, restarts the application and
+only then marks the worker READY. An unrelated session — even one copying the
+exact label — aborts the drop and is never terminated.
 
 Cleanup requires a local record **and** a server-side database marker that agree
 on run, kind, worker, source, cluster identity (`pg_control_system()`), owner
-role and nonce. A local JSON record alone never authorizes deletion, no
-`DROP DATABASE ... WITH (FORCE)` is used, and cleanup is idempotent. The final
-status is emitted only after cleanup; a failure exits non-zero with
+role and nonce. **Every** database in the run is verified before the first
+deletion; one invalid marker rejects the entire run. A local JSON record alone
+never authorizes deletion, no `DROP DATABASE ... WITH (FORCE)` is used, and
+cleanup is idempotent. PostgreSQL cannot drop several databases in one
+transaction, so a later operational failure is reported as `PARTIAL_CLEANUP`
+with the exact completed and remaining databases and is recoverable by retry.
+The final status is emitted only after cleanup; a failure exits non-zero with
 `cleanup_failed` and preserves the records for `--cleanup-run`.
 
 Still unsupported: arbitrary production databases without the required

@@ -1,5 +1,10 @@
 # Phase VI.2 — PostgreSQL Twin Security Hardening Report
 
+> **Phase VI.2.1 supersedes the session and whole-run cleanup guarantees
+> described here.** Mīzān no longer terminates sessions by `application_name`,
+> and cleanup verifies the entire run before the first deletion. See
+> `PHASE_VI_2_1_SESSION_OWNERSHIP_CLEANUP_REPORT.md` for the current guarantees.
+
 ## 1. Executive summary
 
 Phase VI.1 delivered a working disposable PostgreSQL Twin but its cleanup
@@ -74,8 +79,8 @@ Each seed and worker database carries a JSON marker in its database comment:
 - the marker's cluster equals `pg_control_system().system_identifier` for the
   connection performing the drop;
 - the marker's owner equals the database's actual owner role;
-- no unrelated session is connected (an unrelated session aborts; it is never
-  terminated), and only the exact owned session identity may be terminated.
+- no session is connected; Mīzān never terminates a backend, so any remaining
+  session (whatever its label) aborts the drop.
 
 `cleanup_run()` validates the **whole** recorded set before dropping anything,
 so one forged record cannot leave a run half-cleaned. If `pg_control_system()`
@@ -141,14 +146,15 @@ outside the clone guarantee. They are not claimed as verified.
   observed by polling `process.poll()`; a process still alive after the grace
   period is killed and reaped. `_stop_application(strict=True)` raises, and the
   caller blocks every destructive drop when it fails.
-- Application connections use the stable identity
-  `mizan:<run_id>:<worker_id>`. The fixture now has a real connection pool
-  (`/pool`, `MIZAN_PG_POOL_SIZE`, optional leak mode), so restore and cleanup are
-  exercised with idle and active pooled connections. After a restore, the old
-  pool's PIDs are gone and a new pool is established, proving the pool was
-  released before the drop.
-- A session with any other identity aborts the drop with `CleanupError`; only
-  the exact owned identity may be terminated.
+- Application connections carry a client-controlled label
+  `mizan:<run_id>:<worker_id>`. It is diagnostic metadata only; **no session is
+  terminated because of it**. The fixture has a real connection pool (`/pool`,
+  `/pool/shutdown`, `/pool/release`, `MIZAN_PG_POOL_SIZE`, leak mode), so restore
+  and cleanup are exercised with idle and active pooled connections, a failed
+  shutdown and a retry. After a restore, the old pool's PIDs are gone and a new
+  pool is established, proving the pool was released before the drop.
+- Any session still connected to the target database aborts the drop with
+  `CleanupError`, including a client that copied the exact Mīzān label.
 - `CancellationToken` translates SIGINT, SIGTERM and SIGBREAK into a catchable
   `RunInterrupted`, so the normal cleanup path runs and the command exits
   non-zero. Handlers are restored before cleanup so it cannot be interrupted
@@ -163,12 +169,14 @@ outside the clone guarantee. They are not claimed as verified.
   is never printed before cleanup succeeds.
 - A cleanup failure prints `cleanup_failed` with `cleanup_errors` and exits 2.
   Records and markers are preserved for `--cleanup-run`.
+- `--cleanup-run RUN_ID` uses the whole-run preflight and reports `CLEANED`,
+  `PREFLIGHT_FAILED`, `PARTIAL_CLEANUP` or `CLEANUP_FAILED`, with exact
+  completed/remaining lists; see
+  `PHASE_VI_2_1_SESSION_OWNERSHIP_CLEANUP_REPORT.md`.
 - `--dry-run` creates no database and reports `DRY_RUN_OK`, not `VERIFIED`.
 - `--workers N` provisions N isolated databases/processes. `--exercise` runs
   the L2/L3 probes against **worker `w0` only**; the other workers are
   isolation evidence. This is stated in the option help and documented.
-- `--cleanup-run RUN_ID` validates the whole recorded set, verifies markers and
-  drops only this run's databases; it is idempotent.
 
 ## 10. Adversarial test evidence
 
@@ -290,7 +298,7 @@ application), G (cross-framework gate) and S (status summary) all succeeded.
 | 10 | Stable session identity separate from principal, transaction-local principal/request id | `app_session_identity`; `mizan.principal`; audit tests |
 | 11 | Pooled fixture: idle/active, reuse, shutdown and leak/failure mode | `ConnectionPool`; `/pool`; pooled and pool-leak tests |
 | 12 | Pools released before restore/drop | disjoint PID sets across restore; leak-mode drop |
-| 13 | Unrelated sessions never terminated; cleanup refuses; only exact owned stale session terminated | unrelated refusal test; exact-owned-session termination test |
+| 13 | No session terminated by client-controlled label; cleanup refuses while any session remains | spoofed-label test; `test_cleanup_refuses_while_an_unrelated_session_is_active`; Phase VI.2.1 report |
 | 14 | Real SIGINT/SIGTERM during probes and restore/cleanup | parametrized signal tests (POSIX; run in CI B2, skipped on Windows) |
 | 15 | SIGKILL orphan recovery through `--cleanup-run` | `test_sigkill_then_cleanup_run_recovers_the_orphan` |
 | 16 | `--cleanup-run` strict verification: forged record, other cluster, similar name, marker mismatch, unrelated sessions | forged/foreign/similar/unrelated tests; whole-set pre-validation |

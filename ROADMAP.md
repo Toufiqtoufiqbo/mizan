@@ -43,9 +43,9 @@
 - [x] **CI gate**: `mizan replay` replays every proven attack against a target
       and fails when one still works
 - [x] **Postgres auditor**: an audit table and a trigger, with the principal in
-      the transaction-local `mizan.principal` setting and a stable session
-      identity for ownership (legacy `application_name` principals still
-      accepted); primary keys read from the catalog (`id`, UUID, text,
+      the transaction-local `mizan.principal` setting (legacy
+      `application_name` principals still accepted); the session label is
+      client-controlled metadata and never a principal or cleanup authority; primary keys read from the catalog (`id`, UUID, text,
       composite); tables without a key are unidentified, never misattributed;
       `SET LOCAL` keeps the identity inside the transaction; the round trip is
       covered by real-server tests (in CI and locally)
@@ -57,8 +57,10 @@
       immutable seed plus per-worker template clones, canonical fingerprint,
       verified ownership (local record + server marker + cluster identity +
       owner + nonce), mandatory process shutdown and safe cleanup (Phase VI.1,
-      hardened in VI.2); PostgreSQL attack/twin mode is available only with
-      explicit `--allow-disposable` authorization
+      hardened in VI.2); Phase VI.2.1 added whole-run cleanup preflight and
+      removed session termination by `application_name`; PostgreSQL
+      attack/twin mode is available only with explicit `--allow-disposable`
+      authorization
 - [x] **An identity map in the CLI** (`--identity-map`): already implemented
       with dedicated tests (`tests/test_identity_map.py`); this entry was stale
 - [x] **Proof bundles carry no secrets**: the bearer token is a placeholder,

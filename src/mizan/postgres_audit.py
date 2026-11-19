@@ -57,8 +57,8 @@ AUDIT_FUNCTION = "mizan_write_audit_fn"
 #: The prefix that marks an application name as carrying an identity.
 PRINCIPAL_PREFIX = "mizan:"
 
-#: A stable session identity is ``mizan:<12 hex>:<worker>``. It is ownership
-#: metadata, never a principal.
+#: A stable session identity is ``mizan:<12 hex>:<worker>``. It is a
+#: client-controlled label: never a principal, never proof of backend ownership.
 _SESSION_IDENTITY = re.compile(r"mizan:[0-9a-f]{12}:[a-z0-9][a-z0-9_-]{0,31}")
 
 #: Columns that usually name the owner of a row.

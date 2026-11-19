@@ -881,7 +881,9 @@ def postgres_twin(
 
     from mizan.postgres_twin import (
         CancellationToken,
+        CleanupPreflightError,
         DatabaseRegistry,
+        PartialCleanupError,
         PostgresSource,
         PostgresTwin,
         SourceProtectionError,
@@ -904,13 +906,40 @@ def postgres_twin(
     if cleanup_run:
         try:
             cleaned = drop_run(dsn_env, root, cleanup_run)
-        except Exception as exc:
+        except CleanupPreflightError as exc:
             emit(
-                {"run_id": cleanup_run, "status": "cleanup_failed", "error": redact(str(exc))},
+                {
+                    "run_id": cleanup_run,
+                    "status": "PREFLIGHT_FAILED",
+                    "cleaned": [],
+                    "remaining": sorted(exc.categories),
+                    "categories": exc.categories,
+                    "reasons": exc.reasons,
+                    "error": redact(str(exc)),
+                },
                 code=2,
             )
             return
-        emit({"run_id": cleanup_run, "cleaned": cleaned, "status": "CLEANED"})
+        except PartialCleanupError as exc:
+            emit(
+                {
+                    "run_id": cleanup_run,
+                    "status": "PARTIAL_CLEANUP",
+                    "cleaned": exc.cleaned,
+                    "remaining": exc.remaining,
+                    "reasons": exc.reasons,
+                    "error": redact(str(exc)),
+                },
+                code=2,
+            )
+            return
+        except Exception as exc:
+            emit(
+                {"run_id": cleanup_run, "status": "CLEANUP_FAILED", "error": redact(str(exc))},
+                code=2,
+            )
+            return
+        emit({"run_id": cleanup_run, "cleaned": cleaned, "remaining": [], "status": "CLEANED"})
         return
 
     if not allow_disposable:
@@ -1068,6 +1097,14 @@ def postgres_twin(
         if not stop_failed:
             try:
                 drop_run(dsn_env, root, source.run_id)
+            except CleanupPreflightError as exc:
+                evidence["cleanup_status"] = "PREFLIGHT_FAILED"
+                cleanup_errors.append(source.redact("cleanup preflight: " + str(exc)))
+            except PartialCleanupError as exc:
+                evidence["cleanup_status"] = "PARTIAL_CLEANUP"
+                evidence["cleanup_completed"] = exc.cleaned
+                evidence["cleanup_remaining"] = exc.remaining
+                cleanup_errors.append(source.redact("partial cleanup: " + str(exc)))
             except Exception as exc:
                 cleanup_errors.append(source.redact(f"run cleanup: {exc}"))
         else:

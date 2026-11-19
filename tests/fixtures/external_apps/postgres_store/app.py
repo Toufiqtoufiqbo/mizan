@@ -130,19 +130,20 @@ class ConnectionPool:
             with self._lock:
                 self.active -= 1
 
-    def shutdown(self, *, leak: bool = False) -> None:
+    def shutdown(self, *, leak: bool = False) -> list[Any]:
         with self._lock:
             self._closed = True
             owned = list(self._owned)
             self._owned.clear()
         if leak:
-            return
+            return owned
         for connection in owned:
             with contextlib.suppress(Exception):
                 connection.close()
         with contextlib.suppress(Exception):
             while True:
                 self._idle.get_nowait()
+        return []
 
 
 def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | None = None) -> Flask:
@@ -155,6 +156,7 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
     app.config["POOL_SIZE"] = _pool_size()
     app.config["POOL_LEAK"] = bool(os.environ.get("MIZAN_PG_POOL_LEAK"))
     app.config["POOL"] = None
+    app.config["LEAKED_CONNECTIONS"] = []
 
     def q(name: str) -> str:
         return f"{_quote(app.config['PG_SCHEMA'])}.{_quote(name)}"
@@ -258,7 +260,7 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
     if app.config["POOL_SIZE"]:
         pool = ConnectionPool(app.config["PG_DSN"], app.config["POOL_SIZE"])
         app.config["POOL"] = pool
-        atexit.register(pool.shutdown, leak=app.config["POOL_LEAK"])
+        atexit.register(lambda: app.config["LEAKED_CONNECTIONS"].extend(pool.shutdown(leak=app.config["POOL_LEAK"])))
 
     def caller() -> str | None:
         header = request.headers.get("Authorization", "")
@@ -293,9 +295,30 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
                 "created": pool.created,
                 "active": pool.active,
                 "idle": pool._idle.qsize(),
+                "closed": pool._closed,
+                "leaked": len(app.config["LEAKED_CONNECTIONS"]),
                 "leak": app.config["POOL_LEAK"],
             }
         )
+
+    @app.post("/pool/shutdown")
+    def pool_shutdown():
+        pool = app.config["POOL"]
+        if pool is None:
+            return jsonify({"enabled": False})
+        leak = bool(request.args.get("leak")) or app.config["POOL_LEAK"]
+        app.config["LEAKED_CONNECTIONS"].extend(pool.shutdown(leak=leak))
+        return jsonify({"enabled": True, "closed": pool._closed, "leak": leak})
+
+    @app.post("/pool/release")
+    def pool_release():
+        leaked = app.config["LEAKED_CONNECTIONS"]
+        count = len(leaked)
+        for connection in leaked:
+            with contextlib.suppress(Exception):
+                connection.close()
+        leaked.clear()
+        return jsonify({"released": count})
 
     @app.post("/login")
     def login():

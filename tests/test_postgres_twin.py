@@ -9,14 +9,19 @@ fingerprints, pooled sessions, verified cleanup, signals and orphan recovery.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import os
+import secrets
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -24,9 +29,11 @@ import mizan.postgres_twin as twin_module
 from mizan.postgres_twin import (
     BaselineVerificationError,
     CleanupError,
+    CleanupPreflightError,
     DatabaseRegistry,
     OwnershipError,
     OwnershipRecord,
+    PartialCleanupError,
     PostgresSource,
     SourceProtectionError,
     TwinLifecycleError,
@@ -88,6 +95,79 @@ def _record(
         owner_role=owner,
         nonce=nonce,
     )
+
+
+def _build_run(instance, workspace, worker_ids=("w0", "w1")):
+    """Create one seed and validly marked workers for destructive tests."""
+    baseline = instance.prepare_baseline(workspace)
+    registry = DatabaseRegistry(workspace / "ownership.json")
+    admin = _admin(instance.dsn)
+    try:
+        with admin.cursor() as cursor:
+            cursor.execute("SELECT system_identifier::text FROM pg_control_system()")
+            cluster = str(cursor.fetchone()[0])
+        for worker_id in worker_ids:
+            name = expected_worker_name(instance.run_id, worker_id)
+            _create_database(instance.dsn, name)
+            with admin.cursor() as cursor:
+                cursor.execute("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = %s", (name,))
+                owner = str(cursor.fetchone()[0])
+            nonce = secrets.token_hex(16)
+            twin_module.write_marker(
+                admin,
+                name,
+                twin_module.OwnershipMarker(
+                    1,
+                    instance.run_id,
+                    "worker",
+                    worker_id,
+                    instance.source_name(),
+                    cluster,
+                    owner,
+                    nonce,
+                    time.time(),
+                ),
+            )
+            registry.put(
+                _record(
+                    run_id=instance.run_id,
+                    worker_id=worker_id,
+                    database_name=name,
+                    source=instance.source_name(),
+                    seed=baseline.name,
+                    cluster=cluster,
+                    owner=owner,
+                    nonce=nonce,
+                )
+            )
+    finally:
+        admin.close()
+    return baseline, registry
+
+
+def _tamper_marker(instance, name: str) -> None:
+    """Replace a valid marker with one carrying a different nonce."""
+    admin = _admin(instance.dsn)
+    try:
+        marker = twin_module.read_marker(admin, name)
+        assert marker is not None
+        twin_module.write_marker(
+            admin,
+            name,
+            twin_module.OwnershipMarker(
+                marker.version,
+                marker.run_id,
+                marker.kind,
+                marker.worker_id,
+                marker.source_database,
+                marker.cluster_id,
+                marker.owner_role,
+                "f" * 32,
+                marker.created_at,
+            ),
+        )
+    finally:
+        admin.close()
 
 
 # --------------------------------------------------------------------------- #
@@ -489,8 +569,60 @@ def test_cleanup_run_cli_reports_a_machine_readable_failure(monkeypatch, tmp_pat
     )
     assert result.exit_code == 2
     payload = json.loads(result.output)
-    assert payload["status"] == "cleanup_failed"
+    assert payload["status"] == "CLEANUP_FAILED"
     assert "forged" in payload["error"]
+
+
+def test_no_session_termination_api_is_used() -> None:
+    assert not hasattr(twin_module, "_terminate_owned_sessions")
+    source = inspect.getsource(twin_module.verified_drop)
+    assert "pg_terminate_backend" not in source
+    assert "application_name" not in source
+
+
+def test_cleanup_failures_carry_machine_readable_state() -> None:
+    preflight = CleanupPreflightError(["bad marker"], categories={"db": "invalid marker"})
+    assert preflight.categories == {"db": "invalid marker"}
+    partial = PartialCleanupError(["w0"], ["seed"], ["drop refused"])
+    assert partial.cleaned == ["w0"]
+    assert partial.remaining == ["seed"]
+
+
+def test_cli_reports_preflight_and_partial_cleanup_statuses(monkeypatch, tmp_path) -> None:
+    from click.testing import CliRunner
+
+    from mizan.cli import main
+
+    cases = [
+        (
+            CleanupPreflightError(["bad marker"], categories={"db": "invalid marker"}),
+            "PREFLIGHT_FAILED",
+        ),
+        (PartialCleanupError(["w0"], ["seed"], ["drop refused"]), "PARTIAL_CLEANUP"),
+    ]
+    for error, expected in cases:
+
+        def failing(*args, _error=error, **kwargs):
+            raise _error
+
+        monkeypatch.setattr(twin_module, "cleanup_run", failing)
+        result = CliRunner().invoke(
+            main,
+            [
+                "postgres-twin",
+                "--dsn-env",
+                DSN_ENV,
+                "--schema",
+                "pgstore",
+                "--cleanup-run",
+                RUN,
+                "--workspace",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 2
+        payload = json.loads(result.output)
+        assert payload["status"] == expected
 
 
 def test_cli_never_claims_verified_before_a_successful_cleanup(monkeypatch, tmp_path):
@@ -935,6 +1067,301 @@ def test_cleanup_refuses_a_record_from_another_cluster(source) -> None:
 
 
 @pytest.mark.postgres_integration
+def test_all_valid_run_cleanup_removes_seed_and_workers(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v61-valid-run-"))
+    baseline, _registry = _build_run(instance, workspace)
+    names = [baseline.name, expected_worker_name(instance.run_id, "w0"), expected_worker_name(instance.run_id, "w1")]
+    try:
+        assert all(_database_exists(dsn, name) for name in names)
+        cleaned = cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert set(cleaned) == set(names)
+        assert not any(_database_exists(dsn, name) for name in names)
+        assert cleanup_run(DSN_ENV, workspace, instance.run_id) == []
+    finally:
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_invalid_second_worker_marker_blocks_whole_run(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v61-bad-worker-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    w1 = expected_worker_name(instance.run_id, "w1")
+    names = [baseline.name, w0, w1]
+    try:
+        _tamper_marker(instance, w1)
+        with pytest.raises(CleanupPreflightError) as error:
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert error.value.categories.get(w1) == "invalid marker"
+        assert all(_database_exists(dsn, name) for name in names), "a database was deleted during preflight"
+        assert {record.database_name for record in registry.records()} == set(names)
+        assert all(record.state is not TwinState.CLEANED for record in registry.records())
+    finally:
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_invalid_seed_marker_leaves_workers_untouched(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v61-bad-seed-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    w1 = expected_worker_name(instance.run_id, "w1")
+    names = [baseline.name, w0, w1]
+    try:
+        _tamper_marker(instance, baseline.name)
+        with pytest.raises(CleanupPreflightError) as error:
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert error.value.categories.get(baseline.name) == "invalid marker"
+        assert all(_database_exists(dsn, name) for name in names)
+        assert {record.database_name for record in registry.records()} == set(names)
+    finally:
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_session_created_during_preflight_blocks_every_drop(source, monkeypatch) -> None:
+    import psycopg
+
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v61-late-session-"))
+    baseline, _registry = _build_run(instance, workspace)
+    names = [baseline.name, expected_worker_name(instance.run_id, "w0"), expected_worker_name(instance.run_id, "w1")]
+    late: list[Any] = []
+    original = twin_module._wait_for_no_sessions
+
+    def inject(*args, **kwargs):
+        if not late:
+            name = expected_worker_name(instance.run_id, "w1")
+            late.append(
+                psycopg.connect(database_dsn(instance.dsn, name, application_name="late-client"), connect_timeout=5)
+            )
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(twin_module, "_wait_for_no_sessions", inject)
+    try:
+        with pytest.raises(CleanupPreflightError) as error:
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert error.value.categories.get(names[2]) == "active session"
+        assert all(_database_exists(dsn, name) for name in names), "a drop preceded the preflight failure"
+    finally:
+        for connection in late:
+            connection.close()
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_session_that_disappears_during_preflight_allows_cleanup(source) -> None:
+    import psycopg
+
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v61-vanish-"))
+    baseline, _registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    w1 = expected_worker_name(instance.run_id, "w1")
+    names = [baseline.name, w0, w1]
+    holder: list[Any] = []
+    connected = threading.Event()
+
+    def connect_then_close() -> None:
+        holder.append(
+            psycopg.connect(database_dsn(instance.dsn, w0, application_name="vanishing-client"), connect_timeout=5)
+        )
+        connected.set()
+        time.sleep(0.2)
+        holder[0].close()
+
+    thread = threading.Thread(target=connect_then_close)
+    try:
+        thread.start()
+        assert connected.wait(timeout=10)
+        cleaned = cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert set(cleaned) == set(names)
+        assert not any(_database_exists(dsn, name) for name in names)
+    finally:
+        thread.join(timeout=10)
+        if holder and not holder[0].closed:
+            holder[0].close()
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_failure_before_first_drop_is_partial_with_zero_deletions(source, monkeypatch) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v61-before-drop-"))
+    baseline, _registry = _build_run(instance, workspace)
+    names = [baseline.name, expected_worker_name(instance.run_id, "w0"), expected_worker_name(instance.run_id, "w1")]
+    monkeypatch.setattr(
+        twin_module,
+        "verified_drop",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("simulated failure")),
+    )
+    try:
+        with pytest.raises(PartialCleanupError) as error:
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert error.value.cleaned == []
+        assert set(error.value.remaining) == set(names)
+        assert all(_database_exists(dsn, name) for name in names)
+    finally:
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_failure_after_first_drop_is_recoverable(source, monkeypatch) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v61-after-drop-"))
+    baseline, _registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    w1 = expected_worker_name(instance.run_id, "w1")
+    names = [baseline.name, w0, w1]
+    original = twin_module.verified_drop
+    calls = {"n": 0}
+
+    def failing_drop(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return original(*args, **kwargs)
+        raise RuntimeError("simulated failure after the first drop")
+
+    monkeypatch.setattr(twin_module, "verified_drop", failing_drop)
+    try:
+        with pytest.raises(PartialCleanupError) as error:
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert error.value.cleaned == [w0]
+        assert set(error.value.remaining) == {w1, baseline.name}
+        assert not _database_exists(dsn, w0)
+        assert _database_exists(dsn, w1) and _database_exists(dsn, baseline.name)
+    finally:
+        monkeypatch.setattr(twin_module, "verified_drop", original)
+        cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert not any(_database_exists(dsn, name) for name in names)
+
+
+@pytest.mark.postgres_integration
+def test_concurrent_cleanup_is_coordinated(source, monkeypatch) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v61-concurrent-"))
+    baseline, _registry = _build_run(instance, workspace)
+    names = [baseline.name, expected_worker_name(instance.run_id, "w0"), expected_worker_name(instance.run_id, "w1")]
+    entered = threading.Event()
+    release = threading.Event()
+    original = twin_module.verified_drop
+    monkeypatch.setattr(twin_module, "RUN_LOCK_TIMEOUT_SECONDS", 0.5)
+
+    def blocking_drop(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=30), "the first cleanup was never released"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(twin_module, "verified_drop", blocking_drop)
+    outcomes: dict[str, Any] = {}
+
+    def first() -> None:
+        try:
+            outcomes["first"] = cleanup_run(DSN_ENV, workspace, instance.run_id)
+        except Exception as exc:  # pragma: no cover - reported by the assertion
+            outcomes["first_error"] = exc
+
+    thread = threading.Thread(target=first)
+    try:
+        thread.start()
+        assert entered.wait(timeout=30), "the first cleanup did not reach its drop"
+        with pytest.raises(CleanupPreflightError, match="lock"):
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        release.set()
+        thread.join(timeout=30)
+        assert "first_error" not in outcomes, outcomes.get("first_error")
+        assert set(outcomes["first"]) == set(names)
+        assert not any(_database_exists(dsn, name) for name in names)
+    finally:
+        release.set()
+        thread.join(timeout=30)
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_advisory_cleanup_lock_is_released_with_its_connection(source) -> None:
+    instance, dsn = source
+    first = _admin(instance.dsn)
+    second = _admin(instance.dsn)
+
+    key = (twin_module.RUN_LOCK_NAMESPACE << 48) + int(RUN, 16)
+
+    def try_lock() -> bool:
+        with second.cursor() as cursor:
+            cursor.execute("SELECT pg_try_advisory_lock(%s)", (key,))
+            return bool(cursor.fetchone()[0])
+
+    try:
+        with twin_module._run_cleanup_lock(first, RUN):
+            assert try_lock() is False, "a concurrent cleanup could hold the same run lock"
+        assert try_lock() is True, "the run lock survived its original connection"
+        with second.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_unlock(%s)", (key,))
+    finally:
+        first.close()
+        second.close()
+
+
+@pytest.mark.postgres_integration
+def test_cleanup_lock_is_released_after_process_kill(source) -> None:
+    instance, dsn = source
+    key = (twin_module.RUN_LOCK_NAMESPACE << 48) + int(RUN, 16)
+    script = Path(tempfile.mkdtemp(prefix="mizan-v61-lock-script-")) / "holder.py"
+    script.write_text(
+        "import os, time\n"
+        "import psycopg\n"
+        "connection = psycopg.connect(os.environ['MIZAN_LOCK_DSN'], autocommit=True)\n"
+        "with connection.cursor() as cursor:\n"
+        f"    cursor.execute('SELECT pg_try_advisory_lock(%s)', ({key},))\n"
+        "print('locked', flush=True)\n"
+        "time.sleep(120)\n",
+        encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    environment["MIZAN_LOCK_DSN"] = dsn
+    process = subprocess.Popen(
+        [sys.executable, str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=environment,
+    )
+    try:
+        assert process.stdout.readline().strip() == "locked"
+        probe = _admin(instance.dsn)
+        try:
+            with probe.cursor() as cursor:
+                cursor.execute("SELECT pg_try_advisory_lock(%s)", (key,))
+                assert cursor.fetchone()[0] is False
+        finally:
+            probe.close()
+        process.kill()
+        process.wait(timeout=30)
+        probe = _admin(instance.dsn)
+        try:
+            with probe.cursor() as cursor:
+                cursor.execute("SELECT pg_try_advisory_lock(%s)", (key,))
+                assert cursor.fetchone()[0] is True
+                cursor.execute("SELECT pg_advisory_unlock(%s)", (key,))
+        finally:
+            probe.close()
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=30)
+
+
+@pytest.mark.postgres_integration
 def test_cleanup_refuses_a_similar_name_without_failing_the_owner(source) -> None:
     instance, _dsn_value = source
     workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-similar-"))
@@ -1015,7 +1442,7 @@ def test_cleanup_refuses_while_an_unrelated_session_is_active(source) -> None:
         connect_timeout=5,
     )
     try:
-        with pytest.raises(CleanupError, match="unrelated"):
+        with pytest.raises(CleanupError, match="session"):
             twin.cleanup()
         assert _database_exists(instance.dsn, twin.database.name)
     finally:
@@ -1027,16 +1454,14 @@ def test_cleanup_refuses_while_an_unrelated_session_is_active(source) -> None:
 
 
 @pytest.mark.postgres_integration
-def test_cleanup_terminates_only_the_exact_owned_session(source) -> None:
-    """A stale Mīzān session is terminated; an unrelated one is preserved."""
-    import time
-
+def test_unrelated_session_spoofing_application_name_is_never_terminated(source) -> None:
+    """A client-chosen label is not ownership; its backend must survive."""
     import psycopg
 
     from mizan.postgres_twin import PostgresTwin, app_session_identity
 
     instance, _dsn_value = source
-    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-owned-session-"))
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-spoof-"))
     registry = DatabaseRegistry(workspace / "ownership.json")
     baseline = instance.prepare_baseline(workspace)
     twin = PostgresTwin(
@@ -1050,45 +1475,43 @@ def test_cleanup_terminates_only_the_exact_owned_session(source) -> None:
     )
     twin.start()
     identity = app_session_identity(instance.run_id, "w0")
-    owned = psycopg.connect(
+    spoofed = psycopg.connect(
         database_dsn(instance.dsn, twin.database.name, application_name=identity),
         connect_timeout=5,
     )
-    unrelated = psycopg.connect(
-        database_dsn(instance.dsn, twin.database.name, application_name="unrelated-app"),
-        connect_timeout=5,
-    )
-
-    def sessions() -> dict[str, int]:
+    try:
+        with spoofed.cursor() as cursor:
+            cursor.execute("SELECT pg_backend_pid()")
+            pid = int(cursor.fetchone()[0])
         admin = _admin(instance.dsn)
         try:
             with admin.cursor() as cursor:
                 cursor.execute(
-                    "SELECT application_name, pid FROM pg_stat_activity WHERE datname = %s",
-                    (twin.database.name,),
+                    "SELECT count(*) FROM pg_stat_activity WHERE pid = %s AND datname = %s",
+                    (pid, twin.database.name),
                 )
-                return {str(name): int(pid) for name, pid in cursor.fetchall()}
+                assert cursor.fetchone()[0] == 1, "the spoofed backend was not established"
         finally:
             admin.close()
 
-    try:
-        before = sessions()
-        assert before.get(identity), "the stale owned session was not established"
-        assert before.get("unrelated-app"), "the unrelated session was not established"
-
-        with pytest.raises(CleanupError, match="unrelated"):
+        with pytest.raises(CleanupError, match="session"):
             twin.cleanup()
         assert _database_exists(instance.dsn, twin.database.name)
 
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and identity in sessions():
-            time.sleep(0.1)
-        after = sessions()
-        assert identity not in after, "the exact owned session was not terminated"
-        assert after.get("unrelated-app") == before["unrelated-app"], "the unrelated session was terminated"
+        # The unrelated backend is alive and usable: it was never terminated.
+        with spoofed.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            assert cursor.fetchone() == (1,)
+        admin = _admin(instance.dsn)
+        try:
+            with admin.cursor() as cursor:
+                cursor.execute("SELECT count(*) FROM pg_stat_activity WHERE pid = %s", (pid,))
+                assert cursor.fetchone()[0] == 1, "the spoofed backend was terminated"
+        finally:
+            admin.close()
     finally:
-        unrelated.close()
-        owned.close()
+        spoofed.close()
+        # Retry after the unrelated session disconnects: now it can succeed.
         twin.cleanup()
         cleanup_run(DSN_ENV, workspace, instance.run_id)
     assert not _database_exists(instance.dsn, twin.database.name)
@@ -1199,18 +1622,36 @@ def test_pool_leak_mode_still_releases_connections(source) -> None:
             )
             assert response.status_code == 200
 
+        shutdown = requests.post(twin.base_url + "/pool/shutdown?leak=1", timeout=10).json()
+        assert shutdown["closed"] is True
+        assert shutdown["leak"] is True
+        identity = twin_module.app_session_identity(instance.run_id, "w0")
         admin = _admin(instance.dsn)
         try:
             with admin.cursor() as cursor:
                 cursor.execute(
                     "SELECT count(*) FROM pg_stat_activity WHERE datname = %s AND application_name = %s",
-                    (twin.database.name, twin_module.app_session_identity(instance.run_id, "w0")),
+                    (twin.database.name, identity),
                 )
-                assert cursor.fetchone()[0] >= 3
+                assert cursor.fetchone()[0] >= 3, "a failed pool shutdown must leave its sessions open"
         finally:
             admin.close()
 
-        # Cleanup stops the application and must still release its sessions.
+        # The leaked pool's connections are released explicitly; Mīzān does not
+        # terminate them by label. Cleanup then succeeds on retry.
+        released = requests.post(twin.base_url + "/pool/release", timeout=10).json()
+        assert released["released"] >= 3
+        admin = _admin(instance.dsn)
+        try:
+            with admin.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(*) FROM pg_stat_activity WHERE datname = %s AND application_name = %s",
+                    (twin.database.name, identity),
+                )
+                assert cursor.fetchone()[0] == 0
+        finally:
+            admin.close()
+
         twin.cleanup()
         assert not _database_exists(instance.dsn, twin.database.name)
     finally:

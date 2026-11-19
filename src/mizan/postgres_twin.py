@@ -67,11 +67,22 @@ DATABASE_KINDS = ("seed", "worker")
 #: The marker schema version written into the database comment.
 MARKER_VERSION = 1
 
-#: The stable session identity of an application worker.
+#: A client-controlled label for application sessions. It is NOT a credential:
+#: no backend is terminated or trusted because it carries this value.
 APP_SESSION_PREFIX = "mizan:"
 
 #: Mīzān's own control connections never share the application identity.
 CONTROL_SESSION_PREFIX = "mizan-control:"
+
+#: A backend label is metadata, never a credential. Backends are never
+#: terminated because of this label; they must disconnect on their own.
+SESSION_DRAIN_SECONDS = 5.0
+PREFLIGHT_SESSION_SECONDS = 1.0
+
+#: Namespace for run-level advisory locks. Kept small so a 48-bit run id can
+#: be combined into one signed 64-bit key (the two-integer form is 32-bit).
+RUN_LOCK_NAMESPACE = 0x4D5A
+RUN_LOCK_TIMEOUT_SECONDS = 10.0
 
 #: Objects installed by ``PostgresAuditor`` and therefore excluded from the
 #: application fingerprint (they are verified separately).
@@ -123,6 +134,27 @@ class BaselineVerificationError(TwinLifecycleError):
 
 class CleanupError(TwinLifecycleError):
     """A destructive operation could not be performed safely."""
+
+
+class CleanupPreflightError(OwnershipError):
+    """Whole-run ownership preflight failed; zero databases may be deleted."""
+
+    def __init__(self, reasons: list[str], *, categories: dict[str, str] | None = None) -> None:
+        self.reasons = list(reasons)
+        self.categories = dict(categories or {})
+        super().__init__("cleanup preflight failed: " + "; ".join(self.reasons))
+
+
+class PartialCleanupError(CleanupError):
+    """Some databases were deleted before an operational failure stopped the run."""
+
+    def __init__(self, cleaned: list[str], remaining: list[str], reasons: list[str]) -> None:
+        self.cleaned = list(cleaned)
+        self.remaining = list(remaining)
+        self.reasons = list(reasons)
+        super().__init__(
+            f"partial cleanup: {len(self.cleaned)} deleted, {len(self.remaining)} remaining; " + "; ".join(self.reasons)
+        )
 
 
 class RunInterrupted(TwinLifecycleError):
@@ -1180,27 +1212,6 @@ def _verify_database_ownership(
     return marker
 
 
-def _terminate_owned_sessions(connection: Any, database: str, identity: str) -> int:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT count(*) FROM pg_stat_activity
-            WHERE datname = %s AND application_name = %s AND pid <> pg_backend_pid()
-            """,
-            (database, identity),
-        )
-        owned = int(cursor.fetchone()[0])
-        if owned:
-            cursor.execute(
-                """
-                SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-                WHERE datname = %s AND application_name = %s AND pid <> pg_backend_pid()
-                """,
-                (database, identity),
-            )
-    return owned
-
-
 def _remaining_sessions(connection: Any, database: str) -> list[tuple[int, str]]:
     with connection.cursor() as cursor:
         cursor.execute(
@@ -1214,6 +1225,56 @@ def _remaining_sessions(connection: Any, database: str) -> list[tuple[int, str]]
         return [(int(row[0]), str(row[1])) for row in cursor.fetchall()]
 
 
+def _wait_for_no_sessions(
+    connection: Any, database: str, *, timeout: float = SESSION_DRAIN_SECONDS
+) -> list[tuple[int, str]]:
+    """Give the owned process a short window to disconnect on its own.
+
+    This never inspects or uses the clients' labels. A backend that is still
+    present after the drain window is simply "unowned" and blocks the drop.
+    """
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        remaining = _remaining_sessions(connection, database)
+        if not remaining or time.monotonic() >= deadline:
+            return remaining
+        time.sleep(0.05)
+
+
+@contextlib.contextmanager
+def _run_cleanup_lock(connection: Any, run_id: str) -> Iterator[None]:
+    """Coordinate concurrent cleanups of one run with a session-scoped lock.
+
+    The lock is held on the cleanup connection and disappears when the process
+    dies. It serializes Mīzān cleanups; it never grants deletion authority.
+    """
+    key = (RUN_LOCK_NAMESPACE << 48) + int(run_id, 16)
+    acquired = False
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_try_advisory_lock(%s)", (key,))
+        acquired = bool(cursor.fetchone()[0])
+    if not acquired:
+        deadline = time.monotonic() + RUN_LOCK_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_try_advisory_lock(%s)", (key,))
+                acquired = bool(cursor.fetchone()[0])
+            if acquired:
+                break
+    if not acquired:
+        raise CleanupPreflightError(
+            ["the run cleanup lock is held by another process"],
+            categories={"cleanup_lock": "unavailable"},
+        )
+    try:
+        yield
+    finally:
+        with contextlib.suppress(Exception):
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_unlock(%s)", (key,))
+
+
 def verified_drop(
     admin: Any,
     registry: DatabaseRegistry,
@@ -1221,12 +1282,13 @@ def verified_drop(
     *,
     cluster_id: str,
     source_database: str,
-    application_identity: str | None,
+    session_timeout: float = SESSION_DRAIN_SECONDS,
 ) -> bool:
     """Drop one database only when every proof agrees. Returns whether it existed.
 
-    Identifiers are composed, never interpolated. Unrelated sessions abort the
-    operation instead of being terminated.
+    A backend label is client-controlled and is never used to identify or
+    terminate a session. The only safe signal is the absence of backends after
+    the owned process was stopped; any remaining backend blocks the drop.
     """
     from psycopg import sql
 
@@ -1244,20 +1306,9 @@ def verified_drop(
     if stored is None or stored != record:
         raise OwnershipError("the database to drop is not the record stored in the ownership registry")
     _verify_database_ownership(admin, record=record, cluster_id=cluster_id, source_database=source_database)
-    if application_identity:
-        _terminate_owned_sessions(admin, name, application_identity)
-        # pg_terminate_backend is asynchronous. Wait for the exact owned
-        # identity to disappear so a just-terminated session is not mistaken
-        # for an unrelated one; never wait for, or terminate, anything else.
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline:
-            owned = [pid for pid, identity in _remaining_sessions(admin, name) if identity == application_identity]
-            if not owned:
-                break
-            time.sleep(0.05)
-    remaining = _remaining_sessions(admin, name)
+    remaining = _wait_for_no_sessions(admin, name, timeout=session_timeout)
     if remaining:
-        raise CleanupError(f"refusing to drop {name!r}: {len(remaining)} unrelated session(s) are still connected")
+        raise CleanupError(f"refusing to drop {name!r}: {len(remaining)} session(s) are still connected")
     with admin.cursor() as cursor:
         cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
     registry.update_state(name, TwinState.CLEANED)
@@ -1810,7 +1861,6 @@ class DisposableDatabase:
                 record,
                 cluster_id=cluster,
                 source_database=self.source.source_name(),
-                application_identity=app_session_identity(self.source.run_id, self.worker_id),
             )
         finally:
             admin.close()
@@ -2012,11 +2062,13 @@ class PostgresTwin:
 
 
 def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
-    """Clean every database owned by a recorded run; never guess by prefix.
+    """Clean one run in two phases: whole-run preflight, then sequential drops.
 
-    Every record must pass strict identity validation and match its
-    server-side marker. Any mismatch aborts the whole cleanup. A run that
-    already cleaned its databases is idempotent and returns ``[]``.
+    DISCOVER → VALIDATE_ALL → BUILD_PLAN → RECHECK → DELETE → VERIFY_COMPLETE.
+    PostgreSQL cannot drop several databases in one transaction, so a failure
+    after the first deletion is reported as ``PartialCleanupError`` with the
+    exact completed and remaining databases. No record, marker or session is
+    trusted enough to authorize a drop on its own.
     """
     if not RUN_ID_PATTERN.fullmatch(str(run_id)):
         raise OwnershipError("a run id must be 12 lowercase hexadecimal characters")
@@ -2024,6 +2076,12 @@ def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
     records = [record for record in registry.records() if record.run_id == run_id]
     if not records:
         return []
+    names = [record.database_name for record in records]
+    if len(names) != len(set(names)):
+        raise CleanupPreflightError(
+            ["the run contains duplicate or inconsistent database records"],
+            categories={"registry": "duplicate entry"},
+        )
     dsn = os.environ.get(dsn_env, "")
     if not dsn:
         raise SourceProtectionError(f"environment variable {dsn_env} is not set")
@@ -2042,34 +2100,78 @@ def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
             cluster_id=None,
         )
     admin = _admin(target)
-    cleaned: list[str] = []
     try:
-        cluster = cluster_identity(admin)
-        # Validate the whole set before dropping anything: a single forged
-        # record must not leave the run half cleaned.
-        for record in records:
-            validate_record(
-                record,
-                run_id=run_id,
-                source_database=target.dbname,
-                cluster_id=cluster,
-            )
-        ordered = sorted(records, key=lambda record: (record.kind != "worker", record.worker_id))
-        for record in ordered:
-            identity = app_session_identity(record.run_id, record.worker_id) if record.kind == "worker" else None
-            existed = verified_drop(
-                admin,
-                registry,
-                record,
-                cluster_id=cluster,
-                source_database=target.dbname,
-                application_identity=identity,
-            )
-            if existed:
-                cleaned.append(record.database_name)
+        with _run_cleanup_lock(admin, run_id):
+            cluster = cluster_identity(admin)
+            source_database = target.dbname
+            reasons: list[str] = []
+            categories: dict[str, str] = {}
+
+            # DISCOVER + VALIDATE_ALL: nothing is dropped until every existing
+            # database has passed every server-side check.
+            for record in records:
+                try:
+                    validate_record(record, run_id=run_id, source_database=source_database, cluster_id=cluster)
+                except Exception as exc:
+                    reasons.append(f"{record.database_name}: {exc}")
+                    categories[record.database_name] = "invalid local record"
+
+            plan: list[OwnershipRecord] = []
+            for record in records:
+                name = record.database_name
+                if not database_exists(admin, name):
+                    if record.state is not TwinState.CLEANED:
+                        reasons.append(f"{name}: the database is missing but its record is not CLEANED")
+                        categories[name] = "missing inconsistent"
+                    continue
+                if name in categories:
+                    continue
+                try:
+                    _verify_database_ownership(
+                        admin, record=record, cluster_id=cluster, source_database=source_database
+                    )
+                except Exception as exc:
+                    reasons.append(f"{name}: {exc}")
+                    categories[name] = "invalid marker"
+                    continue
+                if _wait_for_no_sessions(admin, name, timeout=PREFLIGHT_SESSION_SECONDS):
+                    reasons.append(f"{name}: a session is still connected")
+                    categories[name] = "active session"
+                    continue
+                plan.append(record)
+
+            if reasons:
+                raise CleanupPreflightError(reasons, categories=categories)
+
+            # BUILD_PLAN: workers before the seed; only fully validated names.
+            ordered = sorted(plan, key=lambda record: (record.kind != "worker", record.worker_id))
+            remaining = [record.database_name for record in ordered]
+            cleaned: list[str] = []
+            try:
+                for record in ordered:
+                    # RECHECK: a valid preflight never authorizes a later drop.
+                    existed = verified_drop(
+                        admin,
+                        registry,
+                        record,
+                        cluster_id=cluster,
+                        source_database=source_database,
+                    )
+                    if existed:
+                        cleaned.append(record.database_name)
+                    if record.database_name in remaining:
+                        remaining.remove(record.database_name)
+            except Exception as exc:
+                detail = redact(str(exc), secrets=(target.password, target.dsn()))
+                raise PartialCleanupError(cleaned, remaining, [detail]) from None
+
+            # VERIFY_COMPLETE: never report CLEANED for an incomplete run.
+            survived = [record.database_name for record in ordered if database_exists(admin, record.database_name)]
+            if survived:
+                raise PartialCleanupError(cleaned, survived, ["a validated database survived deletion"])
+            return cleaned
     finally:
         admin.close()
-    return cleaned
 
 
 # --------------------------------------------------------------------------- #
