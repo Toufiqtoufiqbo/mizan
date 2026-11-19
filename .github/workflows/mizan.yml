@@ -5,9 +5,15 @@
 #                          MIZAN_REQUIRE_POSTGRES makes a skip a failure:
 #                          a broken database setup must fail the build, not
 #                          quietly remove the only test that proves attribution.
+# B2: PostgreSQL lifecycle - destructive cleanup, ownership proof, signals,
+#                          orphan recovery and pooled sessions. Separate from B
+#                          so a failure in the destructive path is unmistakable.
 # C: security regression  - the regression tests and the proof replay. This is
 #                          the gate: an attack that works fails the build.
 # D: benchmark            - the labelled corpus, reported not asserted.
+# S: status summary       - PASSED / FAILED / SKIPPED / NOT CONFIGURED /
+#                          NOT EXECUTED for every stage, without inventing a
+#                          pass for a job that did not run.
 #
 # External-target testing is opt-in (see the last job): ordinary CI never
 # attacks anything it does not own.
@@ -117,6 +123,58 @@ jobs:
             echo "::error::PostgreSQL tests were skipped"
             exit 1
           fi
+
+  # --------------------------------------------------------------------------
+  # Stage B2 - PostgreSQL lifecycle and destructive cleanup
+  # Everything here creates or deletes a real database, or sends a real signal.
+  # --------------------------------------------------------------------------
+  postgres-lifecycle:
+    name: "B2 - PostgreSQL lifecycle & destructive cleanup"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: mizan
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      MIZAN_TEST_POSTGRES_DSN: postgresql://postgres:mizan@localhost:5432/postgres
+      MIZAN_REQUIRE_POSTGRES: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lifecycle, ownership, signals, pools and orphan recovery
+        # Every test in this job is destructive by design: it creates a seed,
+        # clones workers, drops them, sends SIGINT/SIGTERM, SIGKILLs a child and
+        # recovers it with --cleanup-run. A skip would mean the destructive
+        # boundary was never exercised, so the next step fails on any skip.
+        run: python -m pytest -q tests/test_postgres_twin.py -m postgres_integration
+
+      - name: No skipped destructive test
+        run: |
+          python -m pytest tests/test_postgres_twin.py -m postgres_integration -rs --tb=no -q | tee lifecycle.txt
+          if grep -q "skipped" lifecycle.txt; then
+            echo "::error::a destructive lifecycle test was skipped"
+            exit 1
+          fi
+          if grep -q "no tests ran" lifecycle.txt; then
+            echo "::error::the destructive lifecycle tests did not execute"
+            exit 1
+          fi
+          echo "Status: PASSED - destructive lifecycle executed"
 
   # --------------------------------------------------------------------------
   # Stage C - security regression
@@ -343,3 +401,71 @@ jobs:
           MIZAN_TOKENS: ${{ secrets.MIZAN_TOKENS }}
         run: |
           python -m mizan.cli replay mizan-proofs --target "$MIZAN_TARGET"
+
+  # --------------------------------------------------------------------------
+  # Status summary - never turns a non-run into a pass.
+  # A conditional external target is NOT CONFIGURED when the variable is
+  # empty; if it is configured but the job did not execute, NOT EXECUTED.
+  # --------------------------------------------------------------------------
+  status-summary:
+    name: "S - status summary"
+    if: always()
+    needs:
+      - static-and-unit
+      - postgres-integration
+      - postgres-lifecycle
+      - security-regression
+      - benchmark
+      - self-scan
+      - independent-validation
+      - cross-framework
+      - external-target
+    runs-on: ubuntu-latest
+    env:
+      MIZAN_TARGET_CONFIGURED: ${{ vars.MIZAN_TARGET != '' }}
+    steps:
+      - name: Report every stage honestly
+        env:
+          A: ${{ needs.static-and-unit.result }}
+          B: ${{ needs.postgres-integration.result }}
+          B2: ${{ needs.postgres-lifecycle.result }}
+          C: ${{ needs.security-regression.result }}
+          D: ${{ needs.benchmark.result }}
+          E: ${{ needs.self-scan.result }}
+          F: ${{ needs.independent-validation.result }}
+          G: ${{ needs.cross-framework.result }}
+          G_EXTERNAL: ${{ needs.external-target.result }}
+        run: |
+          python - <<'PY'
+          import os
+
+          def state(result: str) -> str:
+              return {
+                  "success": "PASSED",
+                  "failure": "FAILED",
+                  "cancelled": "FAILED",
+                  "skipped": "SKIPPED",
+              }.get(result or "skipped", "NOT EXECUTED")
+
+          rows = [
+              ("A - static & unit", state(os.environ["A"])),
+              ("B - PostgreSQL", state(os.environ["B"])),
+              ("B2 - PostgreSQL lifecycle & destructive cleanup", state(os.environ["B2"])),
+              ("C - security regression", state(os.environ["C"])),
+              ("D - benchmark", state(os.environ["D"])),
+              ("E - self-scan", state(os.environ["E"])),
+              ("F - independent application", state(os.environ["F"])),
+              ("G - cross-framework gate", state(os.environ["G"])),
+          ]
+          if os.environ["MIZAN_TARGET_CONFIGURED"] != "true":
+              rows.append(("G - external target (opt-in)", "NOT CONFIGURED"))
+          else:
+              rows.append(("G - external target (opt-in)", state(os.environ["G_EXTERNAL"])))
+
+          print("| Stage | Status |")
+          print("|---|---|")
+          for name, value in rows:
+              print(f"| {name} | {value} |")
+          if any(value in {"FAILED", "NOT EXECUTED"} for _, value in rows):
+              raise SystemExit("a mandatory stage did not pass")
+          PY

@@ -10,18 +10,20 @@ that made it.
 Identity provenance
 -------------------
 
-The identity travels in ``application_name``, the standard way for a connection
-to say who it is acting for::
+The principal travels in the transaction-local setting ``mizan.principal``::
 
-    SET LOCAL application_name = 'mizan:' || current_user_id;
+    SET LOCAL mizan.principal = 'alice';
 
 ``SET LOCAL`` is transaction-scoped: the value is reset at the end of the
 transaction, so a pooled connection cannot leak one user's identity into the
-next user's work.
+next user's work. An older application may instead use
+``SET LOCAL application_name = 'mizan:alice'``; that legacy form is still read,
+and a stable session identity (``mizan:<run_id>:<worker_id>``) is never treated
+as a principal.
 
 .. warning::
 
-    ``application_name`` is **metadata, not authentication**. Anybody who can
+    Both settings are **metadata, not authentication**. Anybody who can
     run SQL on that connection can claim any identity. The attribution is only
     as trustworthy as the application's ability to control its own database
     connections - which is exactly the assumption an audit of *your own*
@@ -38,6 +40,7 @@ next user's work.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -53,6 +56,10 @@ AUDIT_FUNCTION = "mizan_write_audit_fn"
 
 #: The prefix that marks an application name as carrying an identity.
 PRINCIPAL_PREFIX = "mizan:"
+
+#: A stable session identity is ``mizan:<12 hex>:<worker>``. It is ownership
+#: metadata, never a principal.
+_SESSION_IDENTITY = re.compile(r"mizan:[0-9a-f]{12}:[a-z0-9][a-z0-9_-]{0,31}")
 
 #: Columns that usually name the owner of a row.
 OWNER_COLUMNS = ("owner_id", "user_id", "owner", "account_id", "tenant_id")
@@ -296,7 +303,13 @@ class PostgresAuditor:
             INSERT INTO {self.audit_table}
                 (raw_principal, request_id, schema_name, table_name, row_id, row_identity, operation, row_data, old_row)
             VALUES (
-                current_setting('application_name', true),
+                COALESCE(
+                    CASE
+                        WHEN NULLIF(current_setting('mizan.principal', true), '') IS NOT NULL
+                        THEN 'mizan:' || current_setting('mizan.principal', true)
+                    END,
+                    current_setting('application_name', true)
+                ),
                 COALESCE(current_setting('mizan.request_id', true), ''),
                 TG_TABLE_SCHEMA,
                 TG_TABLE_NAME,
@@ -450,14 +463,18 @@ class PostgresAuditor:
         )
 
     def principal_from(self, raw_principal: str | None) -> str:
-        """The principal an ``application_name`` claims.
+        """The principal an ``application_name`` or ``mizan.principal`` claims.
 
-        An absent or malformed application name yields
-        :data:`UNKNOWN_PRINCIPAL` - never an arbitrary identity.
+        An absent or malformed identity yields :data:`UNKNOWN_PRINCIPAL` -
+        never an arbitrary identity. A stable session identity
+        (``mizan:<run_id>:<worker_id>``) names the connection, not a person,
+        and is never accepted as a principal.
         """
         if not raw_principal:
             return UNKNOWN_PRINCIPAL
         if not raw_principal.startswith(self.principal_prefix):
+            return UNKNOWN_PRINCIPAL
+        if _SESSION_IDENTITY.fullmatch(raw_principal):
             return UNKNOWN_PRINCIPAL
         principal = raw_principal[len(self.principal_prefix) :].strip()
         return principal or UNKNOWN_PRINCIPAL

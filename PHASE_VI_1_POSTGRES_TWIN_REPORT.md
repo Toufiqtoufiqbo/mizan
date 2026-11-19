@@ -1,5 +1,12 @@
 # Mīzān Phase VI.1 — Disposable PostgreSQL Twin
 
+> **Phase VI.2 supersedes the lifecycle guarantees described here.** This report
+> is kept as the record of what VI.1 delivered. VI.2 replaced the local-JSON-only
+> cleanup boundary, applied the schema allowlist to the dump, moved credentials
+> out of child-process arguments, made process shutdown mandatory, separated
+> session identity from the principal and rebuilt the fingerprint. See
+> `PHASE_VI_2_SECURITY_HARDENING_REPORT.md` for the current guarantees.
+
 ## 1. Executive summary
 
 Phase VI.1 adds a genuine disposable PostgreSQL Twin lifecycle. The source
@@ -31,22 +38,29 @@ produced a confirmed L3 finding while the source fingerprint remained unchanged.
 
 ## 3. Clone strategy and rationale
 
-Hybrid: `pg_dump -Fc` from the source into a seed database, then
-`CREATE DATABASE worker TEMPLATE seed` per worker. Template cloning copies
-schema, data, indexes, constraints and sequences quickly; database-level grants
-are explicitly re-applied by owning the clone as the run role. Logical dump per
+Hybrid: a plain-SQL `pg_dump --format=plain --no-owner --no-privileges` of the
+source is applied to a seed database with `psql`, then
+`CREATE DATABASE worker TEMPLATE seed` per worker. The dump is restricted to
+the configured schema allowlist with one `--schema` flag per schema, so an
+un-allowlisted schema is never copied. Template cloning copies schema, data,
+indexes, constraints and sequences quickly; database-level grants are
+explicitly re-applied by owning the clone as the run role. Logical dump per
 probe was rejected as too slow; filesystem copies are unsafe for a live server.
 `CREATE DATABASE` runs outside a transaction; active seed sessions are checked
-before cloning. Missing `pg_dump`/`pg_restore` fails closed.
+before cloning. Missing `pg_dump`/`psql` fails closed. Credentials are supplied
+through a temporary `PGPASSFILE` (0600) and `pg_dump`/`psql` never receive a
+password-bearing DSN in their arguments (Phase VI.2 hardening).
 
 ## 4. Source database protection
 
 The source DSN is read from an environment variable only. Source access is
 limited to read-only catalog/dump operations; no audit triggers are installed
 there and no attack request targets it. Its canonical fingerprint is asserted
-before and after prepare, restore, probe execution and cleanup. Cleanup refuses
-any database without a run-owned record and never drops the source or seed by
-name. Evidence from the CLI run: `source_unchanged: true`.
+before and after prepare, restore, probe execution and cleanup. Cleanup requires
+a matching local record **and** a server-side ownership marker that agrees on
+run, kind, worker, source, cluster identity (`pg_control_system()`), owner role
+and nonce; it never drops the source or seed by name alone and never guesses by
+name prefix. Evidence from the CLI run: `source_unchanged: true`.
 
 ## 5. Worker isolation
 
@@ -57,11 +71,14 @@ did not change worker 1. Fingerprints after mutation differed.
 
 ## 6. Restoration procedure
 
-`restore()`: stop and reap the application process, close Mīzān-owned
-connections, terminate only sessions whose `application_name` carries this
-run/worker id, drop and re-clone the worker database from the seed, reinstall
-audit triggers, restart the application, wait for a real health check, compare
-the canonical fingerprint, then mark `VERIFIED`/`READY`. Cleanup is idempotent.
+`restore()`: stop and reap the application (the exit is observed, not assumed),
+close Mīzān-owned connections, terminate only sessions whose stable
+`application_name` is exactly `mizan:<run_id>:<worker_id>`, drop and re-clone the
+worker database from the seed, reinstall audit triggers, restart the
+application, wait for a real health check, compare the canonical fingerprint,
+then mark `VERIFIED`/`READY`. A connection pool of any size is therefore
+released before the drop; an unrelated session aborts the drop. Cleanup is
+idempotent.
 
 ## 7. Attribution model
 
@@ -81,7 +98,11 @@ mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --schema app \
 mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --cleanup-run RUN_ID
 ```
 
-DSNs never appear in arguments, logs, reports or proof bundles.
+`--workers N` provisions N isolated worker databases and processes. `--exercise`
+executes the L2/L3 probes against **worker `w0` only**; the other workers prove
+database/process isolation. A `--dry-run` validates the DSN, tools, allowlist
+and fingerprint without creating any database and reports `DRY_RUN_OK`, never
+`VERIFIED`. DSNs never appear in arguments, logs, reports or proof bundles.
 
 ## 9. Tests executed
 
@@ -89,8 +110,8 @@ Commands and results (all against real PostgreSQL via `pgserver` unless noted):
 
 - `python -m pytest -q` — **633 passed** before the three final failure-injection
   tests were added; final full-suite count recorded below.
-- `python -m pytest tests/test_postgres_twin.py -q` — **12 passed**
-  (9 unit/failure injection + 3 real-server integration).
+- `python -m pytest tests/test_postgres_twin.py -q` — **17 passed**
+  (13 unit/failure injection + 4 real-server integration).
 - `python -m pytest tests/test_postgres_ownership_integration.py -q` — 16 passed.
 - `python -m pytest tests/test_postgres_audit.py tests/test_postgres_roundtrip.py
   tests/test_postgres_attribution.py -q` — legacy + Phase VI attribution tests pass.
@@ -101,6 +122,11 @@ Commands and results (all against real PostgreSQL via `pgserver` unless noted):
 Final full suite: **`641 passed, 1 warning in 490.66s`** (`python -m pytest -q`).
 
 ## 10. Benchmark results
+
+These are the VI.1 single-run observations. Phase VI.2 replaced the benchmark
+with executed assertions plus repetitions/median/P95; see
+`PHASE_VI_2_SECURITY_HARDENING_REPORT.md` and
+`benchmarks/postgres_twin/results.json` for the current numbers.
 
 `python -m benchmarks.postgres_twin.run` (Python 3.11.9, PostgreSQL 16.2,
 2 workers, local disposable pgserver, `pgstore` fixture schema):
@@ -134,17 +160,19 @@ Full breakdown: `benchmarks/postgres_twin/results.json`.
 
 ## 12. CI results
 
-- CI on implementation commit `3bd6601dee170ae065119ad9c4953fbbe18c80fb`:
-  run **44388731217** (#237), conclusion **success**. Jobs A (static & unit),
-  B (PostgreSQL, now including the Twin lifecycle and both PostgreSQL
-  benchmarks), C (security regression), D (benchmark), E (self-scan),
-  F (independent application) and G (cross-framework) all succeeded.
-  Job `G - external target (opt-in)` was **SKIPPED**, not PASSED.
+- CI on the implementation commits `2b9c6ce` and `3bd6601`: run
+  **44388731217** (#237), conclusion **success**.
+- CI on the documentation commit `3f3f779d074a7ee05c76fbd2ff59477c126a8ce5`:
+  run **44390730758** (#238), conclusion **success**. Jobs A (static & unit),
+  B (PostgreSQL, including the Twin lifecycle and both PostgreSQL benchmarks),
+  C (security regression), D (benchmark), E (self-scan), F (independent
+  application) and G (cross-framework) all succeeded. Job
+  `G - external target (opt-in)` was **SKIPPED**, not PASSED.
 - Earlier CI runs #235 and #236 failed in stage B because the hosted runner's
-  `pg_dump`/`pg_restore` client emitted `transaction_timeout`, which PostgreSQL
-  16 does not recognize. The baseline now uses plain SQL with session-parameter
-  filtering; run #237 passed.
-- The final documentation commit's CI result is recorded in the delivery message.
+  `pg_dump` client emitted `transaction_timeout`, which PostgreSQL 16 does not
+  recognize. The baseline now uses plain SQL with session-parameter filtering;
+  run #237 passed on the last implementation commit and #238 on the VI.1 report
+  commit.
 
 ## 13. Known limitations
 
@@ -161,25 +189,26 @@ Implementation commits: `08b434631b612744c6c9a68b5f7cbee59037f408`
 dump/restore) and `3bd6601dee170ae065119ad9c4953fbbe18c80fb` (client-version
 compatibility). CI run #237 succeeded on the last implementation commit.
 
-Final HEAD (documentation commit adding this report): PENDING_HEAD_SHA
+Final VI.1 HEAD (documentation commit adding this report):
+`3f3f779d074a7ee05c76fbd2ff59477c126a8ce5`; CI run #238 succeeded on it.
 Branch `feat/postgres-ownership-graph`; base `main` at
 `0ffc1f606f9e3e40b60f9fcd23bb54afb2d3d238`; `stash@{0}` preserved.
 
 ## 15. Final verdict
 
-**INCOMPLETE.** The disposable Twin lifecycle is implemented and demonstrated:
-source protection, worker isolation, canonical baseline restoration, L2/L3
-probe execution, cleanup and the listed failure injections all have real
-evidence. The following guarantees remain unverified, so the phase is not
-declared `READY FOR REVIEW`:
+**INCOMPLETE at the time of VI.1.** The disposable Twin lifecycle was
+implemented and demonstrated: source protection, worker isolation, canonical
+baseline restoration, L2/L3 probe execution, cleanup and the listed failure
+injections all had real evidence. The following guarantees were not yet
+verified, which is why VI.2 was commissioned:
 
 - SIGINT/SIGTERM and abrupt process interruption during a probe were not
-  injected; orphan handling is designed but not experimentally proven.
-- Termination of unrelated PostgreSQL sessions was not injected; the code
-  filters by database and run-owned `application_name`, but no adversarial
-  session was created to prove the filter.
-- Connection-pool shutdown injection was not performed; the fixture opens a
-  connection per request, so no long-lived application pool exists to test.
+  injected; orphan handling was designed but not experimentally proven.
+- Termination of unrelated PostgreSQL sessions was not injected.
+- Connection-pool shutdown injection was not performed; the fixture opened a
+  connection per request, so no long-lived application pool existed to test.
+- The cleanup boundary trusted the local JSON registry; later review (VI.2
+  finding A) showed that this alone must never authorize deletion.
 - Cluster-wide role/tablespace objects are outside the dump; required roles are
   assumed to exist.
 

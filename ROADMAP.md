@@ -42,18 +42,22 @@
       own data and port, split the probes between them
 - [x] **CI gate**: `mizan replay` replays every proven attack against a target
       and fails when one still works
-- [x] **Postgres auditor**: an audit table and a trigger, with the identity in
-      `application_name`; primary keys read from the catalog (`id`, UUID, text,
+- [x] **Postgres auditor**: an audit table and a trigger, with the principal in
+      the transaction-local `mizan.principal` setting and a stable session
+      identity for ownership (legacy `application_name` principals still
+      accepted); primary keys read from the catalog (`id`, UUID, text,
       composite); tables without a key are unidentified, never misattributed;
       `SET LOCAL` keeps the identity inside the transaction; the round trip is
-      covered by real-server tests (15 of them, in CI and locally)
+      covered by real-server tests (in CI and locally)
 - [x] **PostgreSQL ownership evidence**: schema-qualified introspection,
       composite keys, a monotonic audit cursor, request correlation and an
       explicit attribution state feed the existing ownership graph and L2/L3
       evidence paths (Phase VI)
-- [x] **PostgreSQL disposable-target restoration**: immutable seed plus
-      per-worker template clones, canonical baseline verification and safe
-      cleanup (Phase VI.1); PostgreSQL attack/twin mode is available only with
+- [x] **PostgreSQL disposable-target restoration**: schema-allowlisted
+      immutable seed plus per-worker template clones, canonical fingerprint,
+      verified ownership (local record + server marker + cluster identity +
+      owner + nonce), mandatory process shutdown and safe cleanup (Phase VI.1,
+      hardened in VI.2); PostgreSQL attack/twin mode is available only with
       explicit `--allow-disposable` authorization
 - [x] **An identity map in the CLI** (`--identity-map`): already implemented
       with dedicated tests (`tests/test_identity_map.py`); this entry was stale

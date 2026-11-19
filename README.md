@@ -520,41 +520,58 @@ Three capabilities must not be confused:
   request correlation.
 - **Ownership-graph evidence** — schema/rows/cursor supplied to the existing
   graph; candidate, unknown and contradictory ownership remain unresolved.
-- **End-to-end attack support** — **not available for PostgreSQL**. `Twin`
-  restores filesystem snapshots, which cannot restore a live database, so
-  attack/twin mode fails closed until a disposable clone is implemented and
-  verified. The `postgres-evidence` command is read-only and reports
+- **End-to-end attack support** — available only through the dedicated
+  `mizan postgres-twin --allow-disposable` command (Phase VI.1/VI.2). The
+  generic `scan`/`attack` path is not wired to a disposable PostgreSQL clone and
+  fails closed. The `postgres-evidence` command remains read-only and reports
   `INCONCLUSIVE` because it runs no authorization probes.
 
 Unattributed, missing-correlation and ambiguously attributed writes are
 reported as inconclusive outcomes, never as confirmed L3 violations.
 
 
-## PostgreSQL disposable Twin (Phase VI.1)
+## PostgreSQL disposable Twin (Phase VI.1/VI.2)
 
-`mizan postgres-twin` prepares an immutable seed from the configured source,
-clones one disposable database per worker, verifies each worker against a
-canonical baseline digest, executes L2/L3 probes on an isolated clone, and
-cleans up only databases with a recorded ownership for the current run.
+`mizan postgres-twin` prepares an immutable, schema-allowlisted seed from the
+configured source, clones one disposable database per worker, verifies each
+worker against a canonical baseline digest, executes L2/L3 probes on an isolated
+clone, and cleans up every database through verified ownership.
 
 ```bash
 export MIZAN_DATABASE_URL='postgresql://user:password@host/source'
 mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --schema app \
   --allow-disposable --workers 2 --exercise
+mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --cleanup-run RUN_ID
 ```
 
-`--dry-run` prepares and verifies the seed only. `--cleanup-run RUN_ID` drops
-only databases recorded as owned by that run. The source DSN is never printed;
+`--dry-run` validates the DSN, tools, allowlist and fingerprint **without
+creating any database** and reports `DRY_RUN_OK` (never `VERIFIED`).
+`--workers N` provisions N isolated databases and processes; `--exercise`
+executes the L2/L3 probes against worker `w0` only. `--cleanup-run RUN_ID`
+recovers databases left by an interrupted run. The source DSN is never printed;
 passwords and tokens never appear in CLI arguments, logs, reports or proof
-bundles. `--allow-disposable` is mandatory before any database is created.
+bundles — `pg_dump`/`psql` receive credentials through a temporary `PGPASSFILE`.
+`--allow-disposable` is mandatory before any database is created.
 
 The source database is never an attack target, never receives audit triggers,
-and its canonical fingerprint is asserted before and after the run. Workers use
-distinct cloned databases; a restore stops the application, closes this run's
-connections, re-clones from the seed, reinstalls audit infrastructure, restarts
-the application and only then marks the worker READY. Cleanup is idempotent and
-refuses databases without a matching ownership record.
+and its canonical fingerprint is asserted before and after the run. Only the
+configured schemas are dumped, fingerprinted and cloned. Workers use distinct
+cloned databases with a stable session identity (`mizan:<run_id>:<worker_id>`);
+the principal and request id travel in transaction-local settings. A restore
+stops the application and observes its exit, closes this run's connections,
+terminates only its exact owned sessions (a pool of any size is released),
+re-clones from the seed, reinstalls audit infrastructure, restarts the
+application and only then marks the worker READY. An unrelated session aborts
+the drop; it is never terminated.
+
+Cleanup requires a local record **and** a server-side database marker that agree
+on run, kind, worker, source, cluster identity (`pg_control_system()`), owner
+role and nonce. A local JSON record alone never authorizes deletion, no
+`DROP DATABASE ... WITH (FORCE)` is used, and cleanup is idempotent. The final
+status is emitted only after cleanup; a failure exits non-zero with
+`cleanup_failed` and preserves the records for `--cleanup-run`.
 
 Still unsupported: arbitrary production databases without the required
-privileges, cluster-wide role/tablespace changes, and non-disposable target
-execution. A skipped external target is always reported as SKIPPED, not PASSED.
+privileges, cluster-wide role/tablespace/extension changes, and non-disposable
+target execution. A skipped external target is always reported as SKIPPED, not
+PASSED.

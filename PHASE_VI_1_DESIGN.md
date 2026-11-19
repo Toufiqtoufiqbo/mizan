@@ -88,9 +88,10 @@ plus `FAILED`:
 
 - `PostgresSource` — DSN from environment only; read-only baseline preparation;
   never an attack target.
-- `ImmutableBaseline` — seed database built once per run via logical dump of
-  the source (or an explicit seed builder when pg_dump is unavailable), with a
-  canonical fingerprint and no active sessions before cloning.
+- `ImmutableBaseline` — seed database built once per run via an allowlisted
+  plain-SQL dump of the source, with a canonical fingerprint and no active
+  sessions before cloning. A missing `pg_dump`/`psql` fails closed; there is no
+  fallback seed builder.
 - `DisposableDatabase` — generated name, durable ownership record (run id,
   worker id, state, creation time), template clone from the baseline, explicit
   cleanup authorization, and verified non-identity with the source.
@@ -105,9 +106,11 @@ plus `FAILED`:
 ## 10. Clone strategy decision
 
 **Selected: hybrid — immutable seed + per-worker template cloning.**
-`pg_dump --format=custom` from the source into a seed database gives a
+`pg_dump --format=plain` from the source into a seed database gives a
 consistent baseline without modifying the source; each worker database is then
-created with `CREATE DATABASE ... TEMPLATE seed`. Template cloning is fast and
+created with `CREATE DATABASE ... TEMPLATE seed`. The dump is restricted to the
+allowlisted schemas (`--schema` per schema) and receives credentials through a
+temporary `PGPASSFILE`, never in its arguments. Template cloning is fast and
 copies schema, data, indexes, constraints, sequences and extensions. It does
 not copy database-level grants, so each clone explicitly re-applies the run
 role's privileges. Active sessions on the seed are prohibited and checked.
@@ -131,10 +134,15 @@ source database.
 ## 11. Verification plan
 
 Baseline verification uses a canonical digest over schema-qualified table names,
-column definitions, primary/unique keys, foreign keys, indexes, constraints,
-row counts **and canonical row identities** (`[table, [(pk columns, values)]]`
-serialized deterministically), sequence values, and audit-table presence. A
-worker may only be marked `READY` when its digest equals the seed digest.
+column definitions and defaults, identity definitions, primary/unique keys,
+foreign keys, indexes, constraints, triggers, functions, row counts **and
+canonical row identities** (primary-key order when a key exists, canonical
+typed sorting otherwise), and sequence state including `is_called`.
+Cluster-wide objects (roles, tablespaces, extensions, user-defined types,
+publications) are explicitly outside this digest. Mīzān's own audit objects are
+excluded from the application digest and verified separately as a documented
+initialization effect. A worker may only be marked `READY` when its application
+digest equals the seed digest and its audit state equals the expected state.
 
 Source protection is proven by hashing the source digest before and after
 prepare/attack/restore/cleanup and asserting equality, plus assertions that no

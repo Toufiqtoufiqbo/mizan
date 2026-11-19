@@ -22,7 +22,11 @@ gap analysis is in `PHASE_VI_POSTGRES_GAP_AUDIT.md`.
   cursor; transaction-local request correlation; explicit attribution states.
 - `src/mizan/postgres_audit.py`: audit table/function record `mizan.request_id`;
   `read(since_id=...)` orders by the `BIGSERIAL id`; old 9-column event rows
-  still load. Trigger installation remains an explicit operation.
+  still load. The trigger takes the principal from the transaction-local
+  `mizan.principal` setting set by the application; a stable session identity
+  (`mizan:<run_id>:<worker_id>`) is never accepted as a principal. Legacy
+  `mizan:<principal>` application names still work. Trigger installation
+  remains an explicit operation.
 - `src/mizan/taint.py`: `WriteEvent.attribution` distinguishes confirmed,
   unknown-principal, missing-request and ambiguous writes; only confirmed
   writes can become L3 findings.
@@ -97,11 +101,12 @@ of general PostgreSQL accuracy.
 
 ## 6. Database restoration guarantees
 
-**Phase VI.1 addendum:** a disposable PostgreSQL Twin now exists
-(`postgres_twin.py`) with immutable seed cloning, per-worker databases,
-canonical baseline verification and idempotent cleanup. PostgreSQL attack/twin
-execution is available through `mizan postgres-twin --allow-disposable`; see
-`PHASE_VI_1_POSTGRES_TWIN_REPORT.md` for the demonstrated guarantees. The
+**Phase VI.1/VI.2 addendum:** a disposable PostgreSQL Twin now exists
+(`postgres_twin.py`) with an allowlisted immutable seed, per-worker databases,
+a canonical baseline fingerprint, verified cleanup (local record + server-side
+marker + cluster identity + owner + nonce) and idempotent reruns. PostgreSQL
+attack execution is available through `mizan postgres-twin --allow-disposable`.
+See `PHASE_VI_2_SECURITY_HARDENING_REPORT.md` for the current guarantees. The
 statements below describe Phase VI at the time it was written.
 
 **PostgreSQL attack/twin mode is not implemented and fails closed.** `Twin`
@@ -119,6 +124,9 @@ would be false; see the gap audit for the required design.
   enforcement.
 - `application_name` and request correlation are metadata, not authentication.
   They are only as trustworthy as the application's control of its connections.
+  The disposable Twin uses a stable `mizan:<run_id>:<worker_id>` session
+  identity for ownership, while the principal and request id travel separately
+  in transaction-local settings.
 - Background writes without request correlation are recorded as inconclusive
   and are not folded into nearby HTTP requests.
 - Composite row identity is canonical in `row_key`; the legacy trigger `row_id`
@@ -127,7 +135,9 @@ would be false; see the gap audit for the required design.
 
 ## 8. Explicitly unsupported scenarios
 
-- PostgreSQL end-to-end attack/twin/parallel probing (no disposable restoration).
+- PostgreSQL end-to-end attack/twin/parallel probing through the generic
+  `scan`/`attack` path (the dedicated `mizan postgres-twin` command exists; the
+  generic engine path is not wired to it).
 - Automatic trigger installation or reset of a production/shared database.
 - Unqualified table declarations when several allowlisted schemas match.
 
@@ -138,12 +148,13 @@ would be false; see the gap audit for the required design.
 is the commit whose code, tests, fixture, benchmark and CI results are measured
 above.
 
-## 10. Exact final HEAD SHA
+## 10. Report history and superseding work
 
-The documentation-only commit adding this report is the final HEAD of
-`feat/postgres-ownership-graph`; its exact SHA is recorded in the final delivery
-message. Local and remote heads match after the final push. `main` and
-`stash@{0}` are unchanged.
+This Phase VI report was committed in `91aed29` and amended in `08b4346` when
+the VI.1 addendum was added. The Phase VI implementation SHA it measures is
+`37b507b6a7ba7ef2016f381ca852bea8986e8674`. Later phases (VI.1 and VI.2) changed
+the Twin lifecycle and this report therefore points to their reports for the
+current state. `main` and `stash@{0}` were not modified by those phases.
 
 ## 11. CI run IDs and job conclusions
 
@@ -155,13 +166,15 @@ message. Local and remote heads match after the final push. `main` and
   integration module resolved its server at import time, which pytest counted
   as a skip when stage A deselected `postgres_integration`. No test failed.
 - This was fixed by resolving the DSN lazily inside executing fixtures only.
-  Local stage A now reports `593 passed, 31 deselected`, zero skipped.
+  Local stage A reported `593 passed, 31 deselected`, zero skipped.
 - A second CI run exposed a timing-dependent `INCONCLUSIVE` in the adversarial
   `clean` control: writes to rows created only by mutation probes, with no
   discovered API resource, were counted as unresolved checks. Their relevance
   filter now requires a known resource key, table, or row identity; genuinely
   ambiguous mappings for known resources remain inconclusive. Local stage A,
-  V.2.x soundness suites and both benchmarks pass after the fix.
-- The CI run ID and conclusions for the final HEAD are recorded in the final
-  delivery message. The optional external-target job remains `SKIPPED`, not
+  V.2.x soundness suites and both benchmarks passed after the fix.
+- Runs #235 and #236 later failed in stage B for an unrelated reason: the
+  hosted runner's `pg_dump` client emitted `transaction_timeout`, which
+  PostgreSQL 16 does not recognize. That was fixed in VI.1; runs #237 and #238
+  are green. The optional external-target job remains `SKIPPED`, never
   `PASSED`.
