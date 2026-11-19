@@ -239,6 +239,13 @@ A final `S - status summary` job reads every job result and prints
 `NOT CONFIGURED` when its variable is empty and `NOT EXECUTED` if it was
 configured but produced no result; it is never shown as passed.
 
+Result for implementation commit `1ed2f779acce705a55f3272fa013dd9a9061f8ad`:
+workflow run **44515424790** (#239), conclusion **success**. Jobs A (static &
+unit), B (PostgreSQL), B2 (PostgreSQL lifecycle & destructive cleanup), C
+(security regression), D (benchmark), E (self-scan), F (independent
+application), G (cross-framework gate) and S (status summary) all succeeded.
+`G - external target (opt-in)` was **SKIPPED**, never passed.
+
 ## 13. Documentation reconciliation
 
 - `PHASE_VI_1_POSTGRES_TWIN_REPORT.md`: plain `pg_dump` + `psql` (not `-Fc`),
@@ -295,9 +302,11 @@ configured but produced no result; it is never shown as passed.
 
 ## 16. Final verdict
 
-Local verification and the adversarial suite described above pass; CI status
-and the exact run/commit are recorded in the delivery message and in the CI
-summary. The destructive path stays behind `--allow-disposable` and refuses to
-act unless every ownership proof agrees.
+Local verification gave `667 passed, 3 skipped, 1 warning in 580.36 s`. CI on
+the implementation commit `1ed2f779acce705a55f3272fa013dd9a9061f8ad` was run
+**44515424790** (#239), conclusion **success**, with A, B, B2, C, D, E, F, G
+and S all PASSED and the external target SKIPPED. The destructive path stays
+behind `--allow-disposable` and refuses to act unless every ownership proof
+agrees.
 
 **Verdict: READY FOR REVIEW.**
