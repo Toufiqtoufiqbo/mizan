@@ -151,8 +151,12 @@ killed after PostgreSQL confirmed the database absent and before the registry
 completion update; the retry reconciled the pending intent, cleaned the two
 remaining databases, reported all three in `cleaned`, and ended `CLEANED`.
 Recreated-OID and tampered-intent tests both rejected with `PREFLIGHT_FAILED`
-and left every database present. Exact CI evidence is recorded in the delivery
-message.
+and left every database present.
+
+CI on implementation commit `f3f6c0054230681060054fc2cbac4b3e3cb42f3b`:
+workflow run **44626896384** (#245), conclusion **success**. Jobs A, B, B2,
+C, D, E, F, G and S all succeeded; the external-target opt-in was SKIPPED.
+The documentation/evidence commit's run is recorded in the delivery message.
 
 ## 8. Remaining limitations
 
