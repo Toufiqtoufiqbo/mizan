@@ -41,7 +41,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -66,6 +66,40 @@ DATABASE_KINDS = ("seed", "worker")
 
 #: The marker schema version written into the database comment.
 MARKER_VERSION = 1
+
+#: Reserved registry keys hold durable deletion intents, never ownership records.
+DELETION_INTENTS_KEY = "__deletion_intents__"
+
+
+#: Directory fsync is used after the registry rename where the OS supports it.
+def _directory_fsync_supported() -> bool:
+    if os.name != "posix":
+        return False
+    probe = Path(tempfile.gettempdir()) / f".mizan-dirfsync-{os.getpid()}"
+    try:
+        probe.mkdir(exist_ok=True)
+        descriptor = os.open(probe, os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        os.fsync(descriptor)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(descriptor)
+        try:
+            probe.rmdir()
+        except OSError:  # pragma: no cover - probe cleanup is best effort
+            pass
+
+
+DIRECTORY_FSYNC_SUPPORTED = _directory_fsync_supported()
+
+#: Test instrumentation hooks. ``None`` during normal operation; only the real
+#: process crash-recovery tests install them.
+INTENT_TEST_HOOK: Callable[[str], None] | None = None
+DELETION_TEST_HOOK: Callable[[str], None] | None = None
 
 #: A client-controlled label for application sessions. It is NOT a credential:
 #: no backend is terminated or trusted because it carries this value.
@@ -1004,6 +1038,99 @@ class OwnershipRecord:
             raise OwnershipError("an ownership record is incomplete or malformed") from None
 
 
+class IntentState(StrEnum):
+    DELETE_PENDING = "DELETE_PENDING"
+    CLEANED = "CLEANED"
+
+
+@dataclass(frozen=True)
+class DeletionIntent:
+    """A durable, pre-deletion proof bound to one exact database OID."""
+
+    run_id: str
+    database_name: str
+    kind: str
+    worker_id: str
+    source_database: str
+    cluster_id: str
+    owner_role: str
+    nonce: str
+    oid: int
+    marker_digest: str
+    operation_id: str
+    created_at: float
+    state: IntentState = IntentState.DELETE_PENDING
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "database_name": self.database_name,
+            "kind": self.kind,
+            "worker_id": self.worker_id,
+            "source_database": self.source_database,
+            "cluster_id": self.cluster_id,
+            "owner_role": self.owner_role,
+            "nonce": self.nonce,
+            "oid": self.oid,
+            "marker_digest": self.marker_digest,
+            "operation_id": self.operation_id,
+            "created_at": self.created_at,
+            "state": str(self.state),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> DeletionIntent:
+        if not isinstance(data, dict):
+            raise OwnershipError("a deletion intent is not an object")
+        try:
+            intent = cls(
+                run_id=str(data["run_id"]),
+                database_name=str(data["database_name"]),
+                kind=str(data["kind"]),
+                worker_id=str(data["worker_id"]),
+                source_database=str(data["source_database"]),
+                cluster_id=str(data["cluster_id"]),
+                owner_role=str(data["owner_role"]),
+                nonce=str(data["nonce"]),
+                oid=int(data["oid"]),
+                marker_digest=str(data["marker_digest"]),
+                operation_id=str(data["operation_id"]),
+                created_at=float(data["created_at"]),
+                state=IntentState(str(data["state"])),
+            )
+        except (KeyError, TypeError, ValueError):
+            raise OwnershipError("a deletion intent is incomplete or malformed") from None
+        if not RUN_ID_PATTERN.fullmatch(intent.run_id):
+            raise OwnershipError("a deletion intent has an invalid run id")
+        if intent.kind not in DATABASE_KINDS:
+            raise OwnershipError("a deletion intent has an unknown kind")
+        if not NONCE_PATTERN.fullmatch(intent.nonce):
+            raise OwnershipError("a deletion intent has an invalid nonce")
+        if not re.fullmatch(r"[0-9a-f]{64}", intent.marker_digest):
+            raise OwnershipError("a deletion intent has an invalid marker digest")
+        if not intent.operation_id or intent.oid <= 0 or intent.created_at <= 0:
+            raise OwnershipError("a deletion intent has invalid identity fields")
+        require_generated_name(intent.database_name, run_id=intent.run_id, kind=intent.kind, worker_id=intent.worker_id)
+        return intent
+
+    def with_state(self, state: IntentState) -> DeletionIntent:
+        return replace(self, state=state)
+
+
+class OwnershipUnprovable(OwnershipError):
+    """Local ownership evidence is missing; no deletion is authorized."""
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        candidates: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.reason = reason
+        self.candidates = list(candidates or [])
+        super().__init__(reason)
+
+
 def validate_record(
     record: OwnershipRecord,
     *,
@@ -1125,6 +1252,8 @@ class DatabaseRegistry:
     def records(self) -> list[OwnershipRecord]:
         result: list[OwnershipRecord] = []
         for key, value in self.load().items():
+            if key.startswith("__"):
+                continue
             if not isinstance(value, dict):
                 raise OwnershipError(f"the ownership registry entry {key!r} is not an object")
             record = OwnershipRecord.from_dict(value)
@@ -1150,9 +1279,47 @@ class DatabaseRegistry:
             except OSError:  # pragma: no cover
                 pass
             os.replace(temporary, self.path)
+            directory_synced = False
+            if DIRECTORY_FSYNC_SUPPORTED:
+                descriptor = os.open(str(self.path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(descriptor)
+                    directory_synced = True
+                finally:
+                    os.close(descriptor)
+            return directory_synced
         finally:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(temporary)
+
+    # -- durable deletion intents ------------------------------------------- #
+
+    def intents(self) -> dict[str, DeletionIntent]:
+        raw = self.load().get(DELETION_INTENTS_KEY, {})
+        if not isinstance(raw, dict):
+            raise OwnershipError("the deletion journal is malformed")
+        return {name: DeletionIntent.from_dict(value) for name, value in raw.items()}
+
+    def get_intent(self, database_name: str) -> DeletionIntent | None:
+        return self.intents().get(database_name)
+
+    def put_intent(self, intent: DeletionIntent) -> bool:
+        with self._lock():
+            records = self.load()
+            journal = records.get(DELETION_INTENTS_KEY, {})
+            if not isinstance(journal, dict):
+                raise OwnershipError("the deletion journal is malformed")
+            journal[intent.database_name] = intent.to_dict()
+            records[DELETION_INTENTS_KEY] = journal
+            return self._write(records)
+
+    def remove_intent(self, database_name: str) -> None:
+        with self._lock():
+            records = self.load()
+            journal = records.get(DELETION_INTENTS_KEY, {})
+            if isinstance(journal, dict) and journal.pop(database_name, None) is not None:
+                records[DELETION_INTENTS_KEY] = journal
+                self._write(records)
 
     def put(self, record: OwnershipRecord) -> None:
         with self._lock():
@@ -1275,6 +1442,128 @@ def _run_cleanup_lock(connection: Any, run_id: str) -> Iterator[None]:
                 cursor.execute("SELECT pg_advisory_unlock(%s)", (key,))
 
 
+def marker_digest(marker: OwnershipMarker) -> str:
+    return hashlib.sha256(marker.to_json().encode("utf-8")).hexdigest()
+
+
+def expected_marker(record: OwnershipRecord, cluster_id: str) -> OwnershipMarker:
+    """Reconstruct the marker a valid record must have written."""
+    return OwnershipMarker(
+        version=MARKER_VERSION,
+        run_id=record.run_id,
+        kind=record.kind,
+        worker_id=record.worker_id,
+        source_database=record.source_database,
+        cluster_id=cluster_id,
+        owner_role=record.owner_role,
+        nonce=record.nonce,
+        created_at=record.created_at,
+    )
+
+
+def prepare_deletion_intent(
+    admin: Any,
+    registry: DatabaseRegistry,
+    record: OwnershipRecord,
+    *,
+    cluster_id: str,
+    source_database: str,
+) -> DeletionIntent:
+    """Verify every ownership fact and durably persist the intent to delete.
+
+    This performs the full recheck and writes the journal **before** any caller
+    is allowed to execute ``DROP DATABASE``. It is also the entry point used to
+    resume a pending intent after a process crash.
+    """
+    validate_record(record, run_id=record.run_id, source_database=source_database, cluster_id=cluster_id)
+    name = record.database_name
+    if not database_exists(admin, name):
+        raise OwnershipError("cannot prepare a deletion intent for an absent database")
+    stored = registry.get(name)
+    if stored is None or stored != record:
+        raise OwnershipError("the database to delete does not match its local record")
+    marker = _verify_database_ownership(admin, record=record, cluster_id=cluster_id, source_database=source_database)
+    oid = database_oid(admin, name)
+    if oid is None:
+        raise OwnershipError("the database has no catalog OID")
+    digest = marker_digest(marker)
+    if digest != marker_digest(expected_marker(record, cluster_id)):
+        raise OwnershipError("the live marker does not match the local ownership record")
+    pending = registry.get_intent(name)
+    if pending is not None and pending.state is IntentState.CLEANED:
+        raise OwnershipError("a completed deletion intent still names an existing database")
+    if pending is not None:
+        validate_intent(pending, record, cluster_id=cluster_id, source_database=source_database)
+        if pending.oid != oid or pending.marker_digest != digest:
+            raise OwnershipError("the pending deletion intent does not match the live database identity")
+        return pending
+    intent = DeletionIntent(
+        run_id=record.run_id,
+        database_name=name,
+        kind=record.kind,
+        worker_id=record.worker_id,
+        source_database=source_database,
+        cluster_id=cluster_id,
+        owner_role=record.owner_role,
+        nonce=record.nonce,
+        oid=oid,
+        marker_digest=digest,
+        operation_id=uuid.uuid4().hex,
+        created_at=time.time(),
+    )
+    registry.put_intent(intent)
+    if registry.get_intent(name) != intent:
+        raise OwnershipError("the deletion intent was not durably persisted")
+    if INTENT_TEST_HOOK is not None:
+        INTENT_TEST_HOOK(name)
+    return intent
+
+
+def validate_intent(
+    intent: DeletionIntent,
+    record: OwnershipRecord,
+    *,
+    cluster_id: str,
+    source_database: str,
+) -> None:
+    """Compare a durable intent with the record and the live context."""
+    if intent.run_id != record.run_id:
+        raise OwnershipError("the deletion intent names a different run")
+    if intent.database_name != record.database_name:
+        raise OwnershipError("the deletion intent names a different database")
+    if intent.kind != record.kind or intent.worker_id != record.worker_id:
+        raise OwnershipError("the deletion intent names a different database kind or worker")
+    if intent.source_database != source_database or record.source_database != source_database:
+        raise OwnershipError("the deletion intent names a different source database")
+    if intent.cluster_id != cluster_id or record.cluster_id != cluster_id:
+        raise OwnershipError("the deletion intent names a different cluster")
+    if intent.owner_role != record.owner_role or intent.nonce != record.nonce:
+        raise OwnershipError("the deletion intent names a different owner or nonce")
+    if intent.marker_digest != marker_digest(expected_marker(record, cluster_id)):
+        raise OwnershipError("the deletion intent marker digest does not match the record")
+
+
+def _reconcile_absent_database(
+    admin: Any,
+    registry: DatabaseRegistry,
+    record: OwnershipRecord,
+    intent: DeletionIntent,
+    *,
+    cluster_id: str,
+    source_database: str,
+) -> None:
+    """Case C: a journaled deletion completed before the registry was updated."""
+    if intent.state is not IntentState.DELETE_PENDING:
+        raise OwnershipError("the deletion intent is not in the pending state")
+    validate_intent(intent, record, cluster_id=cluster_id, source_database=source_database)
+    if cluster_identity(admin) != intent.cluster_id:
+        raise OwnershipError("the cluster changed since the deletion intent was written")
+    if database_exists(admin, record.database_name):
+        raise OwnershipError("the database is present; a pending intent cannot reconcile it")
+    registry.put_intent(intent.with_state(IntentState.CLEANED))
+    registry.update_state(record.database_name, TwinState.CLEANED)
+
+
 def verified_drop(
     admin: Any,
     registry: DatabaseRegistry,
@@ -1284,11 +1573,10 @@ def verified_drop(
     source_database: str,
     session_timeout: float = SESSION_DRAIN_SECONDS,
 ) -> bool:
-    """Drop one database only when every proof agrees. Returns whether it existed.
+    """Drop one database only after a durable intent and a final recheck.
 
-    A backend label is client-controlled and is never used to identify or
-    terminate a session. The only safe signal is the absence of backends after
-    the owned process was stopped; any remaining backend blocks the drop.
+    Returns ``True`` when this call executed the drop. No label is ever used as
+    ownership evidence and no backend is terminated.
     """
     from psycopg import sql
 
@@ -1299,18 +1587,36 @@ def verified_drop(
         cluster_id=cluster_id,
     )
     name = record.database_name
+    pending = registry.get_intent(name)
     if not database_exists(admin, name):
-        registry.update_state(name, TwinState.CLEANED)
-        return False
-    stored = registry.get(name)
-    if stored is None or stored != record:
-        raise OwnershipError("the database to drop is not the record stored in the ownership registry")
-    _verify_database_ownership(admin, record=record, cluster_id=cluster_id, source_database=source_database)
+        if pending is not None and pending.state is IntentState.CLEANED and record.state is TwinState.CLEANED:
+            return False
+        if pending is not None:
+            _reconcile_absent_database(
+                admin, registry, record, pending, cluster_id=cluster_id, source_database=source_database
+            )
+            return False
+        if record.state is TwinState.CLEANED:
+            return False
+        raise OwnershipError(f"{name!r} is missing without a valid deletion intent")
+    if record.state is TwinState.CLEANED:
+        raise OwnershipError("the registry says CLEANED but the database still exists")
+    intent = prepare_deletion_intent(admin, registry, record, cluster_id=cluster_id, source_database=source_database)
+    if database_oid(admin, name) != intent.oid:
+        raise OwnershipError("the database OID changed after the deletion intent was persisted")
+    live = read_marker(admin, name)
+    if live is None or marker_digest(live) != intent.marker_digest:
+        raise OwnershipError("the ownership marker changed after the deletion intent was persisted")
     remaining = _wait_for_no_sessions(admin, name, timeout=session_timeout)
     if remaining:
         raise CleanupError(f"refusing to drop {name!r}: {len(remaining)} session(s) are still connected")
     with admin.cursor() as cursor:
         cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name)))
+    if database_exists(admin, name):
+        raise CleanupError(f"the database {name!r} survived the drop")
+    if DELETION_TEST_HOOK is not None:
+        DELETION_TEST_HOOK(name)
+    registry.put_intent(intent.with_state(IntentState.CLEANED))
     registry.update_state(name, TwinState.CLEANED)
     return True
 
@@ -1741,6 +2047,9 @@ class DisposableDatabase:
             created_oid = database_oid(admin, self.name)
             if created_oid is None:
                 raise TwinLifecycleError("the created worker database has no catalog OID")
+            # A new clone has a fresh OID and nonce; a stale intent from a
+            # previous drop must never authorize or block this one.
+            self.registry.remove_intent(self.name)
             owner_role = database_owner(admin, self.name) or self.source.target.user
             marker = OwnershipMarker(
                 version=MARKER_VERSION,
@@ -2061,6 +2370,47 @@ class PostgresTwin:
 # --------------------------------------------------------------------------- #
 
 
+def discover_orphan_candidates(admin: Any, run_id: str, *, source_database: str) -> list[dict[str, Any]]:
+    """Read-only list of server markers that name the requested run.
+
+    A marker is a clue for an operator, never authority to delete or adopt a
+    database. Nothing in this function writes to PostgreSQL or the registry.
+    """
+    with admin.cursor() as cursor:
+        cursor.execute(
+            "SELECT datname, shobj_description(oid, 'pg_database') FROM pg_database "
+            "WHERE datname LIKE %s ORDER BY datname",
+            (f"{DATABASE_PREFIX}_{run_id}%",),
+        )
+        rows = cursor.fetchall()
+    candidates: list[dict[str, Any]] = []
+    for name, comment in rows:
+        if not comment:
+            continue
+        try:
+            marker = OwnershipMarker.from_json(str(comment))
+        except OwnershipError as exc:
+            candidates.append(
+                {
+                    "database_name": str(name),
+                    "reason": "malformed marker",
+                    "error": redact(str(exc)),
+                }
+            )
+            continue
+        if marker.run_id != run_id:
+            continue
+        candidates.append(
+            {
+                "database_name": str(name),
+                "reason": "matching server marker",
+                "source_matches": marker.source_database == source_database,
+                "marker": json.loads(marker.to_json()),
+            }
+        )
+    return candidates
+
+
 def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
     """Clean one run in two phases: whole-run preflight, then sequential drops.
 
@@ -2072,10 +2422,12 @@ def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
     """
     if not RUN_ID_PATTERN.fullmatch(str(run_id)):
         raise OwnershipError("a run id must be 12 lowercase hexadecimal characters")
-    registry = DatabaseRegistry(Path(workspace) / "ownership.json")
-    records = [record for record in registry.records() if record.run_id == run_id]
-    if not records:
-        return []
+    registry_path = Path(workspace) / "ownership.json"
+    if registry_path.is_symlink():
+        raise OwnershipUnprovable("the ownership registry must not be a symbolic link")
+    registry = DatabaseRegistry(registry_path)
+    registry_missing = not registry_path.is_file()
+    records = [] if registry_missing else [record for record in registry.records() if record.run_id == run_id]
     names = [record.database_name for record in records]
     if len(names) != len(set(names)):
         raise CleanupPreflightError(
@@ -2101,6 +2453,15 @@ def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
         )
     admin = _admin(target)
     try:
+        if registry_missing or not records:
+            candidates = discover_orphan_candidates(admin, run_id, source_database=target.dbname)
+            if registry_missing:
+                reason = "the ownership registry is missing; read-only marker candidates require operator review"
+            elif candidates:
+                reason = "no local ownership record; read-only marker candidates require operator review"
+            else:
+                reason = "no local ownership record and no matching server marker candidates"
+            raise OwnershipUnprovable(reason, candidates=candidates)
         with _run_cleanup_lock(admin, run_id):
             cluster = cluster_identity(admin)
             source_database = target.dbname
@@ -2120,12 +2481,43 @@ def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
             for record in records:
                 name = record.database_name
                 if not database_exists(admin, name):
-                    if record.state is not TwinState.CLEANED:
-                        reasons.append(f"{name}: the database is missing but its record is not CLEANED")
+                    intent = registry.get_intent(name)
+                    if intent is not None:
+                        try:
+                            if intent.state is IntentState.CLEANED:
+                                if record.state is not TwinState.CLEANED:
+                                    raise OwnershipError("a completed intent has an inconsistent record")
+                                continue
+                            if intent.state is not IntentState.DELETE_PENDING:
+                                raise OwnershipError("the deletion intent is not pending")
+                            validate_intent(intent, record, cluster_id=cluster, source_database=source_database)
+                            if cluster_identity(admin) != intent.cluster_id:
+                                raise OwnershipError("the cluster changed since the intent was written")
+                        except Exception as exc:
+                            reasons.append(f"{name}: invalid deletion intent: {exc}")
+                            categories[name] = "invalid deletion intent"
+                    elif record.state is not TwinState.CLEANED:
+                        reasons.append(f"{name}: the database is missing without a valid deletion intent")
                         categories[name] = "missing inconsistent"
                     continue
                 if name in categories:
                     continue
+                if record.state is TwinState.CLEANED:
+                    reasons.append(f"{name}: the registry says CLEANED but the database exists")
+                    categories[name] = "cleaned but present"
+                    continue
+                intent = registry.get_intent(name)
+                if intent is not None:
+                    try:
+                        if intent.state is not IntentState.DELETE_PENDING:
+                            raise OwnershipError("the deletion intent is not pending")
+                        validate_intent(intent, record, cluster_id=cluster, source_database=source_database)
+                        if database_oid(admin, name) != intent.oid:
+                            raise OwnershipError("the database OID differs from the deletion intent")
+                    except Exception as exc:
+                        reasons.append(f"{name}: invalid deletion intent: {exc}")
+                        categories[name] = "invalid deletion intent"
+                        continue
                 try:
                     _verify_database_ownership(
                         admin, record=record, cluster_id=cluster, source_database=source_database
@@ -2147,6 +2539,24 @@ def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
             ordered = sorted(plan, key=lambda record: (record.kind != "worker", record.worker_id))
             remaining = [record.database_name for record in ordered]
             cleaned: list[str] = []
+            # Case C: an absent database with a valid pending intent was already
+            # deleted by this run before a crash. Reconcile it after preflight.
+            for record in records:
+                if database_exists(admin, record.database_name):
+                    continue
+                intent = registry.get_intent(record.database_name)
+                if intent is not None and intent.state is IntentState.DELETE_PENDING:
+                    _reconcile_absent_database(
+                        admin,
+                        registry,
+                        record,
+                        intent,
+                        cluster_id=cluster,
+                        source_database=source_database,
+                    )
+                    cleaned.append(record.database_name)
+                    if record.database_name in remaining:
+                        remaining.remove(record.database_name)
             try:
                 for record in ordered:
                     # RECHECK: a valid preflight never authorizes a later drop.

@@ -163,6 +163,18 @@ jobs:
         # boundary was never exercised, so the next step fails on any skip.
         run: python -m pytest -q tests/test_postgres_twin.py -m postgres_integration
 
+      - name: Missing registry and read-only orphan diagnostics
+        run: python -m pytest -q tests/test_postgres_twin.py -k "requires_explicit_workspace or missing_registry_never or empty_registry_never or orphan_marker_discovery or registry_durable_replace"
+
+      - name: Durable deletion intent before DROP
+        run: python -m pytest -q tests/test_postgres_twin.py -k "delete_intent_is_durable or pending_intent_with_existing"
+
+      - name: Real process crash after intent and after DROP
+        run: python -m pytest -q tests/test_postgres_twin.py -k "crash_after_intent or crash_after_drop"
+
+      - name: Recreated OID and tampered intent rejection
+        run: python -m pytest -q tests/test_postgres_twin.py -k "pending_intent_rejects or tampered_deletion or cleaned_record_with_existing"
+
       - name: Spoofed application_name is never terminated
         run: python -m pytest -q tests/test_postgres_twin.py -k "spoofing_application_name"
 

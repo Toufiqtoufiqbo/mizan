@@ -27,12 +27,16 @@ import pytest
 
 import mizan.postgres_twin as twin_module
 from mizan.postgres_twin import (
+    DIRECTORY_FSYNC_SUPPORTED,
     BaselineVerificationError,
     CleanupError,
     CleanupPreflightError,
     DatabaseRegistry,
+    DeletionIntent,
+    IntentState,
     OwnershipError,
     OwnershipRecord,
+    OwnershipUnprovable,
     PartialCleanupError,
     PostgresSource,
     SourceProtectionError,
@@ -41,10 +45,15 @@ from mizan.postgres_twin import (
     _typed,
     cleanup_run,
     database_dsn,
+    database_oid,
+    discover_orphan_candidates,
+    expected_marker,
     expected_seed_name,
     expected_worker_name,
     generated_name,
+    marker_digest,
     parse_generated_name,
+    prepare_deletion_intent,
     redact,
     validate_record,
 )
@@ -81,6 +90,7 @@ def _record(
     owner: str = OWNER,
     nonce: str = NONCE,
     kind: str = "worker",
+    created_at: float = 1.0,
 ) -> OwnershipRecord:
     return OwnershipRecord(
         run_id,
@@ -89,7 +99,7 @@ def _record(
         source,
         seed or expected_seed_name(run_id),
         TwinState.READY,
-        1.0,
+        created_at,
         kind=kind,
         cluster_id=cluster,
         owner_role=owner,
@@ -99,6 +109,10 @@ def _record(
 
 def _build_run(instance, workspace, worker_ids=("w0", "w1")):
     """Create one seed and validly marked workers for destructive tests."""
+    # The module fixture reuses one run id; remove leftovers from a prior test.
+    for stale in _generated_databases(instance.dsn):
+        if instance.run_id in stale:
+            _drop_database(instance.dsn, stale)
     baseline = instance.prepare_baseline(workspace)
     registry = DatabaseRegistry(workspace / "ownership.json")
     admin = _admin(instance.dsn)
@@ -113,6 +127,7 @@ def _build_run(instance, workspace, worker_ids=("w0", "w1")):
                 cursor.execute("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = %s", (name,))
                 owner = str(cursor.fetchone()[0])
             nonce = secrets.token_hex(16)
+            created = time.time()
             twin_module.write_marker(
                 admin,
                 name,
@@ -125,7 +140,7 @@ def _build_run(instance, workspace, worker_ids=("w0", "w1")):
                     cluster,
                     owner,
                     nonce,
-                    time.time(),
+                    created,
                 ),
             )
             registry.put(
@@ -138,6 +153,7 @@ def _build_run(instance, workspace, worker_ids=("w0", "w1")):
                     cluster=cluster,
                     owner=owner,
                     nonce=nonce,
+                    created_at=created,
                 )
             )
     finally:
@@ -548,6 +564,7 @@ def test_cleanup_run_cli_reports_a_machine_readable_failure(monkeypatch, tmp_pat
 
     from mizan.cli import main
 
+    (tmp_path / "ownership.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
         twin_module,
         "cleanup_run",
@@ -593,6 +610,7 @@ def test_cli_reports_preflight_and_partial_cleanup_statuses(monkeypatch, tmp_pat
 
     from mizan.cli import main
 
+    (tmp_path / "ownership.json").write_text("{}", encoding="utf-8")
     cases = [
         (
             CleanupPreflightError(["bad marker"], categories={"db": "invalid marker"}),
@@ -661,6 +679,91 @@ def test_cli_never_claims_verified_before_a_successful_cleanup(monkeypatch, tmp_
     payload = json.loads(result.output[result.output.index("{") :])
     assert payload["status"] == "cleanup_failed"
     assert payload["cleanup_errors"]
+
+
+def test_deletion_intent_round_trip_and_tamper_rejection() -> None:
+    intent = DeletionIntent(
+        run_id=RUN,
+        database_name=expected_worker_name(RUN, "w0"),
+        kind="worker",
+        worker_id="w0",
+        source_database="source",
+        cluster_id=CLUSTER,
+        owner_role=OWNER,
+        nonce=NONCE,
+        oid=1234,
+        marker_digest="a" * 64,
+        operation_id="operation-1",
+        created_at=1.0,
+    )
+    assert DeletionIntent.from_dict(json.loads(json.dumps(intent.to_dict()))) == intent
+    assert intent.with_state(IntentState.CLEANED).state is IntentState.CLEANED
+    for field, value in (
+        ("run_id", OTHER_RUN),
+        ("database_name", "source"),
+        ("kind", "vulnerable"),
+        ("nonce", "short"),
+        ("oid", -1),
+        ("marker_digest", "xyz"),
+        ("operation_id", ""),
+        ("state", "UNKNOWN"),
+    ):
+        data = intent.to_dict()
+        data[field] = value
+        with pytest.raises(OwnershipError):
+            DeletionIntent.from_dict(data)
+
+
+def test_journal_key_is_not_an_ownership_record(tmp_path) -> None:
+    registry = DatabaseRegistry(tmp_path / "ownership.json")
+    registry.put(_record())
+    assert len(registry.records()) == 1
+    assert registry.intents() == {}
+    intent = DeletionIntent(
+        run_id=RUN,
+        database_name=_record().database_name,
+        kind="worker",
+        worker_id="w0",
+        source_database="source",
+        cluster_id=CLUSTER,
+        owner_role=OWNER,
+        nonce=NONCE,
+        oid=1234,
+        marker_digest="a" * 64,
+        operation_id="operation-1",
+        created_at=1.0,
+    )
+    registry.put_intent(intent)
+    assert twin_module.DELETION_INTENTS_KEY in registry.load()
+    assert len(registry.records()) == 1
+    assert registry.get_intent(_record().database_name) == intent
+
+
+def test_directory_fsync_capability_is_explicit() -> None:
+    assert isinstance(DIRECTORY_FSYNC_SUPPORTED, bool)
+    assert DIRECTORY_FSYNC_SUPPORTED == (os.name == "posix")
+
+
+def test_no_backend_termination_api_exists() -> None:
+    for attribute in ("pg_terminate_backend", "_terminate_owned_sessions"):
+        assert not hasattr(twin_module, attribute)
+
+
+def test_cli_requires_workspace_for_cleanup_run(monkeypatch) -> None:
+    from click.testing import CliRunner
+
+    from mizan.cli import main
+
+    monkeypatch.setenv(DSN_ENV, "postgresql://u:secret@127.0.0.1:1/source")
+    result = CliRunner().invoke(
+        main,
+        ["postgres-twin", "--dsn-env", DSN_ENV, "--schema", "pgstore", "--cleanup-run", RUN],
+    )
+    assert result.exit_code != 0
+    payload = json.loads(result.output)
+    assert payload["status"] == "OWNERSHIP_UNPROVABLE"
+    assert payload["cleaned"] == []
+    assert "secret" not in result.output
 
 
 # --------------------------------------------------------------------------- #
@@ -845,7 +948,9 @@ def test_cleanup_never_drops_unowned_databases(source) -> None:
     workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-clean-"))
     registry = DatabaseRegistry(workspace / "ownership.json")
     registry.put(_record(run_id=OTHER_RUN, source=instance.source_name()))
-    assert cleanup_run(DSN_ENV, workspace, RUN) == []
+    # A run with no local record is unprovable, never a successful no-op.
+    with pytest.raises(OwnershipUnprovable):
+        cleanup_run(DSN_ENV, workspace, RUN)
 
 
 @pytest.mark.postgres_integration
@@ -1637,7 +1742,7 @@ def test_pool_leak_mode_still_releases_connections(source) -> None:
         finally:
             admin.close()
 
-        # The leaked pool's connections are released explicitly; Mīzān does not
+        # The leaked pool's connections are released explicitly; MÄ«zÄn does not
         # terminate them by label. Cleanup then succeeds on retry.
         released = requests.post(twin.base_url + "/pool/release", timeout=10).json()
         assert released["released"] >= 3
@@ -1901,3 +2006,455 @@ def test_sigkill_then_cleanup_run_recovers_the_orphan(source) -> None:
         if process.poll() is None:
             process.kill()
             process.wait(timeout=30)
+
+
+@pytest.mark.postgres_integration
+def test_cleanup_run_requires_explicit_workspace(source) -> None:
+    from click.testing import CliRunner
+
+    from mizan.cli import main
+
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-req-workspace-"))
+    baseline, _registry = _build_run(instance, workspace)
+    names = [baseline.name, expected_worker_name(instance.run_id, "w0"), expected_worker_name(instance.run_id, "w1")]
+    try:
+        result = CliRunner().invoke(
+            main,
+            ["postgres-twin", "--dsn-env", DSN_ENV, "--schema", "pgstore", "--cleanup-run", instance.run_id],
+        )
+        assert result.exit_code != 0
+        payload = json.loads(result.output)
+        assert payload["status"] == "OWNERSHIP_UNPROVABLE"
+        assert payload["cleaned"] == []
+        assert all(_database_exists(dsn, name) for name in names)
+    finally:
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_missing_registry_never_reports_cleaned(source) -> None:
+    from click.testing import CliRunner
+
+    from mizan.cli import main
+
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-no-registry-"))
+    baseline, _registry = _build_run(instance, workspace)
+    names = [baseline.name, expected_worker_name(instance.run_id, "w0"), expected_worker_name(instance.run_id, "w1")]
+    (workspace / "ownership.json").unlink()
+    try:
+        result = CliRunner().invoke(
+            main,
+            [
+                "postgres-twin",
+                "--dsn-env",
+                DSN_ENV,
+                "--schema",
+                "pgstore",
+                "--cleanup-run",
+                instance.run_id,
+                "--workspace",
+                str(workspace),
+            ],
+        )
+        assert result.exit_code != 0
+        payload = json.loads(result.output)
+        assert payload["status"] == "OWNERSHIP_UNPROVABLE"
+        assert payload["cleaned"] == []
+        assert payload["reasons"]
+        assert {c["database_name"] for c in payload["orphan_candidates"]} >= set(names)
+        assert all(_database_exists(dsn, name) for name in names)
+        assert not (workspace / "ownership.json").exists(), "recovery must not create a registry"
+    finally:
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_empty_registry_never_reports_cleaned(source) -> None:
+    from click.testing import CliRunner
+
+    from mizan.cli import main
+
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-empty-registry-"))
+    baseline, _registry = _build_run(instance, workspace)
+    (workspace / "ownership.json").write_text("{}", encoding="utf-8")
+    names = [baseline.name, expected_worker_name(instance.run_id, "w0"), expected_worker_name(instance.run_id, "w1")]
+    try:
+        result = CliRunner().invoke(
+            main,
+            [
+                "postgres-twin",
+                "--dsn-env",
+                DSN_ENV,
+                "--schema",
+                "pgstore",
+                "--cleanup-run",
+                instance.run_id,
+                "--workspace",
+                str(workspace),
+            ],
+        )
+        assert result.exit_code != 0
+        assert json.loads(result.output)["status"] == "OWNERSHIP_UNPROVABLE"
+        assert all(_database_exists(dsn, name) for name in names)
+    finally:
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_orphan_marker_discovery_is_read_only(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-orphan-"))
+    baseline, _registry = _build_run(instance, workspace)
+    names = [baseline.name, expected_worker_name(instance.run_id, "w0"), expected_worker_name(instance.run_id, "w1")]
+    (workspace / "ownership.json").unlink()
+
+    def snapshot() -> dict[str, str]:
+        admin = _admin(dsn)
+        try:
+            with admin.cursor() as cursor:
+                cursor.execute(
+                    "SELECT datname, coalesce(shobj_description(oid, 'pg_database'), '') "
+                    "FROM pg_database WHERE datname = ANY(%s) ORDER BY datname",
+                    (names,),
+                )
+                return {str(row[0]): str(row[1]) for row in cursor.fetchall()}
+        finally:
+            admin.close()
+
+    before = snapshot()
+    try:
+        admin = _admin(instance.dsn)
+        try:
+            candidates = discover_orphan_candidates(admin, instance.run_id, source_database=instance.source_name())
+        finally:
+            admin.close()
+        assert {c["database_name"] for c in candidates} >= set(names)
+        assert all(c["reason"] == "matching server marker" for c in candidates)
+        with pytest.raises(OwnershipUnprovable) as error:
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert error.value.candidates
+        assert snapshot() == before, "read-only diagnostics changed database state"
+        assert all(_database_exists(dsn, name) for name in names)
+        assert not (workspace / "ownership.json").exists()
+    finally:
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_delete_intent_is_durable_before_drop(source, monkeypatch) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-intent-before-"))
+    baseline, registry = _build_run(instance, workspace)
+    names = [baseline.name, expected_worker_name(instance.run_id, "w0"), expected_worker_name(instance.run_id, "w1")]
+    observed: list[str] = []
+
+    def hook(name: str) -> None:
+        admin = _admin(instance.dsn)
+        try:
+            assert _database_exists(instance.dsn, name), "the database was dropped before intent persistence"
+            intent = registry.get_intent(name)
+            assert intent is not None and intent.state is IntentState.DELETE_PENDING
+            record = registry.get(name)
+            assert record is not None
+            assert intent.oid == database_oid(admin, name)
+            assert intent.marker_digest == marker_digest(expected_marker(record, intent.cluster_id))
+        finally:
+            admin.close()
+        observed.append(name)
+
+    monkeypatch.setattr(twin_module, "INTENT_TEST_HOOK", hook)
+    try:
+        cleaned = cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert set(cleaned) == set(names)
+        assert observed == [
+            expected_worker_name(instance.run_id, "w0"),
+            expected_worker_name(instance.run_id, "w1"),
+            baseline.name,
+        ]
+        assert all(intent.state is IntentState.CLEANED for intent in registry.intents().values())
+    finally:
+        monkeypatch.setattr(twin_module, "INTENT_TEST_HOOK", None)
+        for name in names:
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_crash_after_intent_before_drop_recovers(source) -> None:
+    from click.testing import CliRunner
+
+    from mizan.cli import main
+
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-crash-intent-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    ready = workspace / "intent.ready"
+    source_root = str(Path(__file__).resolve().parents[1] / "src")
+    script = workspace / "crash_before_drop.py"
+    script.write_text(
+        "import os, sys, time\n"
+        f"sys.path.insert(0, {source_root!r})\n"
+        "import mizan.postgres_twin as twin\n"
+        f"os.environ[{DSN_ENV!r}] = {dsn!r}\n"
+        f"workspace = {str(workspace)!r}\n"
+        f"name = {w0!r}\n"
+        f"ready = {str(ready)!r}\n"
+        "def hook(database):\n"
+        "    if database == name:\n"
+        "        open(ready, 'w').close()\n"
+        "        time.sleep(120)\n"
+        "twin.INTENT_TEST_HOOK = hook\n"
+        f"twin.cleanup_run({DSN_ENV!r}, workspace, {instance.run_id!r})\n",
+        encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    environment["MIZAN_ORPHAN_DSN"] = dsn
+    process = subprocess.Popen(
+        [sys.executable, str(script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment
+    )
+    try:
+        deadline = time.monotonic() + 60
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert ready.exists(), "the child never persisted its deletion intent"
+        assert _database_exists(dsn, w0), "the child dropped the database too early"
+        pending = registry.get_intent(w0)
+        assert pending is not None and pending.state is IntentState.DELETE_PENDING
+        operation_id = pending.operation_id
+        process.kill()
+        process.wait(timeout=30)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "postgres-twin",
+                "--dsn-env",
+                DSN_ENV,
+                "--schema",
+                "pgstore",
+                "--cleanup-run",
+                instance.run_id,
+                "--workspace",
+                str(workspace),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["status"] == "CLEANED"
+        reconciled = registry.get_intent(w0)
+        assert reconciled is not None
+        assert reconciled.state is IntentState.CLEANED
+        assert reconciled.operation_id == operation_id, "the pending operation was not resumed"
+        assert not _database_exists(dsn, w0)
+        assert not _database_exists(dsn, baseline.name)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=30)
+        for name in (baseline.name, w0, expected_worker_name(instance.run_id, "w1")):
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_crash_after_drop_before_registry_completion_recovers(source) -> None:
+    from click.testing import CliRunner
+
+    from mizan.cli import main
+
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-crash-drop-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    w1 = expected_worker_name(instance.run_id, "w1")
+    ready = workspace / "dropped.ready"
+    source_root = str(Path(__file__).resolve().parents[1] / "src")
+    script = workspace / "crash_after_drop.py"
+    script.write_text(
+        "import sys, time\n"
+        f"sys.path.insert(0, {source_root!r})\n"
+        "import mizan.postgres_twin as twin\n"
+        f"os_dsn = {dsn!r}\n"
+        "import os\n"
+        f"os.environ[{DSN_ENV!r}] = os_dsn\n"
+        f"workspace = {str(workspace)!r}\n"
+        f"name = {w0!r}\n"
+        f"ready = {str(ready)!r}\n"
+        "def hook(database):\n"
+        "    if database == name:\n"
+        "        open(ready, 'w').close()\n"
+        "        time.sleep(120)\n"
+        "twin.DELETION_TEST_HOOK = hook\n"
+        f"twin.cleanup_run({DSN_ENV!r}, workspace, {instance.run_id!r})\n",
+        encoding="utf-8",
+    )
+    process = subprocess.Popen([sys.executable, str(script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 60
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert ready.exists(), "the child never reached the post-DROP window"
+        assert not _database_exists(dsn, w0), "PostgreSQL did not confirm the deletion"
+        pending = registry.get_intent(w0)
+        assert pending is not None and pending.state is IntentState.DELETE_PENDING
+        assert registry.get(w0) is not None
+        assert registry.get(w0).state is not TwinState.CLEANED
+        process.kill()
+        process.wait(timeout=30)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "postgres-twin",
+                "--dsn-env",
+                DSN_ENV,
+                "--schema",
+                "pgstore",
+                "--cleanup-run",
+                instance.run_id,
+                "--workspace",
+                str(workspace),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["status"] == "CLEANED"
+        assert set(payload["cleaned"]) == {w0, w1, baseline.name}
+        assert not any(_database_exists(dsn, name) for name in (w1, baseline.name))
+        assert registry.get_intent(w0).state is IntentState.CLEANED
+        assert registry.get(w0).state is TwinState.CLEANED
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=30)
+        for name in (baseline.name, w0, w1):
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_pending_intent_rejects_recreated_database_oid(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-recreated-oid-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    admin = _admin(instance.dsn)
+    try:
+        with admin.cursor() as cursor:
+            cursor.execute("SELECT system_identifier::text FROM pg_control_system()")
+            cluster = str(cursor.fetchone()[0])
+        prepare_deletion_intent(
+            admin, registry, registry.get(w0), cluster_id=cluster, source_database=instance.source_name()
+        )
+        original_oid = database_oid(admin, w0)
+    finally:
+        admin.close()
+    _drop_database(dsn, w0)
+    _create_database(dsn, w0)
+    admin = _admin(instance.dsn)
+    try:
+        twin_module.write_marker(admin, w0, expected_marker(registry.get(w0), cluster))
+        assert database_oid(admin, w0) != original_oid
+    finally:
+        admin.close()
+    try:
+        with pytest.raises(CleanupPreflightError) as error:
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert error.value.categories.get(w0) == "invalid deletion intent"
+        assert _database_exists(dsn, w0), "the replacement database was deleted"
+    finally:
+        for name in (baseline.name, w0, expected_worker_name(instance.run_id, "w1")):
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_tampered_deletion_intent_fails_closed(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-tampered-intent-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    admin = _admin(instance.dsn)
+    try:
+        with admin.cursor() as cursor:
+            cursor.execute("SELECT system_identifier::text FROM pg_control_system()")
+            cluster = str(cursor.fetchone()[0])
+        intent = prepare_deletion_intent(
+            admin, registry, registry.get(w0), cluster_id=cluster, source_database=instance.source_name()
+        )
+    finally:
+        admin.close()
+    data = intent.to_dict()
+    data["nonce"] = "f" * 32
+    registry.put_intent(DeletionIntent.from_dict(data))
+    try:
+        with pytest.raises(CleanupPreflightError) as error:
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert error.value.categories.get(w0) == "invalid deletion intent"
+        assert _database_exists(dsn, w0)
+    finally:
+        for name in (baseline.name, w0, expected_worker_name(instance.run_id, "w1")):
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_cleaned_record_with_existing_database_fails_closed(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-cleaned-present-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    registry.update_state(w0, TwinState.CLEANED)
+    try:
+        with pytest.raises(CleanupPreflightError) as error:
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert error.value.categories.get(w0) == "cleaned but present"
+        assert _database_exists(dsn, w0)
+    finally:
+        for name in (baseline.name, w0, expected_worker_name(instance.run_id, "w1")):
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_pending_intent_with_existing_original_database_resumes(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-resume-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    admin = _admin(instance.dsn)
+    try:
+        with admin.cursor() as cursor:
+            cursor.execute("SELECT system_identifier::text FROM pg_control_system()")
+            cluster = str(cursor.fetchone()[0])
+        intent = prepare_deletion_intent(
+            admin, registry, registry.get(w0), cluster_id=cluster, source_database=instance.source_name()
+        )
+    finally:
+        admin.close()
+    try:
+        assert _database_exists(dsn, w0)
+        assert cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert not _database_exists(dsn, w0)
+        resumed = registry.get_intent(w0)
+        assert resumed is not None and resumed.state is IntentState.CLEANED
+        assert resumed.operation_id == intent.operation_id
+    finally:
+        for name in (baseline.name, w0, expected_worker_name(instance.run_id, "w1")):
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_registry_durable_replace_and_directory_sync(source) -> None:
+    instance, _dsn_value = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v62-durable-registry-"))
+    registry = DatabaseRegistry(workspace / "ownership.json")
+    registry.put(_record())
+    assert registry.path.read_text(encoding="utf-8").startswith("{")
+    assert [p.name for p in workspace.iterdir() if p.name.endswith(".tmp")] == []
+    if os.name != "posix":
+        assert DIRECTORY_FSYNC_SUPPORTED is False, "directory fsync is not guaranteed on this platform"
+    (workspace / "ownership.json").write_text("{broken", encoding="utf-8")
+    with pytest.raises(OwnershipError):
+        registry.records()

@@ -856,7 +856,12 @@ def postgres_evidence(
 )
 @click.option("--cleanup-run", default=None, help="Drop only databases owned by this run id.")
 @click.option("--exercise", is_flag=True, help="Execute L2/L3 probes against worker w0.")
-@click.option("--workspace", default=None, type=click.Path())
+@click.option(
+    "--workspace",
+    default=None,
+    type=click.Path(),
+    help="Run workspace; mandatory with --cleanup-run, which never creates a new one.",
+)
 def postgres_twin(
     dsn_env: str,
     schemas: tuple[str, ...],
@@ -883,6 +888,7 @@ def postgres_twin(
         CancellationToken,
         CleanupPreflightError,
         DatabaseRegistry,
+        OwnershipUnprovable,
         PartialCleanupError,
         PostgresSource,
         PostgresTwin,
@@ -899,13 +905,73 @@ def postgres_twin(
         if code:
             raise SystemExit(code)
 
+    if cleanup_run and not workspace:
+        emit(
+            {
+                "run_id": cleanup_run,
+                "status": "OWNERSHIP_UNPROVABLE",
+                "cleaned": [],
+                "remaining": [],
+                "reasons": ["--workspace is mandatory with --cleanup-run; no temporary workspace is created"],
+                "category": "missing workspace",
+                "error": "an explicit existing workspace is required for recovery",
+            },
+            code=2,
+        )
+        return
     root = Path(workspace) if workspace else Path(tempfile.mkdtemp(prefix="mizan-v62-"))
-    root.mkdir(parents=True, exist_ok=True)
+    if cleanup_run:
+        if not root.is_dir():
+            emit(
+                {
+                    "run_id": cleanup_run,
+                    "status": "OWNERSHIP_UNPROVABLE",
+                    "cleaned": [],
+                    "remaining": [],
+                    "reasons": ["the requested workspace does not exist"],
+                    "category": "missing workspace",
+                    "error": "the recovery workspace must already exist",
+                },
+                code=2,
+            )
+            return
+        registry_file = root / "ownership.json"
+        if registry_file.is_symlink():
+            emit(
+                {
+                    "run_id": cleanup_run,
+                    "status": "OWNERSHIP_UNPROVABLE",
+                    "cleaned": [],
+                    "remaining": [],
+                    "reasons": ["the ownership registry must be a regular file, not a symlink"],
+                    "category": "unsafe registry path",
+                    "error": "a symlinked registry is never read during recovery",
+                },
+                code=2,
+            )
+            return
+    else:
+        root.mkdir(parents=True, exist_ok=True)
     registry = DatabaseRegistry(root / "ownership.json")
 
     if cleanup_run:
         try:
             cleaned = drop_run(dsn_env, root, cleanup_run)
+        except OwnershipUnprovable as exc:
+            emit(
+                {
+                    "run_id": cleanup_run,
+                    "status": "OWNERSHIP_UNPROVABLE",
+                    "cleaned": [],
+                    "remaining": [],
+                    "reasons": [exc.reason],
+                    "category": "unprovable local ownership",
+                    "orphan_candidates": exc.candidates,
+                    "error": redact(str(exc)),
+                },
+                code=2,
+            )
+            return
         except CleanupPreflightError as exc:
             emit(
                 {
@@ -913,6 +979,7 @@ def postgres_twin(
                     "status": "PREFLIGHT_FAILED",
                     "cleaned": [],
                     "remaining": sorted(exc.categories),
+                    "category": "ownership preflight",
                     "categories": exc.categories,
                     "reasons": exc.reasons,
                     "error": redact(str(exc)),
@@ -927,6 +994,7 @@ def postgres_twin(
                     "status": "PARTIAL_CLEANUP",
                     "cleaned": exc.cleaned,
                     "remaining": exc.remaining,
+                    "category": "operational failure during sequential deletion",
                     "reasons": exc.reasons,
                     "error": redact(str(exc)),
                 },
@@ -935,7 +1003,15 @@ def postgres_twin(
             return
         except Exception as exc:
             emit(
-                {"run_id": cleanup_run, "status": "CLEANUP_FAILED", "error": redact(str(exc))},
+                {
+                    "run_id": cleanup_run,
+                    "status": "CLEANUP_FAILED",
+                    "cleaned": [],
+                    "remaining": [],
+                    "category": "cleanup error",
+                    "reasons": [redact(str(exc))],
+                    "error": redact(str(exc)),
+                },
                 code=2,
             )
             return

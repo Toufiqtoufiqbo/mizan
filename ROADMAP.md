@@ -58,9 +58,10 @@
       verified ownership (local record + server marker + cluster identity +
       owner + nonce), mandatory process shutdown and safe cleanup (Phase VI.1,
       hardened in VI.2); Phase VI.2.1 added whole-run cleanup preflight and
-      removed session termination by `application_name`; PostgreSQL
-      attack/twin mode is available only with explicit `--allow-disposable`
-      authorization
+      removed session termination by `application_name`; Phase VI.2.2 added a
+      durable deletion journal, real process-crash recovery and read-only orphan
+      diagnostics; PostgreSQL attack/twin mode is available only with explicit
+      `--allow-disposable` authorization
 - [x] **An identity map in the CLI** (`--identity-map`): already implemented
       with dedicated tests (`tests/test_identity_map.py`); this entry was stale
 - [x] **Proof bundles carry no secrets**: the bearer token is a placeholder,

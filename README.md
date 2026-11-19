@@ -544,8 +544,11 @@ mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --schema app \
 mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --cleanup-run RUN_ID
 ```
 
-`--cleanup-run` reports `CLEANED`, `PREFLIGHT_FAILED`, `PARTIAL_CLEANUP` or
-`CLEANUP_FAILED`; only `CLEANED` means every resource was verified absent.
+`--cleanup-run` reports `CLEANED`, `PREFLIGHT_FAILED`, `PARTIAL_CLEANUP`,
+`OWNERSHIP_UNPROVABLE` or `CLEANUP_FAILED`; only `CLEANED` means every resource
+was verified absent. Phase VI.2.2 makes `--workspace` mandatory for recovery: a
+registry is never created during cleanup, and a missing registry fails closed.
+Every owned deletion is journaled durably before its `DROP DATABASE`.
 
 `--dry-run` validates the DSN, tools, allowlist and fingerprint **without
 creating any database** and reports `DRY_RUN_OK` (never `VERIFIED`).

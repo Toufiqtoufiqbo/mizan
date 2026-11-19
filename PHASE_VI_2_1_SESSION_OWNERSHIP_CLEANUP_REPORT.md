@@ -1,5 +1,10 @@
 # Mīzān Phase VI.2.1 — Session Ownership & Whole-Run Cleanup Verification
 
+> **Phase VI.2.2 adds durable deletion intents and orphan-aware recovery.**
+> `--cleanup-run` now requires an explicit workspace; a missing registry fails
+> closed, and a crash after `DROP DATABASE` is recoverable. See
+> `PHASE_VI_2_2_DURABLE_RECOVERY_REPORT.md`.
+
 ## 1. Executive summary
 
 Phase VI.2 left two destructive-boundary assumptions unproven. This phase
