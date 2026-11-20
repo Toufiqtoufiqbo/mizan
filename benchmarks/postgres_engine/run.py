@@ -17,6 +17,17 @@ DSN_ENV = "MIZAN_VII_BENCH_DSN"
 
 
 def _pgserver():
+    dsn = os.environ.get("MIZAN_TEST_POSTGRES_DSN") or os.environ.get(DSN_ENV)
+    if dsn:
+
+        class _External:
+            def get_uri(self):
+                return dsn
+
+            def cleanup(self):
+                return None
+
+        return _External()
     pgserver = __import__("pgserver")
     return pgserver.get_server(pgdata=Path(tempfile.mkdtemp(prefix="mizan-vii-bench-")), cleanup_mode="delete")
 
