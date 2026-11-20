@@ -63,6 +63,17 @@
       diagnostics; VI.2.3 added strict missing-intent recovery and atomic
       intent/record completion; PostgreSQL attack/twin mode is available only
       with explicit `--allow-disposable` authorization
+- [x] **PostgreSQL generic engine backend**: `mizan twin --backend postgres`
+      runs the existing `Mizan` learn/attack/prove/replay path against the
+      disposable Twin, with PostgreSQL ownership evidence (Phase VII)
+- [ ] **Parallel PostgreSQL worker databases**: isolated worker databases and
+      processes are started and cleaned; deterministic serial/parallel
+      equivalence reporting is documented as PARTIAL pending broader workloads
+- [ ] **Separate PostgreSQL data directories/clusters per worker**: out of
+      scope; the current Twin uses isolated databases in one cluster
+- [ ] **Full L6/L7 coverage**: no bounded-state or cache/queue/log providers
+- [ ] **Multi-stack independent PostgreSQL validation**: only one independent
+      PostgreSQL-backed fixture exists today
 - [x] **An identity map in the CLI** (`--identity-map`): already implemented
       with dedicated tests (`tests/test_identity_map.py`); this entry was stale
 - [x] **Proof bundles carry no secrets**: the bearer token is a placeholder,
