@@ -1,5 +1,10 @@
 # Mīzān Phase VI.2.2 — Durable Cleanup Journal & Orphan-Aware Recovery
 
+> **Phase VI.2.3 tightens the completion state machine.** An absent database
+> now requires a deletion intent even when its record says CLEANED, and intent
+> plus record are completed in one atomic registry replacement. See
+> `PHASE_VI_2_3_ATOMIC_COMPLETION_REPORT.md`.
+
 ## 1. Executive summary
 
 Two recovery defects were closed.

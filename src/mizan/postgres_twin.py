@@ -29,6 +29,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import decimal
+import errno
 import hashlib
 import json
 import os
@@ -100,6 +101,10 @@ DIRECTORY_FSYNC_SUPPORTED = _directory_fsync_supported()
 #: process crash-recovery tests install them.
 INTENT_TEST_HOOK: Callable[[str], None] | None = None
 DELETION_TEST_HOOK: Callable[[str], None] | None = None
+
+#: Hooks installed only by the atomic-replacement process-interruption tests.
+REGISTRY_BEFORE_REPLACE_HOOK: Callable[[], None] | None = None
+REGISTRY_AFTER_REPLACE_HOOK: Callable[[], None] | None = None
 
 #: A client-controlled label for application sessions. It is NOT a credential:
 #: no backend is terminated or trusted because it carries this value.
@@ -1043,6 +1048,14 @@ class IntentState(StrEnum):
     CLEANED = "CLEANED"
 
 
+def _intent_integrity(data: dict[str, Any]) -> str:
+    """Digest of all persisted intent fields except the integrity field itself."""
+    payload = {key: value for key, value in data.items() if key != "integrity"}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
 @dataclass(frozen=True)
 class DeletionIntent:
     """A durable, pre-deletion proof bound to one exact database OID."""
@@ -1060,6 +1073,7 @@ class DeletionIntent:
     operation_id: str
     created_at: float
     state: IntentState = IntentState.DELETE_PENDING
+    integrity: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1076,6 +1090,7 @@ class DeletionIntent:
             "operation_id": self.operation_id,
             "created_at": self.created_at,
             "state": str(self.state),
+            "integrity": self.integrity,
         }
 
     @classmethod
@@ -1097,6 +1112,7 @@ class DeletionIntent:
                 operation_id=str(data["operation_id"]),
                 created_at=float(data["created_at"]),
                 state=IntentState(str(data["state"])),
+                integrity=str(data.get("integrity", "")),
             )
         except (KeyError, TypeError, ValueError):
             raise OwnershipError("a deletion intent is incomplete or malformed") from None
@@ -1110,11 +1126,18 @@ class DeletionIntent:
             raise OwnershipError("a deletion intent has an invalid marker digest")
         if not intent.operation_id or intent.oid <= 0 or intent.created_at <= 0:
             raise OwnershipError("a deletion intent has invalid identity fields")
+        if not re.fullmatch(r"[0-9a-f]{32}", intent.operation_id):
+            raise OwnershipError("a deletion intent has an invalid operation identifier")
+        if intent.integrity and intent.integrity != _intent_integrity(data):
+            raise OwnershipError("a deletion intent failed its integrity check")
         require_generated_name(intent.database_name, run_id=intent.run_id, kind=intent.kind, worker_id=intent.worker_id)
         return intent
 
     def with_state(self, state: IntentState) -> DeletionIntent:
-        return replace(self, state=state)
+        data = self.to_dict()
+        data["state"] = str(state)
+        data.pop("integrity", None)
+        return replace(self, state=state, integrity=_intent_integrity(data))
 
 
 class OwnershipUnprovable(OwnershipError):
@@ -1189,6 +1212,8 @@ class DatabaseRegistry:
         self.path = Path(path)
         self.lock_timeout = lock_timeout
         self.stale_lock = stale_lock
+        self.last_directory_synced = False
+        self.last_directory_sync_supported = True
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.exists() and self.path.is_symlink():
             raise OwnershipError("the ownership registry must not be a symbolic link")
@@ -1266,31 +1291,79 @@ class DatabaseRegistry:
         value = self.load().get(database_name)
         return OwnershipRecord.from_dict(value) if value else None
 
-    def _write(self, records: dict[str, dict[str, Any]]) -> None:
+    def _write(self, records: dict[str, dict[str, Any]]) -> bool:
         payload = json.dumps(records, indent=2, sort_keys=True)
         temporary = self.path.with_name(f".{self.path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        descriptor: int | None = None
         try:
-            with open(temporary, "w", encoding="utf-8", newline="\n") as stream:
+            # Restrictive permissions exist from creation, before content is
+            # written or the final file fsync is performed.
+            descriptor = os.open(str(temporary), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+                descriptor = None
                 stream.write(payload)
                 stream.flush()
-                os.fsync(stream.fileno())
-            try:
-                os.chmod(temporary, 0o600)
-            except OSError:  # pragma: no cover
-                pass
-            os.replace(temporary, self.path)
-            directory_synced = False
-            if DIRECTORY_FSYNC_SUPPORTED:
-                descriptor = os.open(str(self.path.parent), os.O_RDONLY)
                 try:
-                    os.fsync(descriptor)
-                    directory_synced = True
-                finally:
-                    os.close(descriptor)
-            return directory_synced
+                    os.chmod(temporary, 0o600)
+                except OSError:  # pragma: no cover - non-POSIX permission model
+                    pass
+                os.fsync(stream.fileno())
+            if REGISTRY_BEFORE_REPLACE_HOOK is not None:
+                REGISTRY_BEFORE_REPLACE_HOOK()
+            os.replace(temporary, self.path)
+            if REGISTRY_AFTER_REPLACE_HOOK is not None:
+                REGISTRY_AFTER_REPLACE_HOOK()
         finally:
+            if descriptor is not None:
+                os.close(descriptor)
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(temporary)
+
+        # Synchronize the actual containing directory, not a temporary probe.
+        self.last_directory_synced = False
+        try:
+            directory = os.open(str(self.path.parent), os.O_RDONLY)
+        except OSError as exc:
+            self.last_directory_sync_supported = False
+            self._note_directory_sync_unavailable(exc)
+            return False
+        try:
+            os.fsync(directory)
+            self.last_directory_synced = True
+            self.last_directory_sync_supported = True
+        except OSError as exc:
+            unsupported = {
+                errno.EACCES,
+                errno.EPERM,
+                errno.ENOTSUP,
+                getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
+                errno.EINVAL,
+                errno.ENOSYS,
+            }
+            if os.name == "nt" or exc.errno in unsupported:
+                self.last_directory_sync_supported = False
+                self._note_directory_sync_unavailable(exc)
+            else:
+                # The rename may already be visible; report this honestly.
+                raise OwnershipError(
+                    f"registry replaced but the directory could not be synced: {exc.strerror or 'unknown I/O error'}"
+                ) from None
+        finally:
+            os.close(directory)
+        return self.last_directory_synced
+
+    @staticmethod
+    def _note_directory_sync_unavailable(exc: OSError) -> None:
+        """Document an unsupported platform; never hide a genuine I/O error."""
+        if os.name != "nt" and exc.errno not in {
+            errno.EACCES,
+            errno.EPERM,
+            errno.EINVAL,
+            errno.ENOSYS,
+        }:
+            raise OwnershipError(
+                f"registry directory synchronization failed: {exc.strerror or 'unknown I/O error'}"
+            ) from None
 
     # -- durable deletion intents ------------------------------------------- #
 
@@ -1312,6 +1385,49 @@ class DatabaseRegistry:
             journal[intent.database_name] = intent.to_dict()
             records[DELETION_INTENTS_KEY] = journal
             return self._write(records)
+
+    def complete_deletion(
+        self,
+        record: OwnershipRecord,
+        intent: DeletionIntent,
+        *,
+        allow_legacy: bool = False,
+    ) -> bool:
+        """Atomically mark both the intent and its ownership record CLEANED.
+
+        One lock, one reload, one in-memory snapshot and exactly one ``_write``.
+        ``allow_legacy`` is only for the VI.2.2 split state where a completed
+        intent exists with a non-CLEANED record and the database is absent.
+        """
+        with self._lock():
+            data = self.load()
+            raw_record = data.get(record.database_name)
+            journal = data.get(DELETION_INTENTS_KEY)
+            raw_intent = journal.get(intent.database_name) if isinstance(journal, dict) else None
+            if not isinstance(raw_record, dict) or not isinstance(raw_intent, dict):
+                raise OwnershipError("the record or deletion intent is missing from the registry")
+            current_record = OwnershipRecord.from_dict(raw_record)
+            current_intent = DeletionIntent.from_dict(raw_intent)
+            if current_record != record:
+                raise OwnershipError("the registry record changed since it was loaded")
+            if current_intent != intent:
+                raise OwnershipError("the deletion intent changed since it was loaded")
+            validate_intent(intent, record, cluster_id=intent.cluster_id, source_database=intent.source_database)
+            if intent.database_name != record.database_name or intent.operation_id != current_intent.operation_id:
+                raise OwnershipError("the deletion intent does not match its ownership record")
+            if allow_legacy:
+                if intent.state is not IntentState.CLEANED or record.state is TwinState.CLEANED:
+                    raise OwnershipError("the legacy split-state precondition is not met")
+            else:
+                if intent.state is not IntentState.DELETE_PENDING:
+                    raise OwnershipError("only a pending deletion intent can be completed")
+                if record.state is TwinState.CLEANED:
+                    raise OwnershipError("the ownership record is already CLEANED")
+            completed_intent = intent.with_state(IntentState.CLEANED)
+            completed_record = replace(record, state=TwinState.CLEANED)
+            data[record.database_name] = completed_record.to_dict()
+            data[DELETION_INTENTS_KEY][intent.database_name] = completed_intent.to_dict()
+            return self._write(data)
 
     def remove_intent(self, database_name: str) -> None:
         with self._lock():
@@ -1497,19 +1613,35 @@ def prepare_deletion_intent(
         if pending.oid != oid or pending.marker_digest != digest:
             raise OwnershipError("the pending deletion intent does not match the live database identity")
         return pending
+    fields = {
+        "run_id": record.run_id,
+        "database_name": name,
+        "kind": record.kind,
+        "worker_id": record.worker_id,
+        "source_database": source_database,
+        "cluster_id": cluster_id,
+        "owner_role": record.owner_role,
+        "nonce": record.nonce,
+        "oid": oid,
+        "marker_digest": digest,
+        "operation_id": uuid.uuid4().hex,
+        "created_at": time.time(),
+        "state": str(IntentState.DELETE_PENDING),
+    }
     intent = DeletionIntent(
-        run_id=record.run_id,
-        database_name=name,
-        kind=record.kind,
-        worker_id=record.worker_id,
-        source_database=source_database,
-        cluster_id=cluster_id,
-        owner_role=record.owner_role,
-        nonce=record.nonce,
-        oid=oid,
-        marker_digest=digest,
-        operation_id=uuid.uuid4().hex,
-        created_at=time.time(),
+        run_id=fields["run_id"],
+        database_name=fields["database_name"],
+        kind=fields["kind"],
+        worker_id=fields["worker_id"],
+        source_database=fields["source_database"],
+        cluster_id=fields["cluster_id"],
+        owner_role=fields["owner_role"],
+        nonce=fields["nonce"],
+        oid=fields["oid"],
+        marker_digest=fields["marker_digest"],
+        operation_id=fields["operation_id"],
+        created_at=fields["created_at"],
+        integrity=_intent_integrity(fields),
     )
     registry.put_intent(intent)
     if registry.get_intent(name) != intent:
@@ -1543,6 +1675,26 @@ def validate_intent(
         raise OwnershipError("the deletion intent marker digest does not match the record")
 
 
+def _absent_intent_proof(
+    admin: Any,
+    record: OwnershipRecord,
+    intent: DeletionIntent,
+    *,
+    cluster_id: str,
+    source_database: str,
+) -> None:
+    """Validate the durable evidence for a database that is already absent."""
+    validate_intent(intent, record, cluster_id=cluster_id, source_database=source_database)
+    if intent.oid <= 0 or not intent.operation_id:
+        raise OwnershipError("the deletion intent has invalid identity fields")
+    if intent.cluster_id != cluster_id:
+        raise OwnershipError("the deletion intent names a different cluster")
+    if cluster_identity(admin) != cluster_id:
+        raise OwnershipError("the cluster changed since the deletion intent was written")
+    if database_exists(admin, record.database_name):
+        raise OwnershipError("the database is present; an absent-database proof is invalid")
+
+
 def _reconcile_absent_database(
     admin: Any,
     registry: DatabaseRegistry,
@@ -1552,16 +1704,16 @@ def _reconcile_absent_database(
     cluster_id: str,
     source_database: str,
 ) -> None:
-    """Case C: a journaled deletion completed before the registry was updated."""
-    if intent.state is not IntentState.DELETE_PENDING:
-        raise OwnershipError("the deletion intent is not in the pending state")
-    validate_intent(intent, record, cluster_id=cluster_id, source_database=source_database)
-    if cluster_identity(admin) != intent.cluster_id:
-        raise OwnershipError("the cluster changed since the deletion intent was written")
-    if database_exists(admin, record.database_name):
-        raise OwnershipError("the database is present; a pending intent cannot reconcile it")
-    registry.put_intent(intent.with_state(IntentState.CLEANED))
-    registry.update_state(record.database_name, TwinState.CLEANED)
+    """Cases C/E: complete or legacy-reconcile a journaled deletion."""
+    _absent_intent_proof(admin, record, intent, cluster_id=cluster_id, source_database=source_database)
+    allow_legacy = intent.state is IntentState.CLEANED
+    if not allow_legacy and intent.state is not IntentState.DELETE_PENDING:
+        raise OwnershipError("the deletion intent is not in a reconcilable state")
+    if allow_legacy and record.state is TwinState.CLEANED:
+        raise OwnershipError("a completed intent with a completed record needs no reconciliation")
+    if not allow_legacy and record.state is TwinState.CLEANED:
+        raise OwnershipError("a pending intent with a completed record is inconsistent")
+    registry.complete_deletion(record, intent, allow_legacy=allow_legacy)
 
 
 def verified_drop(
@@ -1589,18 +1741,20 @@ def verified_drop(
     name = record.database_name
     pending = registry.get_intent(name)
     if not database_exists(admin, name):
-        if pending is not None and pending.state is IntentState.CLEANED and record.state is TwinState.CLEANED:
+        if pending is None:
+            # A local record, even CLEANED, is never proof of a deletion.
+            raise OwnershipError(f"{name!r} is missing without a valid deletion intent")
+        if pending.state is IntentState.CLEANED and record.state is TwinState.CLEANED:
+            _absent_intent_proof(admin, record, pending, cluster_id=cluster_id, source_database=source_database)
             return False
-        if pending is not None:
-            _reconcile_absent_database(
-                admin, registry, record, pending, cluster_id=cluster_id, source_database=source_database
-            )
-            return False
-        if record.state is TwinState.CLEANED:
-            return False
-        raise OwnershipError(f"{name!r} is missing without a valid deletion intent")
+        _reconcile_absent_database(
+            admin, registry, record, pending, cluster_id=cluster_id, source_database=source_database
+        )
+        return False
     if record.state is TwinState.CLEANED:
         raise OwnershipError("the registry says CLEANED but the database still exists")
+    if pending is not None and pending.state is IntentState.CLEANED:
+        raise OwnershipError("a completed deletion intent still names an existing database")
     intent = prepare_deletion_intent(admin, registry, record, cluster_id=cluster_id, source_database=source_database)
     if database_oid(admin, name) != intent.oid:
         raise OwnershipError("the database OID changed after the deletion intent was persisted")
@@ -1616,8 +1770,7 @@ def verified_drop(
         raise CleanupError(f"the database {name!r} survived the drop")
     if DELETION_TEST_HOOK is not None:
         DELETION_TEST_HOOK(name)
-    registry.put_intent(intent.with_state(IntentState.CLEANED))
-    registry.update_state(name, TwinState.CLEANED)
+    registry.complete_deletion(record, intent)
     return True
 
 
@@ -2482,23 +2635,19 @@ def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
                 name = record.database_name
                 if not database_exists(admin, name):
                     intent = registry.get_intent(name)
-                    if intent is not None:
-                        try:
-                            if intent.state is IntentState.CLEANED:
-                                if record.state is not TwinState.CLEANED:
-                                    raise OwnershipError("a completed intent has an inconsistent record")
-                                continue
-                            if intent.state is not IntentState.DELETE_PENDING:
-                                raise OwnershipError("the deletion intent is not pending")
-                            validate_intent(intent, record, cluster_id=cluster, source_database=source_database)
-                            if cluster_identity(admin) != intent.cluster_id:
-                                raise OwnershipError("the cluster changed since the intent was written")
-                        except Exception as exc:
-                            reasons.append(f"{name}: invalid deletion intent: {exc}")
-                            categories[name] = "invalid deletion intent"
-                    elif record.state is not TwinState.CLEANED:
-                        reasons.append(f"{name}: the database is missing without a valid deletion intent")
-                        categories[name] = "missing inconsistent"
+                    if intent is None:
+                        reasons.append(f"{name}: the database is absent without a deletion intent")
+                        categories[name] = "missing without deletion intent"
+                        continue
+                    try:
+                        _absent_intent_proof(admin, record, intent, cluster_id=cluster, source_database=source_database)
+                        if intent.state not in {IntentState.DELETE_PENDING, IntentState.CLEANED}:
+                            raise OwnershipError("the deletion intent has an unknown state")
+                        if intent.state is IntentState.DELETE_PENDING and record.state is TwinState.CLEANED:
+                            raise OwnershipError("a pending intent with a completed record is inconsistent")
+                    except Exception as exc:
+                        reasons.append(f"{name}: invalid deletion intent: {exc}")
+                        categories[name] = "invalid deletion intent"
                     continue
                 if name in categories:
                     continue
@@ -2545,7 +2694,10 @@ def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
                 if database_exists(admin, record.database_name):
                     continue
                 intent = registry.get_intent(record.database_name)
-                if intent is not None and intent.state is IntentState.DELETE_PENDING:
+                if intent is not None and (
+                    intent.state is IntentState.DELETE_PENDING
+                    or (intent.state is IntentState.CLEANED and record.state is not TwinState.CLEANED)
+                ):
                     _reconcile_absent_database(
                         admin,
                         registry,

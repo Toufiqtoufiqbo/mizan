@@ -169,6 +169,15 @@ jobs:
       - name: Durable deletion intent before DROP
         run: python -m pytest -q tests/test_postgres_twin.py -k "delete_intent_is_durable or pending_intent_with_existing"
 
+      - name: Strict missing-intent recovery and legacy split state
+        run: python -m pytest -q tests/test_postgres_twin.py -k "missing_intent_absent or valid_pending_intent_absent or valid_cleaned_intent_and or legacy_split_state or existing_database_with_cleaned or absent_database_with_tampered"
+
+      - name: Atomic completion one-write and rejection cases
+        run: python -m pytest -q tests/test_postgres_twin.py -k "complete_deletion_ or registry_permissions_and_durability"
+
+      - name: Real process interruption before and after atomic replacement
+        run: python -m pytest -q tests/test_postgres_twin.py -k "process_crash_during_completion"
+
       - name: Real process crash after intent and after DROP
         run: python -m pytest -q tests/test_postgres_twin.py -k "crash_after_intent or crash_after_drop"
 
