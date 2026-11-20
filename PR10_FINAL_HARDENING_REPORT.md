@@ -7,8 +7,10 @@ Starting state verified before any edits:
 - `main` at `0ffc1f606f9e3e40b60f9fcd23bb54afb2d3d238`, untouched.
 - Clean worktree; `stash@{0}` preserved.
 - PR #10 open and unmerged; `head` equals the starting SHA; `mergeable_state: clean`.
-- VI.2.2 commit `f3f6c0054230681060054fc2cbac4b3e3cb42f3b`; VI.2.3 commit
-  `9fff26d9bcef396fb9cc191b4419104b6d05f600`; PR body updated to include VI.2.3.
+- VI.2.2 commit `f3f6c0054230681060054fc2cbac4b3e3cb42f3b`; VI.2.3 commits
+  `9fff26d9bcef396fb9cc191b4419104b6d05f600` (implementation) and
+  `fa992864e78e4c98be854e389019dd03ecab7d96` (Windows fsync classification
+  fix); PR body updated to include VI.2.3.
 - No code edited before `PR10_FINAL_HARDENING_AUDIT.md` was written.
 
 ## Finding A — The legacy fixture reproduces the real VI.2.2 format
@@ -72,6 +74,21 @@ New unit tests:
 - `test_directory_fsync_io_error_is_raised`: a genuine `EIO` after replace
   raises `OwnershipError`.
 
+## CI
+
+- Implementation `5cb2712ba15a0d824b2052a2b9be3bc111f34f57` — run
+  **44746934428** (#255), conclusion **success**. Jobs A, B, B2, C, D, E, F, G
+  and S all succeeded; external target SKIPPED.
+- Implementation `fa992864e78e4c98be854e389019dd03ecab7d96` — run
+  **44744159074** (#254), conclusion **failure**: Windows directory-fsync
+  classification raised for `PermissionError`; fixed by the 5cb2712 commit.
+- Implementation `9fff26d9bcef396fb9cc191b4419104b6d05f600` — run
+  **44732663358** (#249), conclusion **success**. Jobs A–G, B2 and S PASSED;
+  external target SKIPPED.
+- Documentation commit for this report is pending; its run is recorded in the
+  delivery message.
+- Workflow: https://github.com/Toufiqtoufiqbo/mizan/actions/runs/44746934428
+
 ## Verification
 
 Final local tree: `python -m pytest -q` → **717 passed, 3 skipped, 1 warning
@@ -83,16 +100,25 @@ SKIPPED and executed by CI B2 on Linux.
 
 `ruff check .`, `ruff format --check .`, YAML parsing and `git diff --check`
 pass. PostgreSQL: local 16.2 via `pgserver`, psycopg 3.3.9; CI
-`postgres:16-alpine`. On Windows, directory `fsync()` on the real registry
-parent is unsupported and reported honestly (`last_directory_sync_supported`
-and `last_directory_synced` are `False`).
+`postgres:16-alpine`. On Windows, the real registry parent does not support
+directory `fsync()`; `last_directory_sync_supported` and `last_directory_synced`
+are reported as `False`.
 
-Legacy compatibility was proven with a real PostgreSQL run against a
-historical VI.2.2 serialization (no `integrity` field, float `created_at`):
-the split state reconciled to `CLEANED` while preserving `operation_id`, nonce,
-OID and marker digest. Legacy intents cannot authorize deletion of an existing
-database; tampered legacy intents are rejected; the upgraded registry passes
-`DeletionIntent.from_dict()` round-trip.
+Legacy compatibility was proven with real PostgreSQL 16.2 against a historical
+VI.2.2 serialization (no `integrity` field, float `created_at`):
+`test_vi22_historical_registry_without_integrity_reconciles` performed a real
+`DROP DATABASE`, wrote the historical JSON to the real registry path, invoked
+the public cleanup path, and asserted reconciliation of both states while
+preserving the original `operation_id`, nonce, OID, marker digest, run identity
+and database identity; the upgraded registry passes `DeletionIntent.from_dict()`
+round-trip. `test_vi22_legacy_intent_without_integrity_cannot_delete_an_existing_database`
+and `test_vi22_legacy_intent_tampered_marker_is_rejected` prove legacy intents
+cannot authorize deletion of an existing database or tolerate tampering.
+
+Directory fsync behavior: `test_registry_write_reports_actual_parent_sync`,
+`test_directory_fsync_failure_is_reported`, `test_directory_fsync_io_error_is_raised`,
+`test_directory_open_failure_is_reported` and `test_no_import_time_directory_probe`
+all pass.
 
 CI evidence is recorded in the delivery message.
 
