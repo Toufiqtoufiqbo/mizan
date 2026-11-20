@@ -116,7 +116,10 @@ The CLI retry completed successfully from the old state and was idempotent from
 the new state, preserving the original `operation_id`. This process-kill
 evidence does **not** prove power-loss durability.
 
-CI evidence is recorded in the delivery message.
+CI on implementation commit `9fff26d9bcef396fb9cc191b4419104b6d05f600`:
+workflow run **44732663358** (#249), conclusion **success**. Jobs A, B, B2,
+C, D, E, F, G and S all succeeded; the external-target opt-in was SKIPPED.
+The documentation/evidence commit's run is recorded in the delivery message.
 
 ## 7. Remaining limitations
 
