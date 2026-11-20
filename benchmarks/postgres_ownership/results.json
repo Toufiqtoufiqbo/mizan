@@ -1,0 +1,293 @@
+{
+  "problems": [],
+  "scenarios": [
+    {
+      "candidate_ownership": 0,
+      "confirmed_ownership": 1,
+      "debug_mapping": {
+        "resource_rows": {
+          "items:a1": [
+            "mizan_bench_1b70e3f550.items",
+            [
+              "a1"
+            ]
+          ]
+        },
+        "row_key": "a1",
+        "table": "mizan_bench_1b70e3f550.items"
+      },
+      "expected": {
+        "findings": 0,
+        "grant": 0,
+        "inconclusive": 0
+      },
+      "findings_detail": [],
+      "inconclusive_reasons": [],
+      "name": "clean_owner_write",
+      "observed": {
+        "events": 1,
+        "findings": 0,
+        "grant": 0,
+        "inconclusive": 0,
+        "status": "ran"
+      },
+      "request_count": 1,
+      "unknown_ownership": 0
+    },
+    {
+      "candidate_ownership": 1,
+      "confirmed_ownership": 0,
+      "debug_mapping": {
+        "resource_rows": {
+          "items:a1": [
+            "mizan_bench_59da203e93.items",
+            [
+              "a1"
+            ]
+          ]
+        },
+        "row_key": "a1",
+        "table": "mizan_bench_59da203e93.items"
+      },
+      "expected": {
+        "findings": 0,
+        "grant": 0,
+        "inconclusive": 1
+      },
+      "findings_detail": [],
+      "inconclusive_reasons": [
+        "ownership is CANDIDATE; a confirmed owner is required"
+      ],
+      "name": "candidate_owner_never_finds",
+      "observed": {
+        "events": 1,
+        "findings": 0,
+        "grant": 0,
+        "inconclusive": 1,
+        "status": "ran"
+      },
+      "request_count": 1,
+      "unknown_ownership": 1
+    },
+    {
+      "candidate_ownership": 0,
+      "confirmed_ownership": 1,
+      "debug_mapping": {
+        "resource_rows": {
+          "items:a1": [
+            "mizan_bench_aa50dcac4c.items",
+            [
+              "a1"
+            ]
+          ]
+        },
+        "row_key": "a1",
+        "table": "mizan_bench_aa50dcac4c.items"
+      },
+      "expected": {
+        "findings": 1,
+        "grant": 0,
+        "inconclusive": 0
+      },
+      "findings_detail": [
+        "L3"
+      ],
+      "inconclusive_reasons": [],
+      "name": "confirmed_bola_write",
+      "observed": {
+        "events": 1,
+        "findings": 1,
+        "grant": 0,
+        "inconclusive": 0,
+        "status": "ran"
+      },
+      "request_count": 1,
+      "unknown_ownership": 0
+    },
+    {
+      "candidate_ownership": 0,
+      "confirmed_ownership": 1,
+      "debug_mapping": {
+        "resource_rows": {
+          "items:a1": [
+            "mizan_bench_9faa3951de.items",
+            [
+              "a1"
+            ]
+          ]
+        },
+        "row_key": "a1",
+        "table": "mizan_bench_9faa3951de.items"
+      },
+      "expected": {
+        "findings": 0,
+        "grant": 0,
+        "inconclusive": 1
+      },
+      "findings_detail": [],
+      "inconclusive_reasons": [
+        "the write attribution is 'missing_request'; no confirmed author and request"
+      ],
+      "name": "missing_request_context",
+      "observed": {
+        "events": 1,
+        "findings": 0,
+        "grant": 0,
+        "inconclusive": 1,
+        "status": "ran"
+      },
+      "request_count": 1,
+      "unknown_ownership": 0
+    },
+    {
+      "candidate_ownership": 0,
+      "confirmed_ownership": 1,
+      "debug_mapping": {
+        "resource_rows": {
+          "items:a1": [
+            "mizan_bench_ebd1eb93cb.items",
+            [
+              "a1"
+            ]
+          ]
+        },
+        "row_key": "a1",
+        "table": "mizan_bench_ebd1eb93cb.items"
+      },
+      "expected": {
+        "findings": 1,
+        "grant": 0,
+        "inconclusive": 0
+      },
+      "findings_detail": [
+        "L3"
+      ],
+      "inconclusive_reasons": [],
+      "name": "read_only_grant_does_not_authorize_write",
+      "observed": {
+        "events": 1,
+        "findings": 1,
+        "grant": 0,
+        "inconclusive": 0,
+        "status": "ran"
+      },
+      "request_count": 1,
+      "unknown_ownership": 0
+    },
+    {
+      "candidate_ownership": 0,
+      "confirmed_ownership": 1,
+      "debug_mapping": {
+        "resource_rows": {
+          "items:a1": [
+            "mizan_bench_922f4fb86f.items",
+            [
+              "a1"
+            ]
+          ]
+        },
+        "row_key": "a1",
+        "table": "mizan_bench_922f4fb86f.items"
+      },
+      "expected": {
+        "findings": 0,
+        "grant": 1,
+        "inconclusive": 0
+      },
+      "findings_detail": [],
+      "inconclusive_reasons": [],
+      "name": "write_grant_resolves_write",
+      "observed": {
+        "events": 1,
+        "findings": 0,
+        "grant": 1,
+        "inconclusive": 0,
+        "status": "ran"
+      },
+      "request_count": 1,
+      "unknown_ownership": 0
+    },
+    {
+      "candidate_ownership": 0,
+      "confirmed_ownership": 1,
+      "debug_mapping": {
+        "resource_rows": {
+          "items:a1": [
+            "mizan_bench_e04819ec3c.items",
+            [
+              "a1"
+            ]
+          ]
+        },
+        "row_key": null,
+        "table": null
+      },
+      "expected": {
+        "findings": 0,
+        "grant": 0,
+        "inconclusive": 0
+      },
+      "findings_detail": [],
+      "inconclusive_reasons": [],
+      "name": "rolled_back_write",
+      "observed": {
+        "events": 0,
+        "findings": 0,
+        "grant": 0,
+        "inconclusive": 0,
+        "status": "ran"
+      },
+      "request_count": 1,
+      "unknown_ownership": 0
+    },
+    {
+      "candidate_ownership": 0,
+      "confirmed_ownership": 1,
+      "debug_mapping": {
+        "resource_rows": {
+          "items:[\"t1\",\"a1\"]": [
+            "mizan_bench_6fd0f892d6.items",
+            [
+              "t1",
+              "a1"
+            ]
+          ]
+        },
+        "row_key": "[\"t1\",\"a1\"]",
+        "table": "mizan_bench_6fd0f892d6.items"
+      },
+      "expected": {
+        "findings": 1,
+        "grant": 0,
+        "inconclusive": 0
+      },
+      "findings_detail": [
+        "L3"
+      ],
+      "inconclusive_reasons": [],
+      "name": "composite_primary_key",
+      "observed": {
+        "events": 1,
+        "findings": 1,
+        "grant": 0,
+        "inconclusive": 0,
+        "status": "ran"
+      },
+      "request_count": 1,
+      "unknown_ownership": 0
+    }
+  ],
+  "summary": {
+    "attribution_failures": 1,
+    "candidate_ownership": 1,
+    "confirmed_ownership": 7,
+    "denominator_scenarios": 8,
+    "findings": 3,
+    "grants": 1,
+    "inconclusive": 2,
+    "passed": 8,
+    "requests": 8,
+    "scenarios": 8,
+    "unknown_ownership": 1
+  }
+}

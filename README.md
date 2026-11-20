@@ -491,3 +491,99 @@ not yet. See `ROADMAP.md` for what comes next.
 ## License
 
 MIT.
+
+
+## PostgreSQL ownership evidence (Phase VI)
+
+PostgreSQL now supplies the same ownership-evidence inputs as SQLite:
+schema-qualified introspection (including composite keys), row access, a
+monotonic audit cursor, and request-level correlation. The data feeds the
+existing ownership graph and L2/L3 evidence paths; there is no second ownership
+engine.
+
+```bash
+export MIZAN_DATABASE_URL='postgresql://user:password@host/database'
+mizan postgres-evidence \
+  --dsn-env MIZAN_DATABASE_URL \
+  --schema app \
+  --schema audit \
+  --relationship-contract app/contract.json
+```
+
+The DSN is read from an environment variable, never printed, and database
+objects are only created with the explicit `--install-audit` opt-in. Trigger
+installation is limited to the allowlisted schemas.
+
+Three capabilities must not be confused:
+
+- **Write auditing** — trigger records with transaction-local identity and
+  request correlation.
+- **Ownership-graph evidence** — schema/rows/cursor supplied to the existing
+  graph; candidate, unknown and contradictory ownership remain unresolved.
+- **End-to-end attack support** — available only through the dedicated
+  `mizan postgres-twin --allow-disposable` command (Phase VI.1/VI.2). The
+  generic `scan`/`attack` path is not wired to a disposable PostgreSQL clone and
+  fails closed. The `postgres-evidence` command remains read-only and reports
+  `INCONCLUSIVE` because it runs no authorization probes.
+
+Unattributed, missing-correlation and ambiguously attributed writes are
+reported as inconclusive outcomes, never as confirmed L3 violations.
+
+
+## PostgreSQL disposable Twin (Phase VI.1/VI.2)
+
+`mizan postgres-twin` prepares an immutable, schema-allowlisted seed from the
+configured source, clones one disposable database per worker, verifies each
+worker against a canonical baseline digest, executes L2/L3 probes on an isolated
+clone, and cleans up every database through verified ownership.
+
+```bash
+export MIZAN_DATABASE_URL='postgresql://user:password@host/source'
+mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --schema app \
+  --allow-disposable --workers 2 --exercise
+mizan postgres-twin --dsn-env MIZAN_DATABASE_URL --cleanup-run RUN_ID
+```
+
+`--cleanup-run` reports `CLEANED`, `PREFLIGHT_FAILED`, `PARTIAL_CLEANUP`,
+`OWNERSHIP_UNPROVABLE` or `CLEANUP_FAILED`; only `CLEANED` means every resource
+was verified absent. Phase VI.2.2 makes `--workspace` mandatory for recovery: a
+registry is never created during cleanup, and a missing registry fails closed.
+Every owned deletion is journaled durably before its `DROP DATABASE`. VI.2.3
+adds `complete_deletion()`: one atomic registry replacement marks both the
+intent and the ownership record CLEANED.
+
+`--dry-run` validates the DSN, tools, allowlist and fingerprint **without
+creating any database** and reports `DRY_RUN_OK` (never `VERIFIED`).
+`--workers N` provisions N isolated databases and processes; `--exercise`
+executes the L2/L3 probes against worker `w0` only. `--cleanup-run RUN_ID`
+recovers databases left by an interrupted run. The source DSN is never printed;
+passwords and tokens never appear in CLI arguments, logs, reports or proof
+bundles — `pg_dump`/`psql` receive credentials through a temporary `PGPASSFILE`.
+`--allow-disposable` is mandatory before any database is created.
+
+The source database is never an attack target, never receives audit triggers,
+and its canonical fingerprint is asserted before and after the run. Only the
+configured schemas are dumped, fingerprinted and cloned. The label
+`mizan:<run_id>:<worker_id>` is client-controlled metadata, not a credential:
+Mīzān never terminates a session because of it. A restore stops the application
+and observes its exit, closes this run's connections, lets the backends
+disconnect on their own and refuses the drop if any session remains, re-clones
+from the seed, reinstalls audit infrastructure, restarts the application and
+only then marks the worker READY. An unrelated session — even one copying the
+exact label — aborts the drop and is never terminated.
+
+Cleanup requires a local record **and** a server-side database marker that agree
+on run, kind, worker, source, cluster identity (`pg_control_system()`), owner
+role and nonce. **Every** database in the run is verified before the first
+deletion; one invalid marker rejects the entire run. A local JSON record alone
+never authorizes deletion, no `DROP DATABASE ... WITH (FORCE)` is used, and
+cleanup is idempotent. PostgreSQL cannot drop several databases in one
+transaction, so a later operational failure is reported as `PARTIAL_CLEANUP`
+with the exact completed and remaining databases and is recoverable by retry.
+The final status is emitted only after cleanup; a failure exits non-zero with
+`cleanup_failed` and preserves the records for `--cleanup-run`.
+
+Still unsupported: arbitrary production databases without the required
+privileges, cluster-wide role/tablespace/extension changes, and non-disposable
+target execution. A skipped external target is always reported as SKIPPED, not
+PASSED.

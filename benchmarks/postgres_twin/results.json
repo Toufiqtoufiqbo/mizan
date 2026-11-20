@@ -1,0 +1,93 @@
+{
+  "denominators": {
+    "cleanups": 4,
+    "mutations": 1,
+    "restores": 3,
+    "workers": 2
+  },
+  "environment": {
+    "conditions": "local disposable pgserver",
+    "dataset": "postgres_store fixture, pgstore schema, local fixture only",
+    "git_sha": "3f3f779d074a7ee05c76fbd2ff59477c126a8ce5",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "pool_size": 2,
+    "postgres": {
+      "cluster": "7709837663585139720",
+      "psycopg": "3.3.9",
+      "server": "16.2"
+    },
+    "python": "3.11.9",
+    "repetitions_per_operation": 3,
+    "workers": 2
+  },
+  "failures": [],
+  "measurements": {
+    "baseline_prepare_seconds": {
+      "max": 1.359,
+      "median": 1.359,
+      "min": 1.359,
+      "n": 1,
+      "p95": 1.359
+    },
+    "cleanup_seconds": {
+      "max": 2.328,
+      "median": 0.5315,
+      "min": 0.0,
+      "n": 4,
+      "p95": 2.328
+    },
+    "mutation_seconds": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 1,
+      "p95": 0.0
+    },
+    "restore_seconds": {
+      "max": 4.828,
+      "median": 3.406,
+      "min": 2.797,
+      "n": 3,
+      "p95": 4.828
+    },
+    "worker_startup_seconds": {
+      "max": 2.547,
+      "median": 2.297,
+      "min": 2.047,
+      "n": 2,
+      "p95": 2.547
+    }
+  },
+  "raw_seconds": {
+    "baseline_prepare_seconds": [
+      1.359
+    ],
+    "cleanup_seconds": [
+      2.328,
+      0.0,
+      1.063,
+      0.0
+    ],
+    "mutation_seconds": [
+      0.0
+    ],
+    "restore_seconds": [
+      4.828,
+      3.406,
+      2.797
+    ],
+    "worker_startup_seconds": [
+      2.547,
+      2.047
+    ]
+  },
+  "verification": {
+    "cleanup_idempotent": true,
+    "restore_attempts": 3,
+    "restore_matches_baseline": true,
+    "seed_cleaned": true,
+    "source_unchanged": true,
+    "workers_cleaned": true,
+    "workers_isolated": true
+  }
+}

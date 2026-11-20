@@ -191,6 +191,17 @@ def test_a_missing_or_malformed_application_name_is_unknown(auditor: PostgresAud
     assert auditor.principal_from("mizan:") == UNKNOWN_PRINCIPAL
 
 
+def test_a_stable_session_identity_is_never_a_principal(auditor: PostgresAuditor) -> None:
+    assert auditor.principal_from("mizan:0123456789ab:w0") == UNKNOWN_PRINCIPAL
+    assert auditor.principal_from("mizan:0123456789ab:worker-1") == UNKNOWN_PRINCIPAL
+
+
+def test_the_trigger_prefers_the_transaction_local_principal(auditor: PostgresAuditor) -> None:
+    sql = auditor.audit_function_sql()
+    assert "mizan.principal" in sql
+    assert "application_name" in sql
+
+
 # --------------------------------------------------------------------------- #
 # Conversion
 # --------------------------------------------------------------------------- #

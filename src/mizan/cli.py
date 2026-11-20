@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -744,6 +745,460 @@ def _print_report(engine: Mizan, violations: list[Any], directories: list[Path])
         f"{report['residual_cells']} outside the permitted space, "
         f"residual norm {report['residual_norm']}"
     )
+
+
+@main.command("postgres-evidence")
+@click.option(
+    "--dsn-env",
+    default="MIZAN_DATABASE_URL",
+    show_default=True,
+    help="Name of the environment variable holding the DSN.",
+)
+@click.option("--schema", "schemas", multiple=True, required=True, help="Schema to inspect (repeatable allowlist).")
+@click.option(
+    "--audit-schema", default=None, help="Schema holding the audit table (default: first allowlisted schema)."
+)
+@click.option("--install-audit", is_flag=True, help="Explicit opt-in: create audit table, function and triggers.")
+@click.option("--relationship-contract", "contract_path", default=None, type=click.Path(exists=True, dir_okay=False))
+@click.option("--out", "out_path", default=None, type=click.Path())
+def postgres_evidence(
+    dsn_env: str,
+    schemas: tuple[str, ...],
+    audit_schema: str | None,
+    install_audit: bool,
+    contract_path: str | None,
+    out_path: str | None,
+) -> None:
+    """Build ownership evidence from a PostgreSQL database (read-only).
+
+    This command does NOT attack the database. PostgreSQL attack/twin mode
+    fails closed because filesystem snapshots cannot restore a live database.
+    """
+    import os
+
+    from mizan.attribution import AttributionUnavailable
+    from mizan.ownership import RelationshipContract, RelationshipContractError, build_ownership_graph
+    from mizan.postgres_attribution import PostgresAttributor
+
+    dsn = os.environ.get(dsn_env)
+    if not dsn:
+        raise click.ClickException(f"environment variable {dsn_env} is not set")
+    allowlist = tuple(dict.fromkeys(schemas))
+    audit = audit_schema or allowlist[0]
+    try:
+        import psycopg
+
+        connection = psycopg.connect(dsn, connect_timeout=5)
+    except Exception:
+        # Never echo a DSN: passwords and hosts must not reach logs.
+        raise click.ClickException("cannot connect to PostgreSQL (check the DSN environment variable)")
+    try:
+        provider = PostgresAttributor(connection, schemas=allowlist, audit_schema=audit)
+        if install_audit:
+            provider.auditor.install()
+        try:
+            declared = provider.schema()
+        except AttributionUnavailable:
+            raise click.ClickException(
+                "the audit table is not installed; pass --install-audit explicitly to allow schema changes"
+            )
+        rows = {name: provider.rows(name) for name in declared.tables}
+        contract = None
+        if contract_path:
+            try:
+                contract = RelationshipContract.load(contract_path, strict=True)
+            except RelationshipContractError as exc:
+                raise click.ClickException(f"relationship contract error: {exc}")
+            if contract is not None:
+                try:
+                    contract.validate_schema(declared)
+                except RelationshipContractError as exc:
+                    raise click.ClickException(f"relationship contract error: {exc}")
+        graph = build_ownership_graph(
+            resources={}, traffic=[], ledger=[], schema=declared, rows=rows, contract=contract
+        )
+        report = graph.report()
+        report["schemas"] = list(allowlist)
+        report["verdict"] = "INCONCLUSIVE"
+        report["verdict_reason"] = "evidence only: no authorization probes were executed"
+        report["attack_mode"] = "unsupported: PostgreSQL has no verified disposable-target restoration"
+        rendered = json.dumps(report, indent=2, sort_keys=True)
+        if out_path:
+            Path(out_path).write_text(rendered + "\n", encoding="utf-8")
+        click.echo(rendered)
+    finally:
+        connection.close()
+
+
+@main.command("postgres-twin")
+@click.option(
+    "--dsn-env", default="MIZAN_DATABASE_URL", show_default=True, help="Environment variable holding the DSN."
+)
+@click.option("--schema", "schemas", multiple=True, required=True, help="Schema allowlist (repeatable).")
+@click.option(
+    "--fixture", default=None, type=click.Path(exists=True, file_okay=False), help="Independent fixture directory."
+)
+@click.option("--variant", default="clean", show_default=True)
+@click.option(
+    "--workers",
+    default=2,
+    show_default=True,
+    help="Provision this many isolated worker databases; --exercise probes w0 only.",
+)
+@click.option("--pool-size", default=2, show_default=True, help="Connections each fixture worker keeps pooled.")
+@click.option(
+    "--allow-disposable", is_flag=True, help="Explicit authorization to create and drop disposable databases."
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Validate the DSN, tools, allowlist and fingerprint without creating any database.",
+)
+@click.option("--cleanup-run", default=None, help="Drop only databases owned by this run id.")
+@click.option("--exercise", is_flag=True, help="Execute L2/L3 probes against worker w0.")
+@click.option(
+    "--workspace",
+    default=None,
+    type=click.Path(),
+    help="Run workspace; mandatory with --cleanup-run, which never creates a new one.",
+)
+def postgres_twin(
+    dsn_env: str,
+    schemas: tuple[str, ...],
+    fixture: str | None,
+    variant: str,
+    workers: int,
+    pool_size: int,
+    allow_disposable: bool,
+    dry_run: bool,
+    cleanup_run: str | None,
+    exercise: bool,
+    workspace: str | None,
+) -> None:
+    """Prepare and exercise a disposable PostgreSQL Twin lifecycle.
+
+    The status is emitted only after cleanup has been verified. A cleanup
+    failure exits non-zero and reports ``cleanup_failed``; the local records
+    and the server-side ownership markers are preserved so ``--cleanup-run``
+    can recover them.
+    """
+    import time
+
+    from mizan.postgres_twin import (
+        CancellationToken,
+        CleanupPreflightError,
+        DatabaseRegistry,
+        OwnershipUnprovable,
+        PartialCleanupError,
+        PostgresSource,
+        PostgresTwin,
+        SourceProtectionError,
+        TwinLifecycleError,
+        redact,
+    )
+    from mizan.postgres_twin import (
+        cleanup_run as drop_run,
+    )
+
+    def emit(payload: dict[str, Any], *, code: int = 0) -> None:
+        click.echo(json.dumps(payload, indent=2, sort_keys=True))
+        if code:
+            raise SystemExit(code)
+
+    if cleanup_run and not workspace:
+        emit(
+            {
+                "run_id": cleanup_run,
+                "status": "OWNERSHIP_UNPROVABLE",
+                "cleaned": [],
+                "remaining": [],
+                "reasons": ["--workspace is mandatory with --cleanup-run; no temporary workspace is created"],
+                "category": "missing workspace",
+                "error": "an explicit existing workspace is required for recovery",
+            },
+            code=2,
+        )
+        return
+    root = Path(workspace) if workspace else Path(tempfile.mkdtemp(prefix="mizan-v62-"))
+    if cleanup_run:
+        if not root.is_dir():
+            emit(
+                {
+                    "run_id": cleanup_run,
+                    "status": "OWNERSHIP_UNPROVABLE",
+                    "cleaned": [],
+                    "remaining": [],
+                    "reasons": ["the requested workspace does not exist"],
+                    "category": "missing workspace",
+                    "error": "the recovery workspace must already exist",
+                },
+                code=2,
+            )
+            return
+        registry_file = root / "ownership.json"
+        if registry_file.is_symlink():
+            emit(
+                {
+                    "run_id": cleanup_run,
+                    "status": "OWNERSHIP_UNPROVABLE",
+                    "cleaned": [],
+                    "remaining": [],
+                    "reasons": ["the ownership registry must be a regular file, not a symlink"],
+                    "category": "unsafe registry path",
+                    "error": "a symlinked registry is never read during recovery",
+                },
+                code=2,
+            )
+            return
+    else:
+        root.mkdir(parents=True, exist_ok=True)
+    registry = DatabaseRegistry(root / "ownership.json")
+
+    if cleanup_run:
+        try:
+            cleaned = drop_run(dsn_env, root, cleanup_run)
+        except OwnershipUnprovable as exc:
+            emit(
+                {
+                    "run_id": cleanup_run,
+                    "status": "OWNERSHIP_UNPROVABLE",
+                    "cleaned": [],
+                    "remaining": [],
+                    "reasons": [exc.reason],
+                    "category": "unprovable local ownership",
+                    "orphan_candidates": exc.candidates,
+                    "error": redact(str(exc)),
+                },
+                code=2,
+            )
+            return
+        except CleanupPreflightError as exc:
+            emit(
+                {
+                    "run_id": cleanup_run,
+                    "status": "PREFLIGHT_FAILED",
+                    "cleaned": [],
+                    "remaining": sorted(exc.categories),
+                    "category": "ownership preflight",
+                    "categories": exc.categories,
+                    "reasons": exc.reasons,
+                    "error": redact(str(exc)),
+                },
+                code=2,
+            )
+            return
+        except PartialCleanupError as exc:
+            emit(
+                {
+                    "run_id": cleanup_run,
+                    "status": "PARTIAL_CLEANUP",
+                    "cleaned": exc.cleaned,
+                    "remaining": exc.remaining,
+                    "category": "operational failure during sequential deletion",
+                    "reasons": exc.reasons,
+                    "error": redact(str(exc)),
+                },
+                code=2,
+            )
+            return
+        except Exception as exc:
+            emit(
+                {
+                    "run_id": cleanup_run,
+                    "status": "CLEANUP_FAILED",
+                    "cleaned": [],
+                    "remaining": [],
+                    "category": "cleanup error",
+                    "reasons": [redact(str(exc))],
+                    "error": redact(str(exc)),
+                },
+                code=2,
+            )
+            return
+        emit({"run_id": cleanup_run, "cleaned": cleaned, "remaining": [], "status": "CLEANED"})
+        return
+
+    if not allow_disposable:
+        raise click.ClickException("pass --allow-disposable to authorize disposable database creation")
+    if workers < 1:
+        raise click.ClickException("at least one worker is required")
+
+    fixture_dir = (
+        Path(fixture)
+        if fixture
+        else Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "external_apps" / "postgres_store"
+    )
+    app = fixture_dir / "app.py"
+    if not app.exists():
+        raise click.ClickException("the fixture application was not found")
+    command = [
+        sys.executable,
+        str(app),
+        "--port",
+        "{port}",
+        "--vulnerability",
+        variant,
+    ]
+
+    try:
+        source = PostgresSource(dsn_env, schemas=tuple(schemas))
+    except SourceProtectionError as exc:
+        emit({"status": "FAILED", "error": redact(str(exc))}, code=2)
+        return
+
+    evidence: dict[str, Any] = {
+        "run_id": source.run_id,
+        "source_database": source.source_name(),
+        "schemas": list(schemas),
+        "workers": workers,
+        "pool_size": pool_size,
+        "dry_run": dry_run,
+        "probe_worker": "w0" if exercise else None,
+    }
+    timings: dict[str, float] = {}
+    started: list[PostgresTwin] = []
+    baseline = None
+    failure: str | None = None
+    cleanup_errors: list[str] = []
+    token = CancellationToken()
+
+    try:
+        token.install()
+        if dry_run:
+            before = time.monotonic()
+            tools = source.preflight()
+            timings["preflight_seconds"] = round(time.monotonic() - before, 3)
+            evidence.update(
+                {
+                    # A dry run creates nothing, so there is no cleanup to
+                    # verify; it must not use the word VERIFIED.
+                    "status": "DRY_RUN_OK",
+                    "baseline_fingerprint": tools["fingerprint"],
+                    "tools": tools["tools"],
+                    "timings": timings,
+                }
+            )
+        else:
+            begin = time.monotonic()
+            baseline = source.prepare_baseline(root)
+            timings["baseline_seconds"] = round(time.monotonic() - begin, 3)
+            evidence["seed_database"] = baseline.name
+            evidence["baseline_fingerprint"] = baseline.fingerprint
+
+            for index in range(workers):
+                begin = time.monotonic()
+                twin = PostgresTwin(
+                    source,
+                    baseline,
+                    registry,
+                    f"w{index}",
+                    command=command,
+                    workdir=root,
+                    variant=variant,
+                    pool_size=pool_size,
+                    env={"MIZAN_TOKEN_ALICE": "twin-alice", "MIZAN_TOKEN_BOB": "twin-bob"},
+                )
+                twin.start()
+                timings[f"worker_{index}_start_seconds"] = round(time.monotonic() - begin, 3)
+                started.append(twin)
+
+            # Isolation proof: mutate worker 0 and verify worker 1 is unaffected.
+            first = started[0]
+            from psycopg import sql
+
+            mutator = first.database.connect()
+            with mutator.cursor() as cursor:
+                cursor.execute(
+                    "SELECT table_schema, table_name FROM information_schema.tables "
+                    "WHERE table_schema = ANY(%s) AND table_type = 'BASE TABLE'",
+                    (list(schemas),),
+                )
+                tables = cursor.fetchall()
+            if tables:
+                schema, table = tables[0]
+                cursor_sql = sql.SQL("CREATE TABLE {}.{} (id TEXT PRIMARY KEY)").format(
+                    sql.Identifier(schema), sql.Identifier("mizan_twin_proof")
+                )
+                with mutator.cursor() as cursor:
+                    cursor.execute(cursor_sql)
+                    cursor.execute(
+                        sql.SQL("INSERT INTO {}.{} VALUES (%s)").format(
+                            sql.Identifier(schema), sql.Identifier("mizan_twin_proof")
+                        ),
+                        ("proof",),
+                    )
+            fingerprints = {twin.worker_id: source.fingerprint(twin.database.dsn) for twin in started}
+            if len(set(fingerprints.values())) != len(started):
+                raise TwinLifecycleError("worker databases are not isolated")
+
+            begin = time.monotonic()
+            first.restore()
+            timings["restore_seconds"] = round(time.monotonic() - begin, 3)
+            source.assert_unchanged()
+            evidence["source_unchanged"] = True
+            if exercise:
+                from mizan.postgres_twin import run_l2_l3_probes
+
+                begin = time.monotonic()
+                evidence["probe_results"] = run_l2_l3_probes(
+                    first,
+                    schemas=tuple(schemas),
+                    tokens={"alice": "twin-alice", "bob": "twin-bob"},
+                    contract_path=fixture_dir / "mizan-relationships.json",
+                    cancel=token.check,
+                )
+                timings["probe_seconds"] = round(time.monotonic() - begin, 3)
+                source.assert_unchanged()
+            evidence.update(
+                {
+                    "status": "VERIFIED",
+                    "worker_fingerprints_after_mutation": fingerprints,
+                    "restored_fingerprint": source.fingerprint(first.database.dsn),
+                    "timings": timings,
+                }
+            )
+    except (SourceProtectionError, TwinLifecycleError) as exc:
+        failure = source.redact(str(exc))
+    except KeyboardInterrupt:
+        failure = "the run was interrupted"
+    finally:
+        token.disarm()
+        stop_failed = False
+        for twin in reversed(started):
+            try:
+                twin.stop(strict=True)
+            except Exception as exc:
+                stop_failed = True
+                cleanup_errors.append(source.redact(f"worker {twin.worker_id}: {exc}"))
+        if not stop_failed:
+            try:
+                drop_run(dsn_env, root, source.run_id)
+            except CleanupPreflightError as exc:
+                evidence["cleanup_status"] = "PREFLIGHT_FAILED"
+                cleanup_errors.append(source.redact("cleanup preflight: " + str(exc)))
+            except PartialCleanupError as exc:
+                evidence["cleanup_status"] = "PARTIAL_CLEANUP"
+                evidence["cleanup_completed"] = exc.cleaned
+                evidence["cleanup_remaining"] = exc.remaining
+                cleanup_errors.append(source.redact("partial cleanup: " + str(exc)))
+            except Exception as exc:
+                cleanup_errors.append(source.redact(f"run cleanup: {exc}"))
+        else:
+            cleanup_errors.append("destructive cleanup was blocked because a worker did not stop")
+        cleanup_errors.extend(source.rollback_errors)
+        if cleanup_errors:
+            for message in cleanup_errors:
+                click.echo(f"cleanup error: {message}", err=True)
+
+    if failure is not None or cleanup_errors:
+        evidence["status"] = "cleanup_failed" if cleanup_errors else "FAILED"
+        if failure is not None:
+            evidence["error"] = failure
+        if cleanup_errors:
+            evidence["cleanup_errors"] = cleanup_errors
+        emit(evidence, code=2)
+        return
+    emit(evidence)
 
 
 if __name__ == "__main__":  # pragma: no cover

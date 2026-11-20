@@ -14,6 +14,7 @@ The flow is deliberately small:
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -474,6 +475,15 @@ class Mizan:
         for event in self._ledger_events():
             if event.action != "write" or event.table not in observed_write_tables:
                 continue
+            if not any(
+                resource.key == event.resource_key
+                or resource.type == event.table
+                or resource.id == event.row_id
+                or resource.id == event.row_key
+                or event.table.endswith(resource.type)
+                for resource in self.policy.resources.values()
+            ):
+                continue  # a row created only by a probe has no valid target
             if self._mapped_ledger_resource(event) is not None:
                 continue
             principal = (
@@ -627,6 +637,20 @@ class Mizan:
         if outcome is not AuthorizationOutcome.INCONCLUSIVE:
             self._drop_inconclusive(law, action, resource, principal)
         return outcome
+
+    def _relevant_data_view_resource(self, resource_key: str) -> bool:
+        """Whether a data-view outcome refers to a discovered API resource.
+
+        Unmapped rows created only by mutation probes have no discovered target;
+        they are diagnostics, not security checks. Known resources with an
+        ambiguous mapping remain relevant and inconclusive.
+        """
+        key = str(resource_key)
+        tail = key.rsplit(":", 1)[-1]
+        return any(
+            resource.key == key or resource.id == tail or resource.id == key
+            for resource in self.policy.resources.values()
+        )
 
     def _merge_outcomes(self, outcomes: Iterable[dict[str, str]]) -> None:
         """Fold the data-level analyzer's outcomes into engine accounting."""
@@ -790,6 +814,8 @@ class Mizan:
         analyzer = TaintAnalyzer(self.policy, graph=self._data_view_graph())
         violations = analyzer.analyze(self._ledger_events())
         for item in analyzer.inconclusive:
+            if not self._relevant_data_view_resource(item.get("resource", "")):
+                continue
             self._inconclusive(
                 str(item.get("law", "L3")),
                 str(item.get("resource", "")),
@@ -797,7 +823,9 @@ class Mizan:
                 action=str(item.get("action", "write")),
                 principal=str(item.get("principal", "")),
             )
-        self._merge_outcomes(analyzer.outcomes)
+        self._merge_outcomes(
+            item for item in analyzer.outcomes if self._relevant_data_view_resource(item.get("resource", ""))
+        )
         return violations
 
     def _is_testable(self, principal: Principal) -> bool:
@@ -1108,8 +1136,26 @@ class Mizan:
                     session = self.target.session_for(attacker)
                     response = self._request(session, method, url, json=probe_body, timeout=self.target.timeout)
                     new_events = self._ledger_events()[before:]
-                    tainted = [event for event in new_events if event.principal == attacker.id]
+                    tainted = [
+                        event
+                        for event in new_events
+                        if event.principal == attacker.id and event.attribution == "confirmed"
+                    ]
                     if not tainted:
+                        unconfirmed = [
+                            event
+                            for event in new_events
+                            if event.principal == attacker.id and event.attribution != "confirmed"
+                        ]
+                        if unconfirmed:
+                            self._inconclusive(
+                                "L3",
+                                resource.key,
+                                f"the write attribution is {unconfirmed[0].attribution!r}",
+                                action="write",
+                                principal=attacker.id,
+                            )
+                            continue
                         # No row changed: the application refused the write.
                         # This is a decided check, not an unresolved one.
                         self._outcome("L3", "write", resource.key, attacker.id, AuthorizationOutcome.DECIDED)
@@ -1479,6 +1525,8 @@ class Mizan:
         data_analyzer = TaintAnalyzer(self.policy, graph=self._data_view_graph())
         violations.extend(data_analyzer.analyze(new_events))
         for item in data_analyzer.inconclusive:
+            if not self._relevant_data_view_resource(item.get("resource", "")):
+                continue
             self._inconclusive(
                 str(item.get("law", "L3")),
                 str(item.get("resource", "")),
@@ -1486,7 +1534,9 @@ class Mizan:
                 action=str(item.get("action", "write")),
                 principal=str(item.get("principal", "")),
             )
-        self._merge_outcomes(data_analyzer.outcomes)
+        self._merge_outcomes(
+            item for item in data_analyzer.outcomes if self._relevant_data_view_resource(item.get("resource", ""))
+        )
 
         # L1 - did the server act as the identity the token claims?
         claims = decode_token(principal.token) if principal.token else None
@@ -1530,6 +1580,12 @@ class Mizan:
         """Bring the application back to the state it had before the probes."""
         if self.twin is not None:
             self.twin.restore()
+            # A PostgreSQL twin replaces the disposable database on restore.
+            # Providers that hold a connection must rebind to the new one.
+            database = getattr(self.twin, "database", None)
+            rebind = getattr(self.attributor, "rebind", None)
+            if database is not None and rebind is not None:
+                rebind(database.connect())
 
     def _principal_of(self, session: requests.Session) -> str:
         """The identity of the request the session makes.
@@ -1556,19 +1612,30 @@ class Mizan:
         the request, and the difference becomes a write event. The application
         needs no instrumentation for this.
         """
-        before = self.attributor.snapshot() if self.attributor is not None else None
+        request_id = uuid.uuid4().hex
+        principal_id = self._principal_of(session)
+        before = (
+            self.attributor.snapshot(principal=principal_id, request_id=request_id)
+            if self.attributor is not None
+            else None
+        )
         if self.request_budget is not None and self.requests >= self.request_budget:
             raise RequestBudgetExhausted(f"the scan reached its budget of {self.request_budget} requests")
         self.requests += 1
-        response = session.request(method, url, **kwargs)
+        headers = dict(session.headers)
+        correlation_header = getattr(self.attributor, "request_header", "")
+        if before is not None and correlation_header:
+            headers[correlation_header] = request_id
+        response = session.request(method, url, headers=headers, **kwargs)
         if before is not None:
             payload = kwargs.get("json")
             source_fields = set(payload) if isinstance(payload, dict) else set()
             events = self.attributor.diff(
                 before,
-                principal=self._principal_of(session),
+                principal=principal_id,
                 method=method,
                 path=urlsplit(url).path,
+                request_id=request_id,
                 source_fields=source_fields,
             )
             self._attributed_events.extend(events)

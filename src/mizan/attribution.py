@@ -22,12 +22,62 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from mizan.taint import WriteEvent
 
 #: Columns that usually name the owner of a row.
 OWNER_COLUMNS = ("owner_id", "user_id", "owner", "account_id", "tenant_id")
+
+
+class AttributionUnavailable(RuntimeError):
+    """The configured database cannot supply trustworthy attribution.
+
+    This is an explicit failure state, never an empty result: an empty schema
+    or an empty write ledger must not be mistaken for a clean scan.
+    """
+
+
+@dataclass(frozen=True)
+class AuditCursor:
+    """A monotonic, backend-neutral write-audit cursor.
+
+    The event id is the ordering guarantee. Timestamps are metadata only and
+    must never be used to decide which writes were observed.
+    """
+
+    event_id: int
+    principal: str = ""
+    request_id: str = ""
+
+
+@runtime_checkable
+class DatabaseAttributor(Protocol):
+    """The database view the engine and the ownership graph require.
+
+    SQLite implements it by diffing snapshots; PostgreSQL implements it from
+    the audit table. The engine treats ``snapshot()`` as opaque and only passes
+    it back to ``diff()``, so both strategies can coexist without a framework.
+    """
+
+    def schema(self) -> DatabaseSchema: ...
+
+    def rows(self, table: str) -> list[dict[str, Any]]: ...
+
+    def snapshot(self, *, principal: str = "", request_id: str = "") -> Any: ...
+
+    def diff(
+        self,
+        before: Any,
+        *,
+        principal: str,
+        method: str,
+        path: str,
+        request_id: str = "",
+        source_fields: set[str] | None = None,
+    ) -> list[WriteEvent]: ...
+
+    def row_identity(self, table: str, rowid: str) -> str | None: ...
 
 
 @dataclass(frozen=True)
@@ -208,7 +258,11 @@ class SqliteAttributor:
 
     # -- snapshots ---------------------------------------------------------- #
 
-    def snapshot(self) -> dict[str, TableSnapshot]:
+    def snapshot(self, *, principal: str = "", request_id: str = "") -> dict[str, TableSnapshot]:
+        """Read every table of the database (SQLite ignores request context)."""
+        return self._snapshot_impl()
+
+    def _snapshot_impl(self) -> dict[str, TableSnapshot]:
         """Read every table of the database."""
         if not Path(self.db_path).exists():
             return {}

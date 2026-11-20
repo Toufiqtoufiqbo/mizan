@@ -65,6 +65,23 @@ class RelationshipContractError(ValueError):
     """
 
 
+def _resolve_declared_table(mapping: dict[str, Any], name: str) -> Any:
+    """Resolve a contract declaration against schema-qualified table names.
+
+    An exact key always wins. A bare name is accepted only when it matches
+    exactly one declared qualified table; an ambiguous name is rejected rather
+    than resolving to an arbitrary schema.
+    """
+    if name in mapping:
+        return mapping[name]
+    matches = [key for key in mapping if key.split(".", 1)[-1] == name]
+    if len(matches) == 1:
+        return mapping[matches[0]]
+    if len(matches) > 1:
+        raise RelationshipContractError(f"ambiguous unqualified table {name!r}: matches {sorted(matches)}")
+    return None
+
+
 #: Ownership sources the engine understands. A declaration naming anything
 #: else cannot be honoured, so it is rejected instead of being dropped.
 OWNERSHIP_SOURCES = frozenset({"database_foreign_key", "response_field"})
@@ -130,7 +147,7 @@ class RelationshipContract:
 
     version: int = 1
     identity: tuple[str, str] | None = None
-    ownership: dict[str, tuple[str, str]] = field(default_factory=dict)
+    ownership: dict[str, tuple[str, str, str | None]] = field(default_factory=dict)
     #: table -> (resource_fk, principal_fk, semantics, table, actions).
     #: ``actions`` is the explicit, non-empty scope of the grant: a grant is
     #: never interpreted as permission for an operation it does not declare.
@@ -142,7 +159,10 @@ class RelationshipContract:
         merged: dict[str, Any] = {
             "version": self.version,
             "identity": {"endpoint": self.identity[0], "field": self.identity[1]} if self.identity else None,
-            "ownership": {key: {"source": value[0], "column": value[1]} for key, value in self.ownership.items()},
+            "ownership": {
+                key: {"source": value[0], "column": value[1], **({"table": value[2]} if value[2] else {})}
+                for key, value in self.ownership.items()
+            },
             "sharing": {
                 key: {
                     "resource_fk": value[0],
@@ -189,7 +209,7 @@ class RelationshipContract:
             identity_pair = (str(identity["endpoint"]), str(identity["field"]))
         elif strict and identity is not None:
             raise RelationshipContractError("identity must declare both an endpoint and a field")
-        ownership: dict[str, tuple[str, str]] = {}
+        ownership: dict[str, tuple[str, str, str | None]] = {}
         ownership_data = data.get("ownership") or {}
         if strict and not isinstance(ownership_data, dict):
             raise RelationshipContractError("ownership must be an object")
@@ -211,7 +231,12 @@ class RelationshipContract:
                     f"unsupported ownership source {source!r} for {resource_type!r}; "
                     f"expected one of {sorted(OWNERSHIP_SOURCES)}"
                 )
-            ownership[str(resource_type)] = (source, str(name))
+            declared_table = declaration.get("table")
+            ownership[str(resource_type)] = (
+                source,
+                str(name),
+                str(declared_table) if declared_table else None,
+            )
         sharing: dict[str, tuple[str, str, str, str, frozenset[str]]] = {}
         sharing_data = data.get("sharing") or {}
         if strict and not isinstance(sharing_data, dict):
@@ -288,39 +313,59 @@ class RelationshipContract:
         """
         problems: list[str] = []
         for table, (resource_fk, principal_fk, _semantics, _name, _actions) in sorted(self.sharing.items()):
-            declared = schema.get(table) if schema is not None else None
-            if declared is None:
-                problems.append(f"sharing declares unknown table {table!r}")
+            try:
+                declared = _resolve_declared_table(schema.tables, table) if schema is not None else None
+            except RelationshipContractError as exc:
+                problems.append(str(exc))
                 continue
+            if declared is None:
+                raise RelationshipContractError(f"sharing declares unknown table {table!r}")
+            resolved_table = declared.name
             resource_column = declared.column(resource_fk)
             principal_column = declared.column(principal_fk)
             if resource_column is None:
-                problems.append(f"{table!r} has no resource_fk column {resource_fk!r}")
+                problems.append(f"{resolved_table!r} has no resource_fk column {resource_fk!r}")
             if principal_column is None:
-                problems.append(f"{table!r} has no principal_fk column {principal_fk!r}")
+                problems.append(f"{resolved_table!r} has no principal_fk column {principal_fk!r}")
             if resource_column is None or principal_column is None:
                 continue
             resource_target = next((fk for fk in declared.foreign_keys if fk.column == resource_fk), None)
             principal_target = next((fk for fk in declared.foreign_keys if fk.column == principal_fk), None)
             if resource_target is None:
-                problems.append(f"{table}.{resource_fk} is not a declared foreign key")
+                problems.append(f"{resolved_table}.{resource_fk} is not a declared foreign key")
             if principal_target is None:
-                problems.append(f"{table}.{principal_fk} is not a declared foreign key")
+                problems.append(f"{resolved_table}.{principal_fk} is not a declared foreign key")
             if resource_target is not None and principal_target is not None:
                 if getattr(resource_target, "composite", False) or getattr(principal_target, "composite", False):
                     problems.append(
-                        f"{table} declares a composite foreign key; only single-column grants are supported"
+                        f"{resolved_table} declares a composite foreign key; only single-column grants are supported"
                     )
                 elif resource_target.table == principal_target.table:
                     problems.append(
-                        f"{table} references {resource_target.table!r} for both the resource and the principal"
+                        f"{resolved_table} references {resource_target.table!r} for both the resource and the principal"
                     )
                 target = schema.get(resource_target.table) if schema is not None else None
                 if target is None or not target.primary_key:
-                    problems.append(f"{table}.{resource_fk} does not reference a table with a primary key")
+                    problems.append(f"{resolved_table}.{resource_fk} does not reference a table with a primary key")
                 principal_entity = schema.get(principal_target.table) if schema is not None else None
                 if principal_entity is None or not principal_entity.primary_key:
-                    problems.append(f"{table}.{principal_fk} does not reference a table with a primary key")
+                    problems.append(f"{resolved_table}.{principal_fk} does not reference a table with a primary key")
+        for resource_type, (source, column, declared_table) in sorted(self.ownership.items()):
+            lookup = declared_table or resource_type
+            try:
+                declared = _resolve_declared_table(schema.tables, lookup) if schema is not None else None
+            except RelationshipContractError as exc:
+                problems.append(str(exc))
+                continue
+            if declared is None:
+                # Legacy contracts name the API resource type, not the table.
+                # Without an explicit table they are not a schema assertion.
+                if declared_table is None:
+                    continue
+                problems.append(f"ownership declares unknown table {declared_table!r}")
+                continue
+            if declared.column(column) is None:
+                problems.append(f"{resource_type!r} has no ownership column {column!r}")
         if problems:
             raise RelationshipContractError("; ".join(problems))
 
@@ -923,7 +968,11 @@ def discover_relationships(
                 RelationshipType.OWNS, resource.owner, key, EvidenceState.CANDIDATE, [response_evidence]
             )
 
-        declared = contract.ownership.get(resource.type) if contract is not None else None
+        try:
+            declared = _resolve_declared_table(contract.ownership, resource.type) if contract is not None else None
+        except RelationshipContractError as exc:
+            graph.inconclusive.setdefault(resource.type, str(exc))
+            declared = None
         declared_owner: str | None = None
 
         matches = _find_rows(resource.id, schema, rows)
@@ -991,8 +1040,15 @@ def discover_relationships(
                 continue
 
             # The contract may declare this exact FK as the ownership signal.
+            declared_table = declared[2] if declared is not None else None
+            same_table = declared_table is None or (
+                declared_table == table or declared_table.split(".", 1)[-1] == table.split(".", 1)[-1]
+            )
             is_declared_owner = (
-                declared is not None and declared[0] == "database_foreign_key" and declared[1] == fk.column
+                declared is not None
+                and declared[0] == "database_foreign_key"
+                and declared[1] == fk.column
+                and same_table
             )
             creation = (table, str(local), target) in created or (table, canonical_key(pk_values), target) in created
             if is_declared_owner:
@@ -1061,7 +1117,11 @@ def discover_associations(
         ]
         if not resource_fks or not identity_fks:
             continue
-        grant = contract.sharing.get(table) if contract is not None else None
+        try:
+            grant = _resolve_declared_table(contract.sharing, table) if contract is not None else None
+        except RelationshipContractError as exc:
+            graph.inconclusive.setdefault(f"sharing:{table}", str(exc))
+            grant = None
         declared_resource_fk = grant[0] if grant is not None else None
         declared_principal_fk = grant[1] if grant is not None else None
         declared_actions = grant[4] if grant is not None else frozenset()

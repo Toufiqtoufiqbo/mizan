@@ -52,6 +52,10 @@ class WriteEvent:
     #: The row's identity from declared primary-key metadata, when known.
     #: Older ledgers do not have it; ``resource_key`` keeps the legacy rowid.
     row_key: str | None = None
+    #: How confidently the write was tied to a principal and a request.
+    #: Only ``confirmed`` may support an L3 violation; every other state is an
+    #: explicit inconclusive outcome.
+    attribution: str = "confirmed"
 
     @property
     def action(self) -> str:
@@ -76,6 +80,7 @@ class WriteEvent:
             "status": self.status,
             "method_args": self.method_args,
             "row_key": self.row_key,
+            "attribution": self.attribution,
         }
 
     @classmethod
@@ -94,6 +99,7 @@ class WriteEvent:
             status=int(data.get("status", 200)),
             method_args=dict(data.get("method_args", {})),
             row_key=data.get("row_key"),
+            attribution=str(data.get("attribution", "confirmed")),
         )
 
 
@@ -296,11 +302,12 @@ class TaintAnalyzer:
     def analyze(self, events: Iterable[WriteEvent]) -> list[Violation]:
         violations: list[Violation] = []
         for event in events:
-            if not event.principal or event.principal == UNKNOWN_PRINCIPAL:
-                # Without an author there is nobody to blame and nothing to
-                # prove: the write is kept, the breach is not claimed.
+            if not event.principal or event.principal == UNKNOWN_PRINCIPAL or event.attribution != "confirmed":
+                # Without a confirmed author and request, there is nobody to
+                # blame and nothing to prove: keep the write as evidence of an
+                # unresolved check, never as a breach.
                 self.unattributed.append(event)
-                self._record(event, "the write could not be attributed to a principal")
+                self._record(event, f"the write attribution is {event.attribution!r}; no confirmed author and request")
                 self._outcome(event, event.resource_key, AuthorizationOutcome.INCONCLUSIVE)
                 continue
             violations.extend(self._analyze_event(event))
