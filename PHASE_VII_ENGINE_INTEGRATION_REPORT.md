@@ -98,7 +98,16 @@ All configurations produced identical normalized finding sets (empty on the
 clean variant). The generated `benchmarks/postgres_engine/results.json`
 contains the environment, durations and findings.
 
-CI evidence is recorded in the delivery message.
+CI evidence:
+
+- Implementation `b0ee45ddcf3e5c68faa2b33434997f0859bcc045` — run
+  **44824404026** (#259), failure in B2 only: the new benchmark required the
+  `pgserver` package although CI supplies a PostgreSQL service.
+- Fix `6c2233437f383d69f5b4bc1383023e2504549063` — run **44825799224** (#260),
+  success. All jobs A, B, B2, C, D, E, F, G and S PASSED; the external target
+  was SKIPPED.
+- Final documentation commit run is recorded in the delivery message.
+- Workflow: https://github.com/Toufiqtoufiqbo/mizan/actions/runs/44825799224
 
 ## 7. Limitations
 
