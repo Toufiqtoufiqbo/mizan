@@ -71,32 +71,6 @@ MARKER_VERSION = 1
 #: Reserved registry keys hold durable deletion intents, never ownership records.
 DELETION_INTENTS_KEY = "__deletion_intents__"
 
-
-#: Directory fsync is used after the registry rename where the OS supports it.
-def _directory_fsync_supported() -> bool:
-    if os.name != "posix":
-        return False
-    probe = Path(tempfile.gettempdir()) / f".mizan-dirfsync-{os.getpid()}"
-    try:
-        probe.mkdir(exist_ok=True)
-        descriptor = os.open(probe, os.O_RDONLY)
-    except OSError:
-        return False
-    try:
-        os.fsync(descriptor)
-        return True
-    except OSError:
-        return False
-    finally:
-        os.close(descriptor)
-        try:
-            probe.rmdir()
-        except OSError:  # pragma: no cover - probe cleanup is best effort
-            pass
-
-
-DIRECTORY_FSYNC_SUPPORTED = _directory_fsync_supported()
-
 #: Test instrumentation hooks. ``None`` during normal operation; only the real
 #: process crash-recovery tests install them.
 INTENT_TEST_HOOK: Callable[[str], None] | None = None
@@ -1340,14 +1314,17 @@ class DatabaseRegistry:
                 errno.EINVAL,
                 errno.ENOSYS,
             }
-            if os.name == "nt" or exc.errno in unsupported:
+            if os.name == "nt" and exc.errno in unsupported:
                 self.last_directory_sync_supported = False
                 self._note_directory_sync_unavailable(exc)
             else:
-                # The rename may already be visible; report this honestly.
-                raise OwnershipError(
-                    f"registry replaced but the directory could not be synced: {exc.strerror or 'unknown I/O error'}"
-                ) from None
+                # A genuine error after the rename is reported honestly.
+                self._note_directory_sync_unavailable(exc)
+                if not (exc.errno in unsupported and os.name != "nt"):
+                    raise OwnershipError(
+                        f"registry replaced but the directory could not be synced: "
+                        f"{exc.strerror or 'unknown I/O error'}"
+                    ) from None
         finally:
             os.close(directory)
         return self.last_directory_synced
@@ -1753,6 +1730,8 @@ def verified_drop(
         return False
     if record.state is TwinState.CLEANED:
         raise OwnershipError("the registry says CLEANED but the database still exists")
+    if pending is not None and not pending.integrity:
+        raise OwnershipError("a legacy intent cannot authorize deletion of an existing database")
     if pending is not None and pending.state is IntentState.CLEANED:
         raise OwnershipError("a completed deletion intent still names an existing database")
     intent = prepare_deletion_intent(admin, registry, record, cluster_id=cluster_id, source_database=source_database)
@@ -2650,6 +2629,13 @@ def cleanup_run(dsn_env: str, workspace: str | Path, run_id: str) -> list[str]:
                         categories[name] = "invalid deletion intent"
                     continue
                 if name in categories:
+                    continue
+                intent = registry.get_intent(name)
+                if intent is not None and not intent.integrity:
+                    # A legacy VI.2.2 intent cannot authorize the deletion of
+                    # an existing database; it is accepted only for recovery.
+                    reasons.append(f"{name}: a legacy intent cannot delete an existing database")
+                    categories[name] = "legacy intent for an existing database"
                     continue
                 if record.state is TwinState.CLEANED:
                     reasons.append(f"{name}: the registry says CLEANED but the database exists")

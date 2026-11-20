@@ -8,6 +8,7 @@ fingerprints, pooled sessions, verified cleanup, signals and orphan recovery.
 
 from __future__ import annotations
 
+import errno
 import importlib.util
 import inspect
 import json
@@ -28,7 +29,6 @@ import pytest
 import mizan.postgres_twin as twin_module
 from mizan.postgres_twin import (
     DELETION_INTENTS_KEY,
-    DIRECTORY_FSYNC_SUPPORTED,
     BaselineVerificationError,
     CleanupError,
     CleanupPreflightError,
@@ -740,9 +740,66 @@ def test_journal_key_is_not_an_ownership_record(tmp_path) -> None:
     assert registry.get_intent(_record().database_name) == intent
 
 
-def test_directory_fsync_capability_is_explicit() -> None:
-    assert isinstance(DIRECTORY_FSYNC_SUPPORTED, bool)
-    assert DIRECTORY_FSYNC_SUPPORTED == (os.name == "posix")
+def test_no_import_time_directory_probe() -> None:
+    assert not hasattr(twin_module, "_directory_fsync_supported")
+    assert not hasattr(twin_module, "DIRECTORY_FSYNC_SUPPORTED")
+    # The removed VI.2.2 probe created this marker name in the system temp dir.
+    marker = Path(tempfile.gettempdir()) / ".mizan-dirfsync"
+    assert not marker.exists(), "an import-time filesystem probe was performed"
+
+
+def test_registry_write_reports_actual_parent_sync(tmp_path) -> None:
+    registry = DatabaseRegistry(tmp_path / "ownership.json")
+    registry.put(_record())
+    if os.name == "posix":
+        assert registry.last_directory_sync_supported is True
+        assert registry.last_directory_synced is True
+    else:
+        assert registry.last_directory_sync_supported is False
+        assert registry.last_directory_synced is False
+
+
+def test_directory_fsync_failure_is_reported(tmp_path, monkeypatch) -> None:
+    registry = DatabaseRegistry(tmp_path / "ownership.json")
+    calls = {"n": 0}
+
+    def fake_fsync(fd):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise PermissionError("directory fsync is not permitted")
+
+    monkeypatch.setattr(os, "fsync", fake_fsync)
+    registry.put(_record())
+    assert registry.last_directory_sync_supported is False
+    assert registry.last_directory_synced is False
+
+
+def test_directory_fsync_io_error_is_raised(tmp_path, monkeypatch) -> None:
+    registry = DatabaseRegistry(tmp_path / "ownership.json")
+    real_open = os.open
+    real_close = os.close
+
+    def fake_open(path, flags, mode=0o777):
+        if Path(path) == registry.path.parent:
+            return 1
+        return real_open(path, flags, mode)
+
+    def fake_close(fd):
+        if fd != 1:
+            real_close(fd)
+
+    calls = {"n": 0}
+
+    def fake_fsync(fd):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise OSError(errno.EIO, "I/O error")
+
+    monkeypatch.setattr(os, "open", fake_open)
+    monkeypatch.setattr(os, "close", fake_close)
+    monkeypatch.setattr(os, "fsync", fake_fsync)
+    with pytest.raises(OwnershipError, match="could not be synced"):
+        registry.put(_record())
 
 
 def test_no_backend_termination_api_exists() -> None:
@@ -2454,8 +2511,8 @@ def test_registry_durable_replace_and_directory_sync(source) -> None:
     registry.put(_record())
     assert registry.path.read_text(encoding="utf-8").startswith("{")
     assert [p.name for p in workspace.iterdir() if p.name.endswith(".tmp")] == []
-    if os.name != "posix":
-        assert DIRECTORY_FSYNC_SUPPORTED is False, "directory fsync is not guaranteed on this platform"
+    assert registry.last_directory_sync_supported == (os.name == "posix")
+    assert [p.name for p in workspace.iterdir() if p.name.endswith(".tmp")] == []
     (workspace / "ownership.json").write_text("{broken", encoding="utf-8")
     with pytest.raises(OwnershipError):
         registry.records()
@@ -2553,24 +2610,191 @@ def test_valid_cleaned_intent_and_cleaned_record_are_idempotent(source) -> None:
             _drop_database(dsn, name)
 
 
+def _historical_vi22_intent(
+    *,
+    run_id: str,
+    database_name: str,
+    kind: str,
+    worker_id: str,
+    source_database: str,
+    cluster_id: str,
+    owner_role: str,
+    nonce: str,
+    oid: int,
+    marker_digest: str,
+    operation_id: str,
+    created_at: float,
+    state: str,
+) -> dict[str, Any]:
+    """Serialize the exact VI.2.2 ``DeletionIntent.to_dict()`` format.
+
+    Source of truth: ``git show f3f6c00:src/mizan/postgres_twin.py`` lines 1045-1078.
+    VI.2.2 intents have no ``integrity`` field and used a float ``created_at``.
+    """
+    return {
+        "run_id": run_id,
+        "database_name": database_name,
+        "kind": kind,
+        "worker_id": worker_id,
+        "source_database": source_database,
+        "cluster_id": cluster_id,
+        "owner_role": owner_role,
+        "nonce": nonce,
+        "oid": oid,
+        "marker_digest": marker_digest,
+        "operation_id": operation_id,
+        "created_at": created_at,
+        "state": state,
+    }
+
+
 @pytest.mark.postgres_integration
-def test_legacy_split_state_reconciles_atomically(source) -> None:
+def test_vi22_historical_registry_without_integrity_reconciles(source) -> None:
     instance, dsn = source
-    workspace = Path(tempfile.mkdtemp(prefix="mizan-v63-legacy-split-"))
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v63-vi22-"))
     baseline, registry = _build_run(instance, workspace)
     w0 = expected_worker_name(instance.run_id, "w0")
+    w1 = expected_worker_name(instance.run_id, "w1")
     try:
         intent = _intent_for(instance, registry, w0)
+        record = registry.get(w0)
+        assert record is not None
         _drop_database(dsn, w0)
-        # Reproduce the VI.2.2 two-write completion result.
-        registry.put_intent(intent.with_state(IntentState.CLEANED))
+
+        historical = _historical_vi22_intent(
+            run_id=intent.run_id,
+            database_name=intent.database_name,
+            kind=intent.kind,
+            worker_id=intent.worker_id,
+            source_database=intent.source_database,
+            cluster_id=intent.cluster_id,
+            owner_role=intent.owner_role,
+            nonce=intent.nonce,
+            oid=intent.oid,
+            marker_digest=intent.marker_digest,
+            operation_id=intent.operation_id,
+            created_at=intent.created_at,
+            state=str(IntentState.CLEANED),
+        )
+        assert "integrity" not in historical
+        payload = registry.load()
+        payload[DELETION_INTENTS_KEY][w0] = historical
+        registry._write(payload)
+        assert "integrity" not in registry.load()[DELETION_INTENTS_KEY][w0]
         assert registry.get(w0).state is not TwinState.CLEANED
-        assert cleanup_run(DSN_ENV, workspace, instance.run_id)
+
+        cleaned = cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert w0 in cleaned
         reconciled = registry.get_intent(w0)
+        assert reconciled is not None
         assert reconciled.state is IntentState.CLEANED
         assert reconciled.operation_id == intent.operation_id
-        assert reconciled.nonce == intent.nonce and reconciled.oid == intent.oid
+        assert reconciled.nonce == intent.nonce
+        assert reconciled.oid == intent.oid
+        assert reconciled.marker_digest == intent.marker_digest
+        assert reconciled.run_id == intent.run_id
+        assert reconciled.database_name == intent.database_name
+        assert reconciled.kind == intent.kind
+        assert reconciled.worker_id == intent.worker_id
+        assert reconciled.source_database == intent.source_database
+        assert reconciled.cluster_id == intent.cluster_id
+        assert reconciled.owner_role == intent.owner_role
+        assert reconciled.created_at == intent.created_at
+        assert reconciled.integrity, "the upgraded intent must carry a valid integrity digest"
+        assert DeletionIntent.from_dict(reconciled.to_dict()) == reconciled
         assert registry.get(w0).state is TwinState.CLEANED
+        assert not _database_exists(dsn, w0)
+        assert cleanup_run(DSN_ENV, workspace, instance.run_id) == []
+        assert not _database_exists(dsn, w1) and not _database_exists(dsn, baseline.name)
+    finally:
+        for name in (baseline.name, w0, w1):
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_vi22_legacy_intent_without_integrity_cannot_delete_an_existing_database(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v63-legacy-present-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    w1 = expected_worker_name(instance.run_id, "w1")
+    intent = _intent_for(instance, registry, w0)
+    historical = _historical_vi22_intent(
+        run_id=intent.run_id,
+        database_name=intent.database_name,
+        kind=intent.kind,
+        worker_id=intent.worker_id,
+        source_database=intent.source_database,
+        cluster_id=intent.cluster_id,
+        owner_role=intent.owner_role,
+        nonce=intent.nonce,
+        oid=intent.oid,
+        marker_digest=intent.marker_digest,
+        operation_id=intent.operation_id,
+        created_at=intent.created_at,
+        state="DELETE_PENDING",
+    )
+    payload = registry.load()
+    payload[DELETION_INTENTS_KEY][w0] = historical
+    registry._write(payload)
+    try:
+        with pytest.raises(CleanupPreflightError):
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert _database_exists(dsn, w0)
+        assert _database_exists(dsn, w1) and _database_exists(dsn, baseline.name)
+    finally:
+        for name in (baseline.name, w0, w1):
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_vi22_legacy_intent_tampered_marker_is_rejected(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v63-legacy-tampered-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    intent = _intent_for(instance, registry, w0)
+    _drop_database(dsn, w0)
+    historical = _historical_vi22_intent(
+        run_id=intent.run_id,
+        database_name=intent.database_name,
+        kind=intent.kind,
+        worker_id=intent.worker_id,
+        source_database=intent.source_database,
+        cluster_id=intent.cluster_id,
+        owner_role=intent.owner_role,
+        nonce=intent.nonce,
+        oid=intent.oid,
+        marker_digest="0" * 64,
+        operation_id=intent.operation_id,
+        created_at=intent.created_at,
+        state="CLEANED",
+    )
+    payload = registry.load()
+    payload[DELETION_INTENTS_KEY][w0] = historical
+    registry._write(payload)
+    try:
+        with pytest.raises(OwnershipError):
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+    finally:
+        for name in (baseline.name, w0, expected_worker_name(instance.run_id, "w1")):
+            _drop_database(dsn, name)
+
+
+@pytest.mark.postgres_integration
+def test_current_intent_bad_integrity_remains_rejected(source) -> None:
+    instance, dsn = source
+    workspace = Path(tempfile.mkdtemp(prefix="mizan-v63-bad-integrity-"))
+    baseline, registry = _build_run(instance, workspace)
+    w0 = expected_worker_name(instance.run_id, "w0")
+    _intent_for(instance, registry, w0)
+    payload = registry.load()
+    payload[DELETION_INTENTS_KEY][w0]["integrity"] = "0" * 64
+    registry._write(payload)
+    try:
+        with pytest.raises(OwnershipError):
+            cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert _database_exists(dsn, w0)
     finally:
         for name in (baseline.name, w0, expected_worker_name(instance.run_id, "w1")):
             _drop_database(dsn, name)
