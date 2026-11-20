@@ -774,6 +774,21 @@ def test_directory_fsync_failure_is_reported(tmp_path, monkeypatch) -> None:
     assert registry.last_directory_synced is False
 
 
+def test_directory_open_failure_is_reported(tmp_path, monkeypatch) -> None:
+    registry = DatabaseRegistry(tmp_path / "ownership.json")
+    real_open = os.open
+
+    def fake_open(path, flags, mode=0o777):
+        if flags == os.O_RDONLY:
+            raise PermissionError("directory open is not supported")
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", fake_open)
+    registry.put(_record())
+    assert registry.last_directory_sync_supported is False
+    assert registry.last_directory_synced is False
+
+
 def test_directory_fsync_io_error_is_raised(tmp_path, monkeypatch) -> None:
     registry = DatabaseRegistry(tmp_path / "ownership.json")
     real_open = os.open
@@ -798,7 +813,7 @@ def test_directory_fsync_io_error_is_raised(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(os, "open", fake_open)
     monkeypatch.setattr(os, "close", fake_close)
     monkeypatch.setattr(os, "fsync", fake_fsync)
-    with pytest.raises(OwnershipError, match="could not be synced"):
+    with pytest.raises(OwnershipError, match="directory could not be synced"):
         registry.put(_record())
 
 

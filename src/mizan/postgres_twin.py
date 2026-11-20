@@ -1298,49 +1298,38 @@ class DatabaseRegistry:
         try:
             directory = os.open(str(self.path.parent), os.O_RDONLY)
         except OSError as exc:
-            self.last_directory_sync_supported = False
-            self._note_directory_sync_unavailable(exc)
-            return False
+            if self._is_unsupported_directory_error(exc):
+                self.last_directory_sync_supported = False
+                return False
+            raise
         try:
             os.fsync(directory)
             self.last_directory_synced = True
             self.last_directory_sync_supported = True
         except OSError as exc:
-            unsupported = {
-                errno.EACCES,
-                errno.EPERM,
-                errno.ENOTSUP,
-                getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
-                errno.EINVAL,
-                errno.ENOSYS,
-            }
-            if os.name == "nt" and exc.errno in unsupported:
+            if self._is_unsupported_directory_error(exc):
                 self.last_directory_sync_supported = False
-                self._note_directory_sync_unavailable(exc)
-            else:
-                # A genuine error after the rename is reported honestly.
-                self._note_directory_sync_unavailable(exc)
-                if not (exc.errno in unsupported and os.name != "nt"):
-                    raise OwnershipError(
-                        f"registry replaced but the directory could not be synced: "
-                        f"{exc.strerror or 'unknown I/O error'}"
-                    ) from None
+                self.last_directory_synced = False
+                return False
+            # The rename may already be visible; report this honestly.
+            raise OwnershipError(
+                f"registry replaced but the directory could not be synced: {exc.strerror or 'unknown I/O error'}"
+            ) from None
         finally:
             os.close(directory)
         return self.last_directory_synced
 
     @staticmethod
-    def _note_directory_sync_unavailable(exc: OSError) -> None:
-        """Document an unsupported platform; never hide a genuine I/O error."""
-        if os.name != "nt" and exc.errno not in {
+    def _is_unsupported_directory_error(exc: OSError) -> bool:
+        unsupported = {
             errno.EACCES,
             errno.EPERM,
+            errno.ENOTSUP,
+            getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
             errno.EINVAL,
             errno.ENOSYS,
-        }:
-            raise OwnershipError(
-                f"registry directory synchronization failed: {exc.strerror or 'unknown I/O error'}"
-            ) from None
+        }
+        return exc.errno in unsupported or isinstance(exc, PermissionError)
 
     # -- durable deletion intents ------------------------------------------- #
 
