@@ -133,6 +133,20 @@ def test_mizan_engine_parallel_workers_are_isolated(source, dsn) -> None:
         twins = [run.start_worker("w0"), run.start_worker("w1")]
         assert twins[0].database.name != twins[1].database.name
         assert twins[0].database.dsn != twins[1].database.dsn
+        assert run.worker_traffic_path(twins[0]) != run.worker_traffic_path(twins[1])
+        from mizan.postgres_twin import database_oid
+
+        admin = _admin(twins[0].database.dsn)
+        try:
+            with admin.cursor() as cursor:
+                cursor.execute(
+                    "SELECT oid FROM pg_database WHERE datname = ANY(%s)", ([twin.database.name for twin in twins],)
+                )
+                oids = [int(row[0]) for row in cursor.fetchall()]
+            assert len(oids) == 2 and len(set(oids)) == 2
+        finally:
+            admin.close()
+        assert twins[0]._twin.process.pid != twins[1]._twin.process.pid
         admin = _admin(twins[0].database.dsn)
         try:
             with admin.cursor() as cursor:
