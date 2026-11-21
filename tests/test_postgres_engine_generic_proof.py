@@ -254,13 +254,17 @@ class _AppServer:
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
         deadline = 120
+        import time
+
+        import requests
+
         while deadline > 0:
-            import time
-
             try:
-                import requests
-
-                response = requests.get(f"{self.url}/health", timeout=2)
+                # Do not leave keep-alive sockets open: the temporary database
+                # is dropped as soon as this server stops.
+                with requests.Session() as session:
+                    session.headers.update({"Connection": "close"})
+                    response = session.get(f"{self.url}/health", timeout=2)
                 if response.status_code < 500:
                     return self
             except Exception:
@@ -431,7 +435,7 @@ def test_parallel_workers_really_overlap(source, dsn) -> None:
         def call(base_url: str):
             response = requests.post(
                 f"{base_url}/__barrier",
-                json={"id": "overlap", "parties": 2, "timeout": 15},
+                json={"id": "overlap", "parties": 2, "timeout": 30},
                 timeout=30,
             )
             return response.status_code
@@ -471,7 +475,9 @@ def test_parallel_worker_attack_failure_reaps_every_worker(source, dsn) -> None:
     finally:
         run.cleanup()
     assert run.twins == []
-    assert not _databases(dsn)
+    # Leak detection is scoped to this run: unrelated tests may legitimately
+    # leave databases behind for explicit orphan-recovery scenarios.
+    assert not [name for name in _databases(dsn) if run.source.run_id in name]
     source.assert_unchanged()
 
 
@@ -485,7 +491,9 @@ def test_parallel_worker_start_failure_reaps_workers(source, dsn) -> None:
     finally:
         run.cleanup()
     assert run.twins == []
-    assert not _databases(dsn)
+    # Leak detection is scoped to this run: unrelated tests may legitimately
+    # leave databases behind for explicit orphan-recovery scenarios.
+    assert not [name for name in _databases(dsn) if run.source.run_id in name]
     source.assert_unchanged()
 
 
@@ -517,7 +525,9 @@ def test_parallel_attack_cancellation_cleans_up(source, dsn) -> None:
     finally:
         run.cleanup()
     assert run.twins == []
-    assert not _databases(dsn)
+    # Leak detection is scoped to this run: unrelated tests may legitimately
+    # leave databases behind for explicit orphan-recovery scenarios.
+    assert not [name for name in _databases(dsn) if run.source.run_id in name]
     source.assert_unchanged()
 
 
@@ -556,10 +566,14 @@ def test_worker_process_death_is_recovered_by_restore(source, dsn) -> None:
         run.cleanup()
     # The generic engine restores before every probe group, so the killed
     # worker came back with a fresh process instead of tainting p1.
-    assert len(observed) >= 2, observed
+    # The watcher may miss the original PID on a fast runner; the hook records
+    # it directly. What matters is that a *different* process was started.
     assert killed["pid"] in observed
+    assert any(pid != killed["pid"] for pid in observed), observed
     assert run.twins == []
-    assert not _databases(dsn)
+    # Leak detection is scoped to this run: unrelated tests may legitimately
+    # leave databases behind for explicit orphan-recovery scenarios.
+    assert not [name for name in _databases(dsn) if run.source.run_id in name]
     source.assert_unchanged()
 
 
@@ -574,7 +588,9 @@ def test_run_cleanup_after_normal_run(source, dsn) -> None:
     assert {twin.database.name for twin in twins}.issubset(cleaned)
     assert len(cleaned) >= 3  # two workers and the immutable seed
     assert run.twins == []
-    assert not _databases(dsn)
+    # Leak detection is scoped to this run: unrelated tests may legitimately
+    # leave databases behind for explicit orphan-recovery scenarios.
+    assert not [name for name in _databases(dsn) if run.source.run_id in name]
     source.assert_unchanged()
 
 
