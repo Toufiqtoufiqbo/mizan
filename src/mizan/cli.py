@@ -394,7 +394,7 @@ def _run_postgres_cli(
 ) -> None:
     """Generic engine run against the PostgreSQL disposable Twin."""
     from mizan.ownership import RelationshipContract
-    from mizan.postgres_engine import PostgresRun, normalize_finding, serial_and_parallel_equivalence
+    from mizan.postgres_engine import PostgresRun, dedupe_findings, findings_equivalent, normalize_finding
     from mizan.postgres_twin import DatabaseRegistry, PostgresSource
 
     if not allow_disposable:
@@ -439,13 +439,20 @@ def _run_postgres_cli(
             from mizan.learning import learn_from_spec
             from mizan.proxy import RecordingProxy
 
-            proxy = RecordingProxy(twin.base_url, traffic)
+            # Every --token entry is an explicit name -> token declaration. The
+            # proxy needs the reverse map to attribute recorded traffic; without
+            # it the engine learns zero resources and cannot prove anything.
+            proxy = RecordingProxy(
+                twin.base_url, traffic, identity_map={token: name for name, token in token_map.items()}
+            )
             proxy.start()
             try:
                 learn_from_spec(
                     spec_path,
                     proxy.base_url,
-                    tokens=[f"{name}={token}" for name, token in sorted(token_map.items())],
+                    # identities maps a principal name to a *token value*; the
+                    # learner must send the token itself, never "name=token".
+                    identities=token_map,
                     exclude_paths=("/login",),
                 )
             finally:
@@ -461,13 +468,13 @@ def _run_postgres_cli(
         violations = serial
         if workers > 1:
             parallel_by_worker = run.parallel_attack(workers)
-            parallel = [v for _, vs in parallel_by_worker for v in vs]
+            parallel = dedupe_findings([v for _, vs in parallel_by_worker for v in vs])
             click.echo(f"parallel run on {workers} worker(s): {len(parallel)} finding(s)")
-            equivalence = serial_and_parallel_equivalence(serial, parallel)
+            click.echo("serial: " + json.dumps([normalize_finding(v) for v in serial], sort_keys=True))
+            click.echo("parallel: " + json.dumps([normalize_finding(v) for v in parallel], sort_keys=True))
+            equivalence = findings_equivalent(serial, parallel)
             click.echo(f"serial/parallel normalized finding equivalence: {equivalence}")
             if not equivalence:
-                click.echo("serial: " + json.dumps([normalize_finding(v) for v in serial], sort_keys=True))
-                click.echo("parallel: " + json.dumps([normalize_finding(v) for v in parallel], sort_keys=True))
                 raise SystemExit(2)
         directories = engine.write_bundles(violations, out_path)
         _print_report(engine, violations, directories)
