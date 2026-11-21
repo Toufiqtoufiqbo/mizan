@@ -2166,6 +2166,7 @@ class DisposableDatabase:
                         f"app={row[0]!r} type={row[1]!r} state={row[2]!r} query={row[3]!r}" for row in sessions
                     )
                     raise TwinLifecycleError(f"the immutable seed still has active sessions: {detail}")
+            with admin.cursor() as cursor:
                 cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (self.name,))
                 if cursor.fetchone():
                     raise TwinLifecycleError("the generated worker database already exists")
