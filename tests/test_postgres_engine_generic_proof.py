@@ -405,6 +405,7 @@ def _exists(dsn: str, name: str) -> bool:
     admin = _admin(dsn)
     try:
         from mizan.postgres_twin import database_exists
+
         return database_exists(admin, name)
     finally:
         admin.close()
@@ -422,6 +423,7 @@ def test_parallel_workers_really_overlap(source, dsn) -> None:
         env={"MIZAN_FIXTURE_RENDEZVOUS_DIR": str(rendezvous)},
     )
     captured: list[list] = []
+
     def hook(twins) -> None:
         captured.extend(twins)
         assert len(twins) == 2
@@ -433,6 +435,7 @@ def test_parallel_workers_really_overlap(source, dsn) -> None:
                 timeout=30,
             )
             return response.status_code
+
         with ThreadPoolExecutor(max_workers=2) as executor:
             statuses = [future.result() for future in [executor.submit(call, t.base_url) for t in twins]]
         assert statuses == [200, 200], statuses
