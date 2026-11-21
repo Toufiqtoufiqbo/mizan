@@ -279,7 +279,7 @@ def _render_body(attack: Attack) -> str:
     assert response.status_code not in (200, 201), (
         f"the cross-identity request was still accepted: {{response.status_code}}"
     )"""
-    return """    response = requests.request("{attack.method}", URL, headers=HEADERS, json=BODY, timeout=15)
+    return f'''    response = requests.request("{attack.method}", URL, headers=HEADERS, json=BODY, timeout=15)
     assert response.status_code not in (200, 201), (
         f"the cross-identity write was still accepted: {{response.status_code}}"
-    )"""
+    )'''

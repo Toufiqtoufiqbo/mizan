@@ -344,7 +344,9 @@ def test_regress_command_generates_failing_test_on_vulnerable_and_passing_on_cle
 
     result, out = _run_twin_cli("both")
     assert result.exit_code == 0, result.output
-    bundle = next(directory for directory in out.iterdir() if directory.is_dir())
+    # Use the L3 bundle deliberately: the write branch of the regression
+    # renderer is the one that exercises the real HTTP method.
+    bundle = next(directory for directory in out.iterdir() if directory.is_dir() and directory.name.startswith("L3-"))
 
     reg = Path(tempfile.mkdtemp(prefix="mizan-vii-gp-reg-"))
     runner = _run_cli(["regress", str(bundle), "--out", str(reg)])
