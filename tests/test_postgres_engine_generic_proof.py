@@ -533,27 +533,13 @@ def test_parallel_attack_cancellation_cleans_up(source, dsn) -> None:
 
 @pytest.mark.postgres_integration
 def test_worker_process_death_is_recovered_by_restore(source, dsn) -> None:
-    import threading
-
     run = _postgres_run(source, Path(tempfile.mkdtemp(prefix="mizan-vii-gp-dead-")))
     killed: dict = {}
-    observed: set[int] = set()
-    stop_watching = threading.Event()
-
-    def watch():
-        while not stop_watching.is_set():
-            twin = killed.get("twin")
-            if twin is not None and twin._twin is not None and twin._twin.process is not None:
-                observed.add(twin._twin.process.pid)
-            stop_watching.wait(0.02)
-
-    watcher = threading.Thread(target=watch, daemon=True)
-    watcher.start()
 
     def attack_hook(twin):
         if twin.worker_id == "p0":
             killed["twin"] = twin
-            killed["pid"] = twin._twin.process.pid
+            killed["database"] = twin.database
             with contextlib.suppress(Exception):
                 twin._twin.process.kill()
 
@@ -561,15 +547,11 @@ def test_worker_process_death_is_recovered_by_restore(source, dsn) -> None:
         results = run.parallel_attack(2, on_worker_attack=attack_hook)
         assert [worker_id for worker_id, _ in results] == ["p0", "p1"]
     finally:
-        stop_watching.set()
-        watcher.join(timeout=5)
         run.cleanup()
-    # The generic engine restores before every probe group, so the killed
-    # worker came back with a fresh process instead of tainting p1.
-    # The watcher may miss the original PID on a fast runner; the hook records
-    # it directly. What matters is that a *different* process was started.
-    assert killed["pid"] in observed
-    assert any(pid != killed["pid"] for pid in observed), observed
+    # The generic engine restores before every probe group. Restore replaces
+    # the worker database object, which is deterministic evidence that the
+    # killed worker was rebuilt instead of leaving p1 tainted.
+    assert killed["twin"].database is not killed["database"]
     assert run.twins == []
     # Leak detection is scoped to this run: unrelated tests may legitimately
     # leave databases behind for explicit orphan-recovery scenarios.
