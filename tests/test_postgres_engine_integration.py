@@ -140,7 +140,7 @@ def test_mizan_engine_parallel_workers_are_isolated(source, dsn) -> None:
             with admin.cursor() as cursor:
                 cursor.execute(
                     "SELECT oid FROM pg_database WHERE datname = ANY(%s)", ([twin.database.name for twin in twins],)
-               )
+                )
                 oids = [int(row[0]) for row in cursor.fetchall()]
                 assert len(oids) == 2 and len(set(oids)) == 2
         finally:
