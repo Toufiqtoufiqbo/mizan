@@ -66,7 +66,20 @@ transient/autovacuum session, not confirmed.
   cause. They did not weaken the security assertions; the deterministic
   process-death assertion was kept.
 - The diagnostic-only commit `840bcfea` added active-session details to the
-  clone error; it did not change behavior and is retained.
+  clone error. Its patch closed the `admin.cursor()` context before the
+  "worker database already exists" check, leaving that check on a closed
+  cursor. It was harmless while no seed session was present, but on CI run
+  **#280** (head `9790262`, job 137012168569) the drain path was entered and
+  the benchmark step failed with:
+
+  ```
+  psycopg.InterfaceError: the cursor is closed
+  postgres_twin.py:2169 in create  -> cursor.execute("SELECT 1 FROM pg_database ...")
+  ```
+
+  This is a confirmed regression introduced by the diagnostic patch, not an
+  environmental failure. The existence check now uses a fresh cursor and runs
+  unconditionally, restoring the original fail-closed invariant.
 
 ## 5. Changes pushed (exact commit)
 
@@ -81,10 +94,12 @@ Commit `406bb1855d11315212ff56476afaaad864d4caa7` on
    explicitly so the write path is always exercised.
 4. `src/mizan/postgres_twin.py`: `DisposableDatabase.create()` now gives a
    transient seed backend the same bounded 5-second drain used by verified
-   drops, then still fails closed with session details if it remains.
+   drops, then still fails closed with session details if it remains. The
+   subsequent worker-existence check was moved back into its own cursor scope
+   after the CI #280 closed-cursor regression.
 
-All four pushed files were byte-compared against local `git hash-object` values
-and matched exactly. `ruff check .` and `ruff format --check .` pass.
+All pushed files were byte-compared against local `git hash-object` values and
+matched exactly. `ruff check .` and `ruff format --check .` pass.
 
 ## 6. Verification
 
@@ -93,18 +108,22 @@ and matched exactly. `ruff check .` and `ruff format --check .` pass.
 - `ruff check .` and `ruff format --check .`: clean.
 - New unit regression fails on the buggy renderer (`BUGGY_EXIT 1`) and passes
   with the fix; the integration test now selects the L3 bundle deterministically.
-- CI run **#279**, ID **44956914068**, on the exact fix HEAD
-  `406bb1855d11315212ff56476afaaad864d4caa7`:
-  https://github.com/Toufiqtoufiqbo/mizan/actions/runs/44956914068 — overall
-  **success**. Per job: A, B, B2, C, D, E, F, G, S all `success`;
-  `G - external target (opt-in)` `skipped` per documented design.
+- CI run **#279**, ID **44956914068**, on code HEAD
+  `406bb1855d11315212ff56476afaaad864d4caa7`: overall **success**; A, B, B2,
+  C, D, E, F, G, S all `success`; external target `skipped` by design.
+- CI run **#280**, ID **44958607217**, on docs-only HEAD `9790262`: B2 failed
+  in the benchmark step with the confirmed closed-cursor regression described
+  above; all other jobs passed. This was not a recurrence of the renderer bug.
+- The corrected cursor scope is included in the final push with this report;
+  CI on that exact HEAD is verified in PR #11 before the final verdict.
 
 ## 7. Verdict
 
-**READY FOR REVIEW.** The B2 failure was explained from real job logs, the
-renderer bug fixed, a failing-before/passing-after regression added, and all
-required CI jobs passed on the exact fix HEAD. PR #11 remains open and unmerged;
-`main`, history and the stash were not touched.
+**READY FOR REVIEW** once the final exact-HEAD CI run is green: the original B2
+failure was explained from real job logs, the renderer bug fixed, a
+failing-before/passing-after regression added, and the diagnostic-introduced
+cursor regression corrected. PR #11 remains open and unmerged; `main`, history
+and the stash were not touched.
 
 Remaining limitation: the earlier transient seed-session failure (run #275)
 was mitigated with a bounded drain but its exact backend identity was never
