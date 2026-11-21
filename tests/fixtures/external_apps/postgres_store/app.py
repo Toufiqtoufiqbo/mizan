@@ -60,6 +60,10 @@ VARIANTS = (
     "composite",
 )
 
+#: Independent request rendezvous used only by concurrency tests.
+_BARRIERS: dict[str, tuple[threading.Barrier, int]] = {}
+_BARRIER_LOCK = threading.Lock()
+
 
 def _dsn() -> str:
     return os.environ.get("MIZAN_PG_DSN") or os.environ.get("MIZAN_TEST_POSTGRES_DSN") or ""
