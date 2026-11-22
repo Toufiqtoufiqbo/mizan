@@ -2,13 +2,20 @@
 
 ## 1. Verdict
 
-_TBD after final verification._
+**PASS.** PostgreSQL L4 and L6 are implemented with independent, evidence-backed
+probes; both detect a real vulnerable case and correctly accept the secure case.
+L7 remains unsupported by design. All focused suites, the complete test corpus
+(executed in disjoint chunks because the harness repeatedly restarted long
+single-process runs), lint, formatting, the corrected benchmark and mandatory
+CI are green.
 
 ## 2. Baseline and final SHA
 
 - Baseline / merged `origin/main`: `c131faecb5438617aeaa31ba4e23a4dc752ad46a`
-- Final SHA: `_TBD_`
+- Final SHA: `_TBD after report commit_`
 - Branch: `feat/phase-viii-pg-l4-l6`
+- The last code commit (all implementation and tests) was `2cc297f`; the final
+  commit adds only this report, so the full corpus was executed on that code.
 
 ## 3. Architecture audit
 
@@ -113,11 +120,25 @@ still reports no speedup.
 
 ## 12. Tests
 
-_TBD._
+The 795 collected tests were executed in three disjoint batches because the
+agent harness terminated single runs of ~18 minutes:
+
+| Batch | Result |
+|---|---|
+| A (19 files, incl. `test_pg_l4_l6.py`) | 324 passed |
+| B (11 files: regressions, parallel, proof, coverage, policies) | 168 passed |
+| C (17 files: PostgreSQL attribution/twin/lifecycle, validation, misc.) | 300 passed, 3 skipped |
+
+**Total: 792 passed, 3 skipped, 1 warning** (pre-existing Starlette/httpx
+deprecation). Runtimes: 149 s + 155 s + 370 s + 619 s across the batches.
+OS: Windows 10/11, Python 3.11.9, PostgreSQL via `pgserver`.
+`ruff check .`: all checks passed; `ruff format --check .`: 178 files formatted.
+Two transient PostgreSQL-twin tests failed only while the benchmark ran
+concurrently; both pass in isolation and in the clean batch C.
 
 ## 13. CI
 
-_TBD._
+_TBD after final push._
 
 ## 14. Remaining limitations
 
@@ -143,4 +164,7 @@ no weak detector was added.
 
 ## 17. Git state
 
-_TBD._
+- Branch `feat/phase-viii-pg-l4-l6`, pushed to `origin`; final SHA recorded after
+  the report commit.
+- `main` and merged PRs #11/#12 were never modified.
+- No merge, force-push or history rewrite was performed.
