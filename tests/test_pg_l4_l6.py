@@ -160,6 +160,30 @@ def test_l6_secure_accepts_boundary_behavior(source, dsn) -> None:
 
 
 @pytest.mark.postgres_integration
+def test_regressions_are_semantic_l4_and_explicitly_unsupported_l6(source, dsn, tmp_path) -> None:
+    from click.testing import CliRunner
+
+    from mizan.cli import main
+
+    result, out = _run("l4_vulnerable")
+    assert result.exit_code == 0, result.output
+    directories = {path.name: path for path in out.iterdir() if path.is_dir()}
+    l4 = next(path for name, path in directories.items() if name.startswith("L4-"))
+    l6 = next(path for name, path in directories.items() if name.startswith("L6-"))
+    for bundle, expected_supported in ((l4, True), (l6, False)):
+        target = tmp_path / f"reg-{bundle.name}"
+        run = CliRunner().invoke(main, ["regress", str(bundle), "--out", str(target)])
+        assert run.exit_code == 0, run.output
+        generated = next(target.glob("test_mizan_*.py")).read_text(encoding="utf-8")
+        assert f"SUPPORTED = {expected_supported}" in generated
+        if expected_supported:
+            assert "_readback" in generated
+            assert "FIELD" in generated
+        else:
+            assert "pytest.skip" in generated
+
+
+@pytest.mark.postgres_integration
 def test_l4_and_l6_have_independent_execution_records(source, dsn) -> None:
     result, _out = _run("l4_vulnerable")
     assert result.exit_code == 0, result.output
