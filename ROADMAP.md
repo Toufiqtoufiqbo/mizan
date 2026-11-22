@@ -71,7 +71,12 @@
       equivalence reporting is documented as PARTIAL pending broader workloads
 - [ ] **Separate PostgreSQL data directories/clusters per worker**: out of
       scope; the current Twin uses isolated databases in one cluster
-- [ ] **Full L6/L7 coverage**: no bounded-state or cache/queue/log providers
+- [x] **PostgreSQL L4**: trusted protected-field declarations plus attributed
+      persisted-state verification (Phase VIII)
+- [x] **PostgreSQL L6**: explicit scoped cardinality invariants verified from
+      database state, independent of L5 execution accounting (Phase VIII)
+- [ ] **Full L6/L7 coverage**: generic L6 remains partial; L7 needs cache/queue/log
+      providers (see `PHASE_VIII_L7_FEASIBILITY.md`)
 - [ ] **Multi-stack independent PostgreSQL validation**: only one independent
       PostgreSQL-backed fixture exists today
 - [x] **An identity map in the CLI** (`--identity-map`): already implemented

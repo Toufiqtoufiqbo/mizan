@@ -751,7 +751,14 @@ class Mizan:
             records = [item for item in self.outcomes if item.get("law") == law]
             eligible = self.eligible_by_law.get(law, 0)
             executed = self.executed_by_law.get(law, 0)
-            if not eligible and not records and not executed and law not in ScanCoverage.required_laws:
+            declared_law = law in {"L4", "L6"} and self._law_policy_enabled
+            if (
+                not eligible
+                and not records
+                and not executed
+                and law not in ScanCoverage.required_laws
+                and not declared_law
+            ):
                 continue
             # Every recorded outcome is, by definition, an eligible check that
             # actually ran. Ledger writes discovered only while the probes run

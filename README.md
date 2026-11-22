@@ -637,10 +637,16 @@ Law capability matrix (honest reporting; missing evidence is never clean):
 | L1 | SUPPORTED | SUPPORTED | identity coherence from a trusted identity endpoint |
 | L2 | SUPPORTED | SUPPORTED | confirmed ownership evidence required |
 | L3 | SUPPORTED | SUPPORTED | confirmed transaction-local attribution required |
-| L4 | PARTIAL | UNSUPPORTED | client field origin cannot be proven from the database alone |
+| L4 | PARTIAL | SUPPORTED | PostgreSQL requires a trusted protected-field policy and an attributed persisted mutation; generic path remains partial |
 | L5 | SUPPORTED | PARTIAL | POST-only race probe, executed on an isolated worker |
-| L6 | PARTIAL | UNSUPPORTED | detected only through L5 race heuristics, never a standalone law |
-| L7 | UNSUPPORTED | UNSUPPORTED | no cache/queue/log/metric provider |
+| L6 | PARTIAL | SUPPORTED | explicit scoped cardinality invariants verified from database state; generic path remains partial |
+| L7 | UNSUPPORTED | UNSUPPORTED | no cache/queue/log/metric provider; see `PHASE_VIII_L7_FEASIBILITY.md` |
+
+`SUPPORTED` for PostgreSQL L4/L6 means a declared invariant is exercised and its
+violation is confirmed from persisted database evidence (see
+`tests/test_pg_l4_l6.py`). It does not mean every possible authority field or
+bound is covered: the declaration must name the field or invariant, its source
+and its confidence. A field name alone is never evidence.
 
 The command prints a machine-readable `postgres backend status` line. Its
 `laws_executed` field is derived from recorded probe executions, never from a
