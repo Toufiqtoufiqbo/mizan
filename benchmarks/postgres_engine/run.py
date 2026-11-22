@@ -139,7 +139,11 @@ def _run_once(dsn: str, workspace: Path, workers: int, *, module: Any, contract:
         started = time.perf_counter()
         serial_violations = engine.attack()
         serial_seconds = time.perf_counter() - started
-        serial_coverage = engine.coverage().to_dict()
+        serial_coverage_object = engine.coverage()
+        # Learning traffic is real and was counted by the learner; record it on
+        # the coverage snapshot so ``meaningful`` reflects the actual workload.
+        serial_coverage_object.learning_operations = len(learned)
+        serial_coverage = serial_coverage_object.to_dict()
         serial = {
             "workers": 1,
             "duration_seconds": round(serial_seconds, 4),
@@ -267,13 +271,15 @@ def check_results(results: dict[str, Any]) -> list[str]:
     _require(results.get("execution_mode") == EXECUTION_MODE, "the execution mode is mislabelled", problems)
     _require(not results.get("failures"), "the run recorded failures", problems)
     parallel = results.get("parallel", {})
-    if parallel.get("workers", 1) > 1:
-        _require(parallel.get("equivalent_to_serial") is True, "parallel findings differ from serial", problems)
-        _require(
-            len(parallel.get("per_worker", [])) == parallel["workers"],
-            "the parallel result has the wrong worker count",
-            problems,
-        )
+    parallel_items = parallel if isinstance(parallel, list) else [parallel]
+    for item in parallel_items:
+        if item.get("workers", 1) > 1:
+            _require(item.get("equivalent_to_serial") is True, "parallel findings differ from serial", problems)
+            _require(
+                len(item.get("per_worker", [])) == item["workers"],
+                "the parallel result has the wrong worker count",
+                problems,
+            )
     return problems
 
 

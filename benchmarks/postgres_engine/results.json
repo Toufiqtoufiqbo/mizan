@@ -3,15 +3,15 @@
   "comparison": {
     "mode": "replicated worker isolation and normalized finding equivalence",
     "parallel_durations_seconds": [
-      21.9383,
-      32.715
+      20.5422,
+      35.4356
     ],
-    "serial_duration_seconds": 13.2111,
+    "serial_duration_seconds": 13.787,
     "speedup_claim": null
   },
   "environment": {
-    "cluster": "7710949953056356416",
-    "git_sha": "2f275d00a1e9565300b35bf630c7e58cc06b404f",
+    "cluster": "7710951362204036496",
+    "git_sha": "a13bf89b4343a2906525285a66178d3395dc41fd",
     "platform": "Windows-10-10.0.19045-SP0",
     "psycopg": "3.3.9",
     "python": "3.11.9"
@@ -28,7 +28,7 @@
   },
   "parallel": [
     {
-      "duration_seconds": 21.9383,
+      "duration_seconds": 20.5422,
       "equivalent_to_serial": true,
       "findings": 2,
       "normalized_findings": [
@@ -77,7 +77,7 @@
       "workers": 2
     },
     {
-      "duration_seconds": 32.715,
+      "duration_seconds": 35.4356,
       "equivalent_to_serial": true,
       "findings": 2,
       "normalized_findings": [
@@ -141,10 +141,10 @@
     }
   ],
   "parallel_duration_seconds": [
-    21.9383,
-    32.715
+    20.5422,
+    35.4356
   ],
-  "parallel_median_seconds": 27.3267,
+  "parallel_median_seconds": 27.9889,
   "problems": [],
   "serial": {
     "coverage": {
@@ -191,8 +191,8 @@
           "unresolved": 0
         }
       },
-      "learning_operations": 0,
-      "meaningful": false,
+      "learning_operations": 10,
+      "meaningful": true,
       "ownership_ambiguous": 0,
       "ownership_candidates": 0,
       "ownership_semantics_missing": 0,
@@ -209,7 +209,7 @@
       "sharing_semantics_ambiguous": 2,
       "unresolved_checks": 1
     },
-    "duration_seconds": 13.2111,
+    "duration_seconds": 13.787,
     "findings": 2,
     "inconclusive": 1,
     "laws": [
