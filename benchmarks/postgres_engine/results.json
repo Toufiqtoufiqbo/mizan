@@ -1,34 +1,260 @@
 {
-  "environment": {
-    "cluster": "7710374212274719264",
-    "git_sha": "cac413733307651788670d42eaeb083c6ad8c946",
-    "postgres": "3.3.9"
+  "benchmark_version": 2,
+  "comparison": {
+    "mode": "replicated worker isolation and normalized finding equivalence",
+    "parallel_durations_seconds": [
+      21.6813,
+      30.9834
+    ],
+    "serial_duration_seconds": 13.2626,
+    "speedup_claim": null
   },
+  "environment": {
+    "cluster": "7710958324059037072",
+    "git_sha": "548949fac44c4979e8bb8866c57a6f7498f9dd19",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "psycopg": "3.3.9",
+    "python": "3.11.9"
+  },
+  "execution_mode": "replicated: each isolated worker runs the full learn()->attack() workload",
   "failures": [],
+  "fixture": {
+    "app_sha256": "ac00097ed30e6689a31c1c8219fb0e7d6c68fe2dac140e454db7c15800d60840",
+    "contract_sha256": "7c55e623b37da9efb9238a52026250a27dda1e3583bff73800520ea6f3303ece",
+    "name": "postgres_store",
+    "schema": "pgstore",
+    "spec_sha256": "1834ea05cea898bd66f14009cbf07ad86a0a111c7f9b1c4dc3fec0956bbafadd",
+    "variant": "both"
+  },
   "parallel": [
     {
-      "duration_seconds": 11.1587,
-      "resources": 0,
-      "rules": 0,
-      "violations": 0,
+      "duration_seconds": 21.6813,
+      "equivalent_to_serial": true,
+      "findings": 2,
+      "normalized_findings": [
+        [
+          "L2",
+          "bob",
+          "items:item-a1",
+          "read",
+          "high",
+          "alice",
+          "",
+          "",
+          "bob read an object owned by alice"
+        ],
+        [
+          "L3",
+          "bob",
+          "items:item-a1",
+          "write",
+          "high",
+          "alice",
+          "",
+          "",
+          "bob wrote into an object owned by alice"
+        ]
+      ],
+      "per_worker": [
+        {
+          "findings": 2,
+          "probes_executed": 2,
+          "requests": 5,
+          "resources": 2,
+          "worker": "p0"
+        },
+        {
+          "findings": 2,
+          "probes_executed": 2,
+          "requests": 5,
+          "resources": 2,
+          "worker": "p1"
+        }
+      ],
+      "total_probes_executed": 4,
+      "total_requests": 10,
+      "violations": 2,
       "workers": 2
     },
     {
-      "duration_seconds": 20.7607,
-      "resources": 0,
-      "rules": 0,
-      "violations": 0,
+      "duration_seconds": 30.9834,
+      "equivalent_to_serial": true,
+      "findings": 2,
+      "normalized_findings": [
+        [
+          "L2",
+          "bob",
+          "items:item-a1",
+          "read",
+          "high",
+          "alice",
+          "",
+          "",
+          "bob read an object owned by alice"
+        ],
+        [
+          "L3",
+          "bob",
+          "items:item-a1",
+          "write",
+          "high",
+          "alice",
+          "",
+          "",
+          "bob wrote into an object owned by alice"
+        ]
+      ],
+      "per_worker": [
+        {
+          "findings": 2,
+          "probes_executed": 2,
+          "requests": 5,
+          "resources": 2,
+          "worker": "p0"
+        },
+        {
+          "findings": 2,
+          "probes_executed": 2,
+          "requests": 5,
+          "resources": 2,
+          "worker": "p1"
+        },
+        {
+          "findings": 2,
+          "probes_executed": 2,
+          "requests": 5,
+          "resources": 2,
+          "worker": "p2"
+        },
+        {
+          "findings": 2,
+          "probes_executed": 2,
+          "requests": 5,
+          "resources": 2,
+          "worker": "p3"
+        }
+      ],
+      "total_probes_executed": 8,
+      "total_requests": 20,
+      "violations": 2,
       "workers": 4
     }
   ],
-  "parallel_median_seconds": 15.9597,
+  "parallel_duration_seconds": [
+    21.6813,
+    30.9834
+  ],
+  "parallel_median_seconds": 26.3323,
+  "problems": [],
   "serial": {
-    "duration_seconds": 9.4656,
-    "resources": 0,
-    "rules": 0,
-    "violations": 0,
+    "coverage": {
+      "budget_exhausted": false,
+      "executed_laws": [
+        "L2",
+        "L3"
+      ],
+      "identity_anchors_unresolved": 0,
+      "inconclusive_checks": 1,
+      "laws": {
+        "L2": {
+          "allowed_by_grant": 0,
+          "attempt_rate": 1.0,
+          "attempted": 2,
+          "decided": 0,
+          "eligible": 2,
+          "executed": 1,
+          "findings": 1,
+          "inconclusive": 1,
+          "pending": 0,
+          "resolution_rate": 0.5,
+          "resolved": 1,
+          "skipped": false,
+          "state": "executed",
+          "supported": true,
+          "unresolved": 1
+        },
+        "L3": {
+          "allowed_by_grant": 0,
+          "attempt_rate": 1.0,
+          "attempted": 1,
+          "decided": 0,
+          "eligible": 1,
+          "executed": 1,
+          "findings": 1,
+          "inconclusive": 0,
+          "pending": 0,
+          "resolution_rate": 1.0,
+          "resolved": 1,
+          "skipped": false,
+          "state": "executed",
+          "supported": true,
+          "unresolved": 0
+        }
+      },
+      "learning_operations": 10,
+      "meaningful": true,
+      "ownership_ambiguous": 0,
+      "ownership_candidates": 0,
+      "ownership_semantics_missing": 0,
+      "pending_checks": 0,
+      "probe_candidates": 4,
+      "probes_executed": 2,
+      "resolved_checks": 2,
+      "resource_row_mapping_ambiguous": 0,
+      "resources_corroborated": 1,
+      "resources_discovered": 2,
+      "resources_owned": 1,
+      "resources_with_ownership_evidence": 1,
+      "sharing_explained": 0,
+      "sharing_semantics_ambiguous": 2,
+      "unresolved_checks": 1
+    },
+    "duration_seconds": 13.2626,
+    "findings": 2,
+    "inconclusive": 1,
+    "laws": [
+      "L2",
+      "L3"
+    ],
+    "normalized_findings": [
+      [
+        "L2",
+        "bob",
+        "items:item-a1",
+        "read",
+        "high",
+        "alice",
+        "",
+        "",
+        "bob read an object owned by alice"
+      ],
+      [
+        "L3",
+        "bob",
+        "items:item-a1",
+        "write",
+        "high",
+        "alice",
+        "",
+        "",
+        "bob wrote into an object owned by alice"
+      ]
+    ],
+    "outcomes": 3,
+    "probe_candidates": 4,
+    "probes_executed": 2,
+    "requests": 5,
+    "resources": 2,
+    "rules": 2,
+    "violations": 2,
     "workers": 1
   },
-  "serial_median_seconds": 9.4656,
-  "source_unchanged": true
+  "workload": {
+    "eligible_probes": 4,
+    "executed_probes": 2,
+    "learning_requests": 10,
+    "resources_discovered": 2,
+    "rules_learned": 2,
+    "traffic_records": 10
+  }
 }

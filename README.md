@@ -25,6 +25,16 @@ the part that is still missing in the ecosystem:
 pip install -e .
 ```
 
+PostgreSQL support is an optional extra; the base installation does not pull in
+a database driver:
+
+```bash
+pip install -e '.[postgres]'
+```
+
+Missing driver produces an actionable error naming that command rather than a
+bare `ImportError`.
+
 ## Try it in 30 seconds
 
 ```bash
@@ -318,15 +328,27 @@ compares two snapshots of the database around a request; the difference is the
 write, attributed to the identity that made it. This is what the twin uses.
 
 **2. Postgres.** `mizan.postgres_audit.PostgresAuditor` installs an audit table
-and a trigger on every table of the schemas you point it at. The identity
-travels in `application_name`:
+and a trigger on every table of the schemas you point it at. The primary
+transaction-local principal mechanism is `mizan.principal`:
+
+```sql
+SELECT set_config('mizan.principal', current_user_id, true);
+```
+
+`SET LOCAL`/`set_config(..., true)` is transaction-scoped, so a pooled
+connection cannot carry one user's identity into another user's work.
+
+Legacy deployments may still expose the acting principal through
+`application_name`:
 
 ```sql
 SET LOCAL application_name = 'mizan:' || current_user_id;
 ```
 
-`SET LOCAL` is transaction-scoped, so a pooled connection cannot carry one
-user's identity into another user's work.
+That form is accepted only for backwards compatibility. `application_name` is
+connection metadata, **not trusted authentication evidence**: any client that
+can set it can claim any identity. It is never treated as proof of who made a
+write.
 
 The auditor needs to own the tables it instruments (creating a trigger requires
 it), and it keeps both the row before and after the change, so the changed
@@ -610,17 +632,24 @@ attacked or modified. `postgres-evidence` and `postgres-twin` remain available.
 
 Law capability matrix (honest reporting; missing evidence is never clean):
 
-| Law | SQLite | PostgreSQL | Notes |
+| Law | Generic/SQLite | PostgreSQL | Notes |
 |---|---|---|---|
-| L1 | SUPPORTED | SUPPORTED | existing identity provenance rules |
-| L2 | SUPPORTED | SUPPORTED | PostgreSQL-backed ownership evidence |
-| L3 | SUPPORTED | SUPPORTED | requires confirmed audit attribution |
-| L4 | PARTIAL | UNSUPPORTED | database alone cannot prove client field origin |
-| L5 | SUPPORTED | PARTIAL | race harness runs on an isolated worker |
-| L6 | UNSUPPORTED | UNSUPPORTED | no complete bounded-state evidence |
+| L1 | SUPPORTED | SUPPORTED | identity coherence from a trusted identity endpoint |
+| L2 | SUPPORTED | SUPPORTED | confirmed ownership evidence required |
+| L3 | SUPPORTED | SUPPORTED | confirmed transaction-local attribution required |
+| L4 | PARTIAL | UNSUPPORTED | client field origin cannot be proven from the database alone |
+| L5 | SUPPORTED | PARTIAL | POST-only race probe, executed on an isolated worker |
+| L6 | PARTIAL | UNSUPPORTED | detected only through L5 race heuristics, never a standalone law |
 | L7 | UNSUPPORTED | UNSUPPORTED | no cache/queue/log/metric provider |
 
-The command prints a machine-readable `postgres backend status` line with laws
-executed, requests, attributed writes, findings, inconclusive outcomes and
-worker count. `benchmarks/postgres_engine/run.py` compares serial and parallel
-runs and records timings and normalized findings.
+The command prints a machine-readable `postgres backend status` line. Its
+`laws_executed` field is derived from recorded probe executions, never from a
+hardcoded law list or from the existence of a finding; `laws_by_status` reports
+`unsupported`, `supported_not_exercised`, `eligible`, `attempted`, `executed`,
+`inconclusive` and `skipped` separately.
+
+`benchmarks/postgres_engine/run.py` sends real traffic through
+`learn_from_spec`, runs the real attack pipeline and fails on an empty or
+incomplete workload. Parallel mode is **replicated**: every isolated worker
+runs the whole workload, so the benchmark reports worker isolation and
+normalized finding equivalence, not a speedup claim.

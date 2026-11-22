@@ -375,6 +375,30 @@ def _attack_parallel(
     return findings
 
 
+def postgres_backend_status(engine: Any, violations: list[Any], workers: int) -> dict[str, Any]:
+    """Derive the backend status from real engine execution records.
+
+    Kept as a pure function so the reporting contract can be tested without a
+    live PostgreSQL cluster. No law name is hardcoded here.
+    """
+    coverage = engine.coverage()
+    law_details = coverage.to_dict()["laws"]
+    return {
+        "backend": "postgres",
+        "laws_executed": coverage.executed_laws,
+        "laws_by_status": {law: details["state"] for law, details in law_details.items()},
+        "laws_unsupported": sorted(law for law, details in law_details.items() if details["state"] == "unsupported"),
+        "laws_skipped": sorted(law for law, details in law_details.items() if details["state"] == "skipped"),
+        "probe_candidates": engine.probe_candidates,
+        "probes_executed": engine.probes_executed,
+        "requests": engine.requests,
+        "attributed_writes": len(engine._attributed_events),
+        "confirmed_findings": len(violations),
+        "inconclusive": len(engine.inconclusive_checks),
+        "workers": workers,
+    }
+
+
 def _run_postgres_cli(
     *,
     command: str,
@@ -478,16 +502,7 @@ def _run_postgres_cli(
                 raise SystemExit(2)
         directories = engine.write_bundles(violations, out_path)
         _print_report(engine, violations, directories)
-        status = {
-            "backend": "postgres",
-            "laws_executed": sorted({str(v.law) for v in violations} | {"L1", "L2", "L3", "L5"}),
-            "laws_unsupported": ["L4", "L6", "L7"],
-            "requests": engine.requests,
-            "attributed_writes": len(engine._attributed_events),
-            "confirmed_findings": len(violations),
-            "inconclusive": len(engine.inconclusive_checks),
-            "workers": workers,
-        }
+        status = postgres_backend_status(engine, violations, workers)
         click.echo("postgres backend status: " + json.dumps(status, sort_keys=True))
         source.assert_unchanged()
     finally:
@@ -525,9 +540,8 @@ def replay(bundles: str, target: str, token: str | None) -> None:
     Exits with a non-zero status when an attack still works, so a pull request
     that reintroduces a fixed vulnerability fails the build.
     """
-    from urllib.parse import urlsplit
-
-    from mizan.regression import Attack, attack_succeeds
+    from mizan.core import Step, Violation
+    from mizan.regression import attack_succeeds, build_attack
 
     resolver = TokenResolver.from_env()
     directories = sorted(path for path in Path(bundles).iterdir() if path.is_dir())
@@ -541,7 +555,6 @@ def replay(bundles: str, target: str, token: str | None) -> None:
         steps = payload.get("steps") or []
         if not steps:
             continue
-        step = steps[0]
         principal = payload.get("principal") or "attacker"
         bearer = token or resolver.token_for(principal)
         if not bearer:
@@ -549,17 +562,20 @@ def replay(bundles: str, target: str, token: str | None) -> None:
                 f'no token for principal {principal!r}. Set MIZAN_TOKENS=\'{{"{principal}": "..."}}\' '
                 f"or MIZAN_TOKEN_{principal.upper()}. The replay cannot be trusted without it."
             )
-        attack = Attack(
+        violation = Violation(
             law=payload["law"],
             title=payload["title"],
-            method=step["method"],
-            path=urlsplit(step["url"]).path or "/",
-            token_var=f"MIZAN_TOKEN_{principal.upper()}",
-            headers=step.get("headers") or {},
-            body=step.get("body"),
-            expectation="the request is rejected",
+            detail=payload.get("detail", ""),
+            severity=payload.get("severity", "high"),
             principal=principal,
+            resource=payload.get("resource"),
+            action=payload.get("action"),
+            evidence=payload.get("evidence") or {},
+            steps=[Step(**item) for item in steps],
         )
+        attack = build_attack(violation)
+        if attack is None:
+            continue
         try:
             still_works = attack_succeeds(attack, bearer, target)
         except Exception as exc:
@@ -754,6 +770,7 @@ def regress(bundle: str, out_path: str) -> None:
         principal=payload.get("principal"),
         resource=payload.get("resource"),
         action=payload.get("action"),
+        evidence=payload.get("evidence") or {},
         steps=[Step(**step) for step in payload.get("steps", [])],
     )
     directory = Path(out_path)
@@ -784,29 +801,30 @@ def verify(bundle: str, target: str, token: str | None, expect_fixed: bool) -> N
 
 def _verify_fixed(bundle: str, target: str, token: str | None, resolver: TokenResolver) -> None:
     """Check that the attack behind a bundle no longer works."""
-    from urllib.parse import urlsplit
-
-    from mizan.regression import Attack, attack_succeeds
+    from mizan.core import Step, Violation
+    from mizan.regression import attack_succeeds, build_attack
 
     payload = json.loads((Path(bundle) / "replay.json").read_text(encoding="utf-8"))
     steps = payload.get("steps") or []
     if not steps:
         click.echo("the bundle has no reproduction steps")
         raise SystemExit(2)
-    step = steps[0]
     principal = payload.get("principal") or "attacker"
     token = token or resolver.token_for(principal) or ""
-    attack = Attack(
+    violation = Violation(
         law=payload["law"],
         title=payload["title"],
-        method=step["method"],
-        path=urlsplit(step["url"]).path or "/",
-        token_var=f"MIZAN_TOKEN_{principal.upper()}",
-        headers=step.get("headers") or {},
-        body=step.get("body"),
-        expectation="the request is rejected",
+        detail=payload.get("detail", ""),
+        severity=payload.get("severity", "high"),
         principal=principal,
+        resource=payload.get("resource"),
+        action=payload.get("action"),
+        evidence=payload.get("evidence") or {},
+        steps=[Step(**item) for item in steps],
     )
+    attack = build_attack(violation)
+    if attack is None:
+        raise SystemExit(2)
     if not token:
         click.echo(f"no token given: set --token or MIZAN_TOKEN_{principal.upper()}")
         raise SystemExit(2)
@@ -952,9 +970,13 @@ def postgres_evidence(
         raise click.ClickException(f"environment variable {dsn_env} is not set")
     allowlist = tuple(dict.fromkeys(schemas))
     audit = audit_schema or allowlist[0]
-    try:
-        import psycopg
+    from mizan.postgres_twin import TwinLifecycleError, require_psycopg
 
+    try:
+        psycopg = require_psycopg()
+    except TwinLifecycleError as exc:
+        raise click.ClickException(str(exc)) from exc
+    try:
         connection = psycopg.connect(dsn, connect_timeout=5)
     except Exception:
         # Never echo a DSN: passwords and hosts must not reach logs.

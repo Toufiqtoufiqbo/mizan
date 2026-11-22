@@ -154,6 +154,9 @@ class Mizan:
         self.probe_candidates = 0
         #: How many probe groups actually issued a check during the attack.
         self.probes_executed = 0
+        #: Real probe executions per law. Reporting derives ``laws_executed``
+        #: from this record, never from hardcoded law names or findings.
+        self.executed_by_law: dict[str, int] = {}
 
     # -- learning ---------------------------------------------------------- #
 
@@ -328,6 +331,7 @@ class Mizan:
         self.eligible_by_law = dict(candidates)
         self.probe_candidates = sum(candidates.values())
         self.probes_executed = 0
+        self.executed_by_law = {}
         self.inconclusive_checks = []
         self.outcomes = []
         self._outcome_index = {}
@@ -350,6 +354,11 @@ class Mizan:
                 break
             if self.requests > issued_before:
                 self.probes_executed += 1
+                # ``T`` is the data-level view, not a standalone law probe. L6
+                # is only inferred through the L5 race heuristic and is never
+                # claimed as an independently executed law.
+                if name in {"L1", "L2", "L3", "L4", "L5"}:
+                    self.executed_by_law[name] = self.executed_by_law.get(name, 0) + 1
         return _dedupe(violations)
 
     # -- relevance of unresolved ownership -------------------------------- #
@@ -526,11 +535,14 @@ class Mizan:
 
         counts: dict[str, int] = {}
 
-        # L5 / L6 - a mutating operation on an object somebody owns.
+        # L5 - only POST is actually processed by ``_probe_races``. Counting
+        # PUT/PATCH/DELETE here would inflate eligible coverage with probes the
+        # engine never sends. L6 is not a standalone probe: it is inferred from
+        # the same race evidence and is reported as skipped, not executed.
         counts["L5"] = sum(
             1
             for (method, _template), records in examples.items()
-            if method in {"POST", "PUT", "PATCH", "DELETE"}
+            if method == "POST"
             and any(record.resource is not None and record.resource.key in owned for record in records)
         )
 
@@ -725,20 +737,29 @@ class Mizan:
         )
         report = self.graph.report() if self.graph is not None else {}
         reasons = list((self.graph.inconclusive if self.graph else {}).items())
-        # L2 and L3 are accounted separately. A completed read check is never
-        # allowed to stand in for an unresolved write check (or vice versa).
+        # Every law gets an explicit state. Reporting derives ``laws_executed``
+        # from the recorded probe execution, never from a hardcoded list or
+        # from the mere existence of a finding. L2 and L3 stay separate: a
+        # completed read check never stands in for an unresolved write check.
         laws: dict[str, LawCoverage] = {}
-        for law in ScanCoverage.required_laws:
+        for law in ("L1", "L2", "L3", "L4", "L5", "L6", "L7"):
             records = [item for item in self.outcomes if item.get("law") == law]
             eligible = self.eligible_by_law.get(law, 0)
-            if not eligible and not records:
+            executed = self.executed_by_law.get(law, 0)
+            if not eligible and not records and not executed and law not in ScanCoverage.required_laws:
                 continue
             # Every recorded outcome is, by definition, an eligible check that
             # actually ran. Ledger writes discovered only while the probes run
             # (for example a row created by a POST) may not have been in the
             # pre-computed target list; include them in the denominator so the
             # counters stay internally consistent.
-            counter = LawCoverage(eligible=max(eligible, len(records)), attempted=len(records))
+            counter = LawCoverage(
+                eligible=max(eligible, len(records)),
+                attempted=len(records),
+                executed=executed,
+                skipped=law == "L6",
+                supported=law not in {"L6", "L7"},
+            )
             for item in records:
                 value = item.get("outcome")
                 if value == AuthorizationOutcome.DECIDED.value:
@@ -1098,6 +1119,21 @@ class Mizan:
                     break
         return endpoints
 
+    def _state_verification_path(self) -> str | None:
+        """An endpoint whose response reflects persisted state for this actor.
+
+        Generated regressions use it to verify that a privileged or
+        cross-identity value really reached the database, instead of trusting
+        an echoed request value in the mutation response.
+        """
+        endpoints = self._identity_endpoints()
+        if endpoints:
+            return urlsplit(endpoints[0][2]).path or "/"
+        contract = self.relationship_contract
+        if contract is not None and contract.identity is not None:
+            return str(contract.identity[0])
+        return None
+
     def _probe_write_authorization(self) -> list[Violation]:
         """L3 - can one principal write into another principal's object?"""
         violations: list[Violation] = []
@@ -1278,6 +1314,7 @@ class Mizan:
                                     "database_key": event.row_key or event.row_id,
                                     "api_resource": mapped_resource,
                                 },
+                                "verification_path": urlsplit(url).path or self._state_verification_path(),
                             },
                             steps=[
                                 Step(
@@ -1344,6 +1381,7 @@ class Mizan:
                                 "sentinel": sentinel,
                                 "status": response.status_code,
                                 "event": event.to_dict(),
+                                "verification_path": self._state_verification_path(),
                             },
                             steps=[
                                 Step(

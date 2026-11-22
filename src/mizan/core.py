@@ -209,6 +209,43 @@ OUTCOME_PRECEDENCE: dict[AuthorizationOutcome, int] = {
 }
 
 
+class LawExecutionState(StrEnum):
+    """The single source of truth for what a scan did about one law.
+
+    The states are ordered by evidence strength, not by severity:
+
+    ``unsupported``
+        This backend has no implementation for the law. No assertion about the
+        law is made from this scan.
+    ``supported_not_exercised``
+        The law is implemented, but this workload offered no eligible target.
+        It is deliberately distinct from ``unsupported``.
+    ``eligible``
+        An eligible target existed, but no check was attempted (for example
+        the budget stopped the scan first).
+    ``attempted``
+        A check was recorded without a probe issuing an HTTP request (for
+        example a provisional uncertainty from ownership evidence).
+    ``executed``
+        A probe for this law actually issued requests and reached a decided
+        outcome (including a finding).
+    ``inconclusive``
+        Only inconclusive outcomes were recorded; no successful execution.
+        Never reported as a successful execution.
+    ``skipped``
+        The law is intentionally not evaluated as a standalone law in this
+        backend (L6 is only detected through the L5 race heuristics).
+    """
+
+    UNSUPPORTED = "unsupported"
+    SUPPORTED_NOT_EXERCISED = "supported_not_exercised"
+    ELIGIBLE = "eligible"
+    ATTEMPTED = "attempted"
+    EXECUTED = "executed"
+    INCONCLUSIVE = "inconclusive"
+    SKIPPED = "skipped"
+
+
 @dataclass
 class LawCoverage:
     """Per-law accounting for one authorization law.
@@ -240,6 +277,28 @@ class LawCoverage:
     allowed_by_grant: int = 0
     findings: int = 0
     inconclusive: int = 0
+    #: Probe groups that actually issued requests for this law. Unlike
+    #: ``attempted``, this cannot be raised by a recorded outcome alone.
+    executed: int = 0
+    supported: bool = True
+    skipped: bool = False
+
+    @property
+    def state(self) -> LawExecutionState:
+        """The derived execution state of this law."""
+        if self.skipped:
+            return LawExecutionState.SKIPPED
+        if not self.supported:
+            return LawExecutionState.UNSUPPORTED
+        if self.attempted and self.resolved == 0:
+            return LawExecutionState.INCONCLUSIVE
+        if self.executed > 0:
+            return LawExecutionState.EXECUTED
+        if self.attempted > 0:
+            return LawExecutionState.ATTEMPTED
+        if self.eligible > 0:
+            return LawExecutionState.ELIGIBLE
+        return LawExecutionState.SUPPORTED_NOT_EXERCISED
 
     @property
     def resolved(self) -> int:
@@ -269,6 +328,10 @@ class LawCoverage:
             "allowed_by_grant": self.allowed_by_grant,
             "findings": self.findings,
             "inconclusive": self.inconclusive,
+            "executed": self.executed,
+            "supported": self.supported,
+            "skipped": self.skipped,
+            "state": self.state.value,
             "resolved": self.resolved,
             "unresolved": self.unresolved,
             "pending": self.pending,
@@ -365,20 +428,39 @@ class ScanCoverage:
         return any(coverage.eligible > 0 for coverage in self.laws.values())
 
     @property
+    def executed_laws(self) -> list[str]:
+        """Laws with a real probe execution, in deterministic order.
+
+        This is the only list a reporting layer may use for ``laws_executed``:
+        a hardcoded law, an eligible target or a finding alone never qualifies.
+        """
+        return sorted(law for law, coverage in self.laws.items() if coverage.state is LawExecutionState.EXECUTED)
+
+    def law_state(self, law: str) -> LawExecutionState:
+        """The recorded state of one law (absent means unsupported)."""
+        coverage = self.laws.get(law)
+        return coverage.state if coverage is not None else LawExecutionState.UNSUPPORTED
+
+    @property
     def resolved_checks(self) -> int:
-        """Decided checks, including checks resolved by a confirmed grant."""
-        return sum(coverage.resolved for coverage in self.laws.values())
+        """Decided checks, including checks resolved by a confirmed grant.
+
+        Only the laws whose own coverage decides a clean claim are aggregated:
+        including probe-level laws that never record outcomes would invent
+        pending work and turn every scan inconclusive.
+        """
+        return sum(coverage.resolved for law, coverage in self.laws.items() if law in self.required_laws)
 
     @property
     def unresolved_checks(self) -> int:
         """Checks that remain undecided, including legacy recorded reasons."""
-        recorded = sum(coverage.inconclusive for coverage in self.laws.values())
+        recorded = sum(coverage.inconclusive for law, coverage in self.laws.items() if law in self.required_laws)
         return max(self.inconclusive_checks, recorded)
 
     @property
     def pending_checks(self) -> int:
         """Eligible checks that were never attempted."""
-        return sum(coverage.pending for coverage in self.laws.values())
+        return sum(coverage.pending for law, coverage in self.laws.items() if law in self.required_laws)
 
     @property
     def meaningful(self) -> bool:
@@ -411,6 +493,7 @@ class ScanCoverage:
             "resource_row_mapping_ambiguous": self.resource_row_mapping_ambiguous,
             "sharing_semantics_ambiguous": self.sharing_semantics_ambiguous,
             "laws": {law: coverage.to_dict() for law, coverage in sorted(self.laws.items())},
+            "executed_laws": self.executed_laws,
             "resolved_checks": self.resolved_checks,
             "unresolved_checks": self.unresolved_checks,
             "pending_checks": self.pending_checks,
