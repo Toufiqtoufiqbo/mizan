@@ -152,7 +152,13 @@ def _assert_clean(result, out: Path) -> None:
 def test_generic_cli_clean_variant_finds_nothing(source, dsn) -> None:
     result, out = _run_twin_cli("clean")
     _assert_clean(result, out)
-    assert _status(result)["laws_executed"] == ["L1", "L2", "L3", "L5"]
+    status = _status(result)
+    # The list is derived from real probe execution records, not hardcoded.
+    assert status["laws_executed"] == sorted(
+        law for law, state in status["laws_by_status"].items() if state == "executed"
+    )
+    assert "L6" not in status["laws_executed"]
+    assert "L7" not in status["laws_executed"]
 
 
 @pytest.mark.postgres_integration

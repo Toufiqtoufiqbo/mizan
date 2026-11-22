@@ -375,6 +375,30 @@ def _attack_parallel(
     return findings
 
 
+def postgres_backend_status(engine: Any, violations: list[Any], workers: int) -> dict[str, Any]:
+    """Derive the backend status from real engine execution records.
+
+    Kept as a pure function so the reporting contract can be tested without a
+    live PostgreSQL cluster. No law name is hardcoded here.
+    """
+    coverage = engine.coverage()
+    law_details = coverage.to_dict()["laws"]
+    return {
+        "backend": "postgres",
+        "laws_executed": coverage.executed_laws,
+        "laws_by_status": {law: details["state"] for law, details in law_details.items()},
+        "laws_unsupported": sorted(law for law, details in law_details.items() if details["state"] == "unsupported"),
+        "laws_skipped": sorted(law for law, details in law_details.items() if details["state"] == "skipped"),
+        "probe_candidates": engine.probe_candidates,
+        "probes_executed": engine.probes_executed,
+        "requests": engine.requests,
+        "attributed_writes": len(engine._attributed_events),
+        "confirmed_findings": len(violations),
+        "inconclusive": len(engine.inconclusive_checks),
+        "workers": workers,
+    }
+
+
 def _run_postgres_cli(
     *,
     command: str,
@@ -478,16 +502,7 @@ def _run_postgres_cli(
                 raise SystemExit(2)
         directories = engine.write_bundles(violations, out_path)
         _print_report(engine, violations, directories)
-        status = {
-            "backend": "postgres",
-            "laws_executed": sorted({str(v.law) for v in violations} | {"L1", "L2", "L3", "L5"}),
-            "laws_unsupported": ["L4", "L6", "L7"],
-            "requests": engine.requests,
-            "attributed_writes": len(engine._attributed_events),
-            "confirmed_findings": len(violations),
-            "inconclusive": len(engine.inconclusive_checks),
-            "workers": workers,
-        }
+        status = postgres_backend_status(engine, violations, workers)
         click.echo("postgres backend status: " + json.dumps(status, sort_keys=True))
         source.assert_unchanged()
     finally:
@@ -952,9 +967,13 @@ def postgres_evidence(
         raise click.ClickException(f"environment variable {dsn_env} is not set")
     allowlist = tuple(dict.fromkeys(schemas))
     audit = audit_schema or allowlist[0]
-    try:
-        import psycopg
+    from mizan.postgres_twin import TwinLifecycleError, require_psycopg
 
+    try:
+        psycopg = require_psycopg()
+    except TwinLifecycleError as exc:
+        raise click.ClickException(str(exc)) from exc
+    try:
         connection = psycopg.connect(dsn, connect_timeout=5)
     except Exception:
         # Never echo a DSN: passwords and hosts must not reach logs.
