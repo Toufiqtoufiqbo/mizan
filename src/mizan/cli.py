@@ -540,9 +540,8 @@ def replay(bundles: str, target: str, token: str | None) -> None:
     Exits with a non-zero status when an attack still works, so a pull request
     that reintroduces a fixed vulnerability fails the build.
     """
-    from urllib.parse import urlsplit
-
-    from mizan.regression import Attack, attack_succeeds
+    from mizan.core import Step, Violation
+    from mizan.regression import attack_succeeds, build_attack
 
     resolver = TokenResolver.from_env()
     directories = sorted(path for path in Path(bundles).iterdir() if path.is_dir())
@@ -556,7 +555,6 @@ def replay(bundles: str, target: str, token: str | None) -> None:
         steps = payload.get("steps") or []
         if not steps:
             continue
-        step = steps[0]
         principal = payload.get("principal") or "attacker"
         bearer = token or resolver.token_for(principal)
         if not bearer:
@@ -564,17 +562,20 @@ def replay(bundles: str, target: str, token: str | None) -> None:
                 f'no token for principal {principal!r}. Set MIZAN_TOKENS=\'{{"{principal}": "..."}}\' '
                 f"or MIZAN_TOKEN_{principal.upper()}. The replay cannot be trusted without it."
             )
-        attack = Attack(
+        violation = Violation(
             law=payload["law"],
             title=payload["title"],
-            method=step["method"],
-            path=urlsplit(step["url"]).path or "/",
-            token_var=f"MIZAN_TOKEN_{principal.upper()}",
-            headers=step.get("headers") or {},
-            body=step.get("body"),
-            expectation="the request is rejected",
+            detail=payload.get("detail", ""),
+            severity=payload.get("severity", "high"),
             principal=principal,
+            resource=payload.get("resource"),
+            action=payload.get("action"),
+            evidence=payload.get("evidence") or {},
+            steps=[Step(**item) for item in steps],
         )
+        attack = build_attack(violation)
+        if attack is None:
+            continue
         try:
             still_works = attack_succeeds(attack, bearer, target)
         except Exception as exc:
@@ -769,6 +770,7 @@ def regress(bundle: str, out_path: str) -> None:
         principal=payload.get("principal"),
         resource=payload.get("resource"),
         action=payload.get("action"),
+        evidence=payload.get("evidence") or {},
         steps=[Step(**step) for step in payload.get("steps", [])],
     )
     directory = Path(out_path)
@@ -799,29 +801,30 @@ def verify(bundle: str, target: str, token: str | None, expect_fixed: bool) -> N
 
 def _verify_fixed(bundle: str, target: str, token: str | None, resolver: TokenResolver) -> None:
     """Check that the attack behind a bundle no longer works."""
-    from urllib.parse import urlsplit
-
-    from mizan.regression import Attack, attack_succeeds
+    from mizan.core import Step, Violation
+    from mizan.regression import attack_succeeds, build_attack
 
     payload = json.loads((Path(bundle) / "replay.json").read_text(encoding="utf-8"))
     steps = payload.get("steps") or []
     if not steps:
         click.echo("the bundle has no reproduction steps")
         raise SystemExit(2)
-    step = steps[0]
     principal = payload.get("principal") or "attacker"
     token = token or resolver.token_for(principal) or ""
-    attack = Attack(
+    violation = Violation(
         law=payload["law"],
         title=payload["title"],
-        method=step["method"],
-        path=urlsplit(step["url"]).path or "/",
-        token_var=f"MIZAN_TOKEN_{principal.upper()}",
-        headers=step.get("headers") or {},
-        body=step.get("body"),
-        expectation="the request is rejected",
+        detail=payload.get("detail", ""),
+        severity=payload.get("severity", "high"),
         principal=principal,
+        resource=payload.get("resource"),
+        action=payload.get("action"),
+        evidence=payload.get("evidence") or {},
+        steps=[Step(**item) for item in steps],
     )
+    attack = build_attack(violation)
+    if attack is None:
+        raise SystemExit(2)
     if not token:
         click.echo(f"no token given: set --token or MIZAN_TOKEN_{principal.upper()}")
         raise SystemExit(2)

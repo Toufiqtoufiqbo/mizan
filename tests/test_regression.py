@@ -443,7 +443,7 @@ def test_insufficient_evidence_is_explicitly_unsupported() -> None:
         title="cross identity read",
         detail="",
         principal="alice",
-        steps=[Step(method="GET", url="http://127.0.0.1:8000/orders/o1", headers={}, status=200)],
+        steps=[Step(method="GET", url="http://127.0.0.1:8000/orders", headers={}, status=200)],
     )
     attack = build_attack(violation)
     assert attack is not None

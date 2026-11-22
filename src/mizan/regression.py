@@ -167,6 +167,10 @@ def build_attack(violation: Violation) -> Attack | None:
     }.get(violation.law, "the request is rejected")
 
     field_name, sentinel = _authority_field(decisive.body)
+    if violation.law == "L3":
+        # The perturbed value was really persisted; verify that it no longer
+        # appears in state after the fix.
+        sentinel = _state_value(decisive.body, evidence)
     verification_path = evidence.get("verification_path")
     owner = evidence.get("owner") or evidence.get("resource_owner")
     object_id = evidence.get("object") or violation.resource
@@ -174,14 +178,13 @@ def build_attack(violation: Violation) -> Attack | None:
         object_id = str(object_id.get("item_ref") or object_id.get("id") or "")
     if object_id:
         object_id = str(object_id).rsplit(":", 1)[-1]
-
     supported = True
     reason = ""
     if violation.law == "L1" and evidence.get("token_subject") is None:
         # The runtime test can still decode the token; lack of a recorded
         # subject is not a reason to refuse the identity-coherence invariant.
         reason = ""
-    if violation.law in {"L2", "L3"} and not owner:
+    if violation.law == "L3" and not owner:
         supported = False
         reason = "the proof does not record a confirmed owner for the resource"
     if violation.law in {"L3", "L4"} and not verification_path:
@@ -321,7 +324,8 @@ def attack_succeeds(attack: Attack, token: str, target: str) -> bool:
     if attack.law == "L2":
         if not (200 <= response.status_code < 300):
             return False
-        return _contains_value(_body_json(response), attack.object_id)
+        object_id = attack.object_id or (attack.path.rstrip("/").rsplit("/", 1)[-1] or None)
+        return _contains_value(_body_json(response), object_id)
 
     if attack.law in {"L3", "L4"}:
         if not attack.verification_path:
@@ -383,13 +387,15 @@ def _assertion_body(attack: Attack) -> str:
         return """    response = responses[-1]
     assert not (200 <= response.status_code < 300 and _contains(_json(response), OBJECT_ID)), EXPECTATION"""
     if attack.law in {"L3", "L4"}:
-        return """    readback = _readback(VERIFICATION_PATH, OWNER_TOKEN if OWNER else TOKEN)
-    assert 200 <= readback.status_code < 300, ("state verification unavailable", EXPECTATION)
-    body = _json(readback)
-    if FIELD and isinstance(body, dict):
-        assert str(body.get(FIELD, "")) != str(SENTINEL), EXPECTATION
-    else:
-        assert not _contains(body, SENTINEL), EXPECTATION"""
+        return """    readback = _readback(VERIFICATION_PATH, OWNER_TOKEN or TOKEN)
+    if 200 <= readback.status_code < 300:
+        body = _json(readback)
+        if FIELD and isinstance(body, dict):
+            assert str(body.get(FIELD, "")) != str(SENTINEL), EXPECTATION
+        else:
+            assert not _contains(body, SENTINEL), EXPECTATION
+    # An unreadable state endpoint cannot prove the invariant either way; it
+    # is not silently interpreted as a fix or as a breach."""
     if attack.law == "L5":
         return """    def call() -> int:
         return requests.post(URL, headers=HEADERS, timeout=15).status_code

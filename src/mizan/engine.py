@@ -1314,7 +1314,7 @@ class Mizan:
                                     "database_key": event.row_key or event.row_id,
                                     "api_resource": mapped_resource,
                                 },
-                                "verification_path": self._state_verification_path(),
+                                "verification_path": urlsplit(url).path or self._state_verification_path(),
                             },
                             steps=[
                                 Step(

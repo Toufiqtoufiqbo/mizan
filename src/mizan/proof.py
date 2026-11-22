@@ -67,6 +67,9 @@ class ProofBundle:
             "resource": violation.resource,
             "action": violation.action,
             "steps": [step.to_dict() for step in violation.steps],
+            # Evidence travels with the bundle: a regression generated from it
+            # must be able to check the same invariant the engine proved.
+            "evidence": evidence or violation.evidence,
         }
         (directory / "replay.json").write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         (directory / "violation.md").write_text(_render_markdown(violation, evidence), encoding="utf-8")
