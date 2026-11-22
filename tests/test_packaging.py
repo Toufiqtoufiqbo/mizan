@@ -44,6 +44,7 @@ def test_readme_documents_install_backend_and_capability_matrix() -> None:
     assert "pip install -e '.[postgres]'" in readme
     assert "mizan.principal" in readme
     assert "not trusted authentication evidence" in readme
-    assert "| L4 | PARTIAL | UNSUPPORTED |" in readme
-    assert "| L6 | PARTIAL | UNSUPPORTED |" in readme
+    assert "| L4 | PARTIAL | SUPPORTED |" in readme
+    assert "| L6 | PARTIAL | SUPPORTED |" in readme
+    assert "PHASE_VIII_L7_FEASIBILITY.md" in readme
     assert "replicated" in readme
