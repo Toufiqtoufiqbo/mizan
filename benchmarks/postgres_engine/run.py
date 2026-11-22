@@ -334,6 +334,8 @@ def _run_law_once(dsn: str, law: str, variant: str) -> dict[str, Any]:
             "fixture": law_contract.name,
             "variant": variant,
             "fixture_sha256": hashlib.sha256(law_contract.read_bytes()).hexdigest(),
+            "learning_requests": len(learned),
+            "traffic_records": len(engine.traffic),
             "resources_discovered": len(policy.resources),
             "rules_learned": len(policy.rules),
             "eligible_probes": engine.probe_candidates,
