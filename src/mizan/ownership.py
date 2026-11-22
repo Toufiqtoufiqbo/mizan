@@ -528,10 +528,14 @@ class RelationshipContract:
             table = declaration.table
             if not table:
                 continue
-            if schema is None or table not in schema.tables:
+            try:
+                resolved = _resolve_declared_table(schema.tables if schema is not None else (), table)
+            except RelationshipContractError:
+                resolved = None
+            if resolved is None:
                 problems.append(f"{declaration.resource_type!r} law declaration names unknown table {table!r}")
                 continue
-            if isinstance(declaration, ProtectedField) and schema.tables[table].column(declaration.field) is None:
+            if isinstance(declaration, ProtectedField) and resolved.column(declaration.field) is None:
                 problems.append(f"protected field {table}.{declaration.field} does not exist")
         if problems:
             raise RelationshipContractError("; ".join(problems))

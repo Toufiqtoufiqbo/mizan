@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "identity": { "endpoint": "/whoami", "field": "p_key" },
+  "ownership": {
+    "items": { "source": "database_foreign_key", "column": "originator_ref", "table": "inventory_items" },
+    "capabilities": { "source": "database_foreign_key", "column": "originator_ref", "table": "capabilities" }
+  },
+  "authority": {
+    "fields": [
+      {
+        "resource_type": "users",
+        "field": "role",
+        "source": "trusted_application_policy",
+        "confidence": "confirmed",
+        "authorized_roles": ["admin"],
+        "table": "principals_registry"
+      }
+    ]
+  },
+  "cardinality": [
+    {
+      "resource_type": "items",
+      "bound": 2,
+      "scope": "principal",
+      "unit": "objects",
+      "source": "trusted_application_policy",
+      "enforcement": "reject_beyond",
+      "table": "inventory_items"
+    },
+    {
+      "resource_type": "capabilities",
+      "bound": 1,
+      "scope": "principal",
+      "unit": "uses",
+      "source": "trusted_application_policy",
+      "enforcement": "single_use",
+      "table": "capabilities"
+    }
+  ]
+}

@@ -1,0 +1,156 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "PostgreSQL law fixture", "version": "1.0" },
+  "paths": {
+    "/whoami": {
+      "get": {
+        "operationId": "whoami",
+        "responses": {
+          "200": {
+            "description": "the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "p_key": { "type": "string" }, "label": { "type": "string" } },
+                  "required": ["p_key", "label"]
+                },
+                "example": { "p_key": "alice", "label": "Label of alice" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "operationId": "listUsers",
+        "responses": {
+          "200": {
+            "description": "users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "user_id": { "type": "string" },
+                      "label": { "type": "string" },
+                      "role": { "type": "string" }
+                    },
+                    "required": ["user_id", "label", "role"]
+                  }
+                },
+                "example": [{ "user_id": "alice", "label": "Alice", "role": "user" }]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capabilities": {
+      "get": {
+        "operationId": "listCapabilities",
+        "responses": {
+          "200": {
+            "description": "capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": { "code": { "type": "string" }, "consumed_at": { "type": "number", "nullable": true } },
+                    "required": ["code"]
+                  }
+                },
+                "example": [{ "code": "cap-alice", "consumed_at": null }]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items": {
+      "post": {
+        "operationId": "createItem",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "label": { "type": "string", "example": "mizan" } },
+                "required": ["label"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "item_ref": { "type": "string" },
+                    "label": { "type": "string" },
+                    "owner_id": { "type": "string" }
+                  },
+                  "required": ["item_ref", "label", "owner_id"]
+                },
+                "example": { "item_ref": "item-a1", "label": "Item A", "owner_id": "alice" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{user_id}": {
+      "parameters": [
+        { "name": "user_id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "patch": {
+        "operationId": "patchUser",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "role": { "type": "string", "example": "user" } },
+                "required": ["role"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "user_id": { "type": "string" }, "role": { "type": "string" } },
+                  "required": ["user_id", "role"]
+                },
+                "example": { "user_id": "alice", "role": "user" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/capabilities/{code}/consume": {
+      "parameters": [
+        { "name": "code", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "operationId": "consumeCapability",
+        "responses": { "200": { "description": "consumed" } }
+      }
+    }
+  }
+}
