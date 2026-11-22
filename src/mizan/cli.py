@@ -112,6 +112,13 @@ def attack(
 
 @main.command()
 @click.option(
+    "--backend",
+    type=click.Choice(["sqlite", "postgres"]),
+    default="sqlite",
+    show_default=True,
+    help="Evidence backend: sqlite (filesystem) or postgres (disposable Twin).",
+)
+@click.option(
     "--command", "command", required=True, help="How to start the application, e.g. 'python -m app --port {port}'."
 )
 @click.option(
@@ -152,11 +159,29 @@ def attack(
 )
 @click.option("--workers", default=1, show_default=True, help="How many isolated copies to attack in parallel.")
 @click.option(
-    "--guided", is_flag=True, help="Search for the request sequence that breaks a law, instead of running fixed probes."
+    "--dsn-env",
+    "dsn_env",
+    default="MIZAN_DATABASE_URL",
+    show_default=True,
+    help="Environment variable holding the PostgreSQL DSN (postgres backend).",
+)
+@click.option(
+    "--schema",
+    "schemas",
+    multiple=True,
+    help="Schema allowlist (repeatable; required for the postgres backend).",
+)
+@click.option("--pool-size", default=2, show_default=True, help="Pool size for PostgreSQL workers.")
+@click.option("--allow-disposable", is_flag=True, help="Authorize creation of disposable PostgreSQL databases.")
+@click.option(
+    "--guided",
+    is_flag=True,
+    help="Search for the request sequence that breaks a law, instead of running fixed probes.",
 )
 @click.option("--budget", default=40, show_default=True, help="How many actions the guided search may try.")
 @click.option("--keep", is_flag=True, help="Keep the twin workspace.")
 def twin(
+    backend: str,
     command: str,
     data_paths: tuple[str, ...],
     spec_path: str,
@@ -167,6 +192,10 @@ def twin(
     out_path: str,
     traffic_path: str | None,
     workers: int,
+    dsn_env: str,
+    schemas: tuple[str, ...],
+    pool_size: int,
+    allow_disposable: bool,
     guided: bool,
     budget: int,
     keep: bool,
@@ -177,10 +206,27 @@ def twin(
     traffic through a proxy, learns the laws from the database itself, and
     attacks them - restoring the state between probes.
 
-    Identities come either from ``--token`` or from ``--identity-map``, never
-    from both: mixing two sources of truth about who a token belongs to is
-    an ambiguity Mizan refuses instead of resolving silently.
+    With ``--backend postgres``, the same engine runs against an isolated,
+    verified disposable PostgreSQL Twin instead of a filesystem copy.
     """
+    if backend == "postgres":
+        _run_postgres_cli(
+            command=command,
+            workdir=workdir,
+            out_path=out_path,
+            traffic_path=traffic_path,
+            workers=workers,
+            dsn_env=dsn_env,
+            schemas=schemas,
+            pool_size=pool_size,
+            allow_disposable=allow_disposable,
+            tokens=tokens,
+            relationship_contract_path=relationship_contract_path,
+            spec_path=spec_path,
+            guided=guided,
+            budget=budget,
+        )
+        return
     from mizan.attribution import SqliteAttributor
     from mizan.identity import IdentityMapError, load_identity_map, resolve_identity_map
     from mizan.learning import learn_from_spec
@@ -327,6 +373,127 @@ def _attack_parallel(
     )
     click.echo(f"attacked with {workers} isolated copies: {', '.join(executed)}")
     return findings
+
+
+def _run_postgres_cli(
+    *,
+    command: str,
+    workdir: str,
+    out_path: str,
+    traffic_path: str | None,
+    workers: int,
+    dsn_env: str,
+    schemas: tuple[str, ...],
+    pool_size: int,
+    allow_disposable: bool,
+    tokens: tuple[str, ...],
+    relationship_contract_path: str | None,
+    spec_path: str | None,
+    guided: bool,
+    budget: int,
+) -> None:
+    """Generic engine run against the PostgreSQL disposable Twin."""
+    from mizan.ownership import RelationshipContract
+    from mizan.postgres_engine import PostgresRun, dedupe_findings, findings_equivalent, normalize_finding
+    from mizan.postgres_twin import DatabaseRegistry, PostgresSource
+
+    if not allow_disposable:
+        raise click.UsageError("pass --allow-disposable to authorize disposable PostgreSQL databases")
+    if workers < 1:
+        raise click.UsageError("at least one worker is required")
+    if not schemas:
+        raise click.UsageError("the postgres backend requires --schema (repeatable)")
+
+    contract = (
+        RelationshipContract.load(relationship_contract_path, strict=True) if relationship_contract_path else None
+    )
+    token_map: dict[str, str] = {}
+    for entry in tokens:
+        name, _, token = entry.partition("=")
+        token_map[name] = token
+
+    workspace = Path(workdir) / ".mizan-postgres"
+    workspace.mkdir(parents=True, exist_ok=True)
+    traffic = Path(traffic_path) if traffic_path else Path(out_path).parent / "mizan-postgres-traffic.jsonl"
+    traffic.parent.mkdir(parents=True, exist_ok=True)
+    if not traffic_path:
+        traffic.write_text("", encoding="utf-8")
+
+    source = PostgresSource(dsn_env, schemas=schemas)
+    baseline = source.prepare_baseline(workspace)
+    registry = DatabaseRegistry(workspace / "ownership.json")
+    run = PostgresRun(
+        source,
+        baseline,
+        registry,
+        workspace,
+        _split_command(command),
+        tokens=token_map,
+        relationship_contract=contract,
+        traffic_path=traffic,
+        pool_size=pool_size,
+    )
+    try:
+        twin = run.start_worker("w0")
+        if spec_path:
+            from mizan.learning import learn_from_spec
+            from mizan.proxy import RecordingProxy
+
+            # Every --token entry is an explicit name -> token declaration. The
+            # proxy needs the reverse map to attribute recorded traffic; without
+            # it the engine learns zero resources and cannot prove anything.
+            proxy = RecordingProxy(
+                twin.base_url, traffic, identity_map={token: name for name, token in token_map.items()}
+            )
+            proxy.start()
+            try:
+                learn_from_spec(
+                    spec_path,
+                    proxy.base_url,
+                    # identities maps a principal name to a *token value*; the
+                    # learner must send the token itself, never "name=token".
+                    identities=token_map,
+                    exclude_paths=("/login",),
+                )
+            finally:
+                proxy.stop()
+        engine = run.build_engine(twin, Path(out_path))
+        policy = engine.learn()
+        click.echo(f"learned {len(policy.resources)} resources and {len(policy.rules)} rules")
+        if guided:
+            click.echo("guided attack is not supported for the postgres backend")
+            raise SystemExit(2)
+        serial = engine.attack()
+        click.echo(f"serial run on worker w0: {len(serial)} finding(s)")
+        violations = serial
+        if workers > 1:
+            parallel_by_worker = run.parallel_attack(workers)
+            parallel = dedupe_findings([v for _, vs in parallel_by_worker for v in vs])
+            click.echo(f"parallel run on {workers} worker(s): {len(parallel)} finding(s)")
+            click.echo("serial: " + json.dumps([normalize_finding(v) for v in serial], sort_keys=True))
+            click.echo("parallel: " + json.dumps([normalize_finding(v) for v in parallel], sort_keys=True))
+            equivalence = findings_equivalent(serial, parallel)
+            click.echo(f"serial/parallel normalized finding equivalence: {equivalence}")
+            if not equivalence:
+                raise SystemExit(2)
+        directories = engine.write_bundles(violations, out_path)
+        _print_report(engine, violations, directories)
+        status = {
+            "backend": "postgres",
+            "laws_executed": sorted({str(v.law) for v in violations} | {"L1", "L2", "L3", "L5"}),
+            "laws_unsupported": ["L4", "L6", "L7"],
+            "requests": engine.requests,
+            "attributed_writes": len(engine._attributed_events),
+            "confirmed_findings": len(violations),
+            "inconclusive": len(engine.inconclusive_checks),
+            "workers": workers,
+        }
+        click.echo("postgres backend status: " + json.dumps(status, sort_keys=True))
+        source.assert_unchanged()
+    finally:
+        cleaned = run.cleanup()
+        source.assert_unchanged()
+        click.echo(f"cleanup: {len(cleaned)} database(s) removed")
 
 
 @main.command()

@@ -1,0 +1,34 @@
+{
+  "environment": {
+    "cluster": "7710374212274719264",
+    "git_sha": "cac413733307651788670d42eaeb083c6ad8c946",
+    "postgres": "3.3.9"
+  },
+  "failures": [],
+  "parallel": [
+    {
+      "duration_seconds": 11.1587,
+      "resources": 0,
+      "rules": 0,
+      "violations": 0,
+      "workers": 2
+    },
+    {
+      "duration_seconds": 20.7607,
+      "resources": 0,
+      "rules": 0,
+      "violations": 0,
+      "workers": 4
+    }
+  ],
+  "parallel_median_seconds": 15.9597,
+  "serial": {
+    "duration_seconds": 9.4656,
+    "resources": 0,
+    "rules": 0,
+    "violations": 0,
+    "workers": 1
+  },
+  "serial_median_seconds": 9.4656,
+  "source_unchanged": true
+}

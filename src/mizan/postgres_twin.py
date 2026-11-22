@@ -2151,11 +2151,22 @@ class DisposableDatabase:
             cluster = self.source.cluster_id(admin)
             with admin.cursor() as cursor:
                 cursor.execute(
-                    "SELECT count(*) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()",
+                    "SELECT application_name, backend_type, state, left(query, 200) "
+                    "FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()",
                     (self.baseline.name,),
                 )
-                if cursor.fetchone()[0]:
-                    raise TwinLifecycleError("the immutable seed still has active sessions")
+                sessions = cursor.fetchall()
+            if sessions:
+                # A backend that just finished reading the seed can disappear a
+                # moment later. Give it the same bounded drain window that a
+                # verified drop uses, then fail closed if it is still present.
+                remaining = _wait_for_no_sessions(admin, self.baseline.name)
+                if remaining:
+                    detail = "; ".join(
+                        f"app={row[0]!r} type={row[1]!r} state={row[2]!r} query={row[3]!r}" for row in sessions
+                    )
+                    raise TwinLifecycleError(f"the immutable seed still has active sessions: {detail}")
+            with admin.cursor() as cursor:
                 cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (self.name,))
                 if cursor.fetchone():
                     raise TwinLifecycleError("the generated worker database already exists")

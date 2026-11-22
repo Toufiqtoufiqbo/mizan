@@ -1,0 +1,115 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Independent PostgreSQL fixture (generic engine contract)",
+    "version": "1.0.0",
+    "description": "Describes exactly the endpoints implemented by app.py. The concurrency rendezvous is intentionally not listed."
+  },
+  "paths": {
+    "/health": {
+      "get": {"summary": "Readiness probe", "responses": {"200": {"description": "ok"}}}
+    },
+    "/whoami": {
+      "get": {
+        "summary": "Return the authenticated principal",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {"p_key": {"type": "string"}, "label": {"type": "string"}},
+                  "required": ["p_key", "label"],
+                  "example": {"p_key": "alice", "label": "Label of alice"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items": {
+      "get": {
+        "summary": "List items",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {"item_ref": {"type": "string"}, "label": {"type": "string"}},
+                    "required": ["item_ref", "label"]
+                  },
+                  "example": [{"item_ref": "item-a1", "label": "Item A"}]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items/{item_ref}": {
+      "parameters": [
+        {
+          "name": "item_ref",
+          "in": "path",
+          "required": true,
+          "schema": {"type": "string", "example": "item-a1"}
+        }
+      ],
+      "get": {
+        "summary": "Read one item",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {"item_ref": {"type": "string"}, "label": {"type": "string"}},
+                  "required": ["item_ref", "label"],
+                  "example": {"item_ref": "item-a1", "label": "Item A"}
+                }
+              }
+            }
+          },
+          "404": {"description": "not found"}
+        }
+      },
+      "put": {
+        "summary": "Update one item",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {"label": {"type": "string", "example": "Item A"}},
+                "required": ["label"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "updated"},
+          "404": {"description": "not found"}
+        }
+      }
+    },
+    "/pairs": {
+      "get": {
+        "summary": "List composite resources",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {"type": "array", "items": {"type": "object"}}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

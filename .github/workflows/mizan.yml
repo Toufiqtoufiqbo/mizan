@@ -163,6 +163,15 @@ jobs:
         # boundary was never exercised, so the next step fails on any skip.
         run: python -m pytest -q tests/test_postgres_twin.py -m postgres_integration
 
+      - name: PostgreSQL generic engine integration (real database)
+        run: python -m pytest -q tests/test_postgres_engine_integration.py -m postgres_integration
+
+      - name: Generic-engine proof, replay, regression and real parallelism
+        run: python -m pytest -q tests/test_postgres_engine_generic_proof.py -m postgres_integration
+
+      - name: PostgreSQL engine benchmark
+        run: python -m benchmarks.postgres_engine.run
+
       - name: Missing registry and read-only orphan diagnostics
         run: python -m pytest -q tests/test_postgres_twin.py -k "requires_explicit_workspace or missing_registry_never or empty_registry_never or orphan_marker_discovery or registry_durable_replace"
 

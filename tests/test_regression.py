@@ -56,6 +56,31 @@ def test_regression_test_is_valid_python_for_every_law(law: str) -> None:
     compile(render_test(_violation(law)), f"test_mizan_{law.lower()}.py", "exec")
 
 
+def test_regression_test_without_a_body_does_not_call_json_loads_on_none() -> None:
+    violation = _violation("L2")
+    violation.steps[0].body = None
+    source = render_test(violation)
+    compile(source, "test_mizan_l2.py", "exec")
+    assert "BODY = None" in source
+    assert "BODY = json.loads" not in source
+
+
+def test_generated_write_regression_uses_the_real_http_method() -> None:
+    """A generated L3 regression must replay the recorded write method.
+
+    The write branch of the renderer used a non-f-string template, producing
+    a literal ``{ATTACK.METHOD}`` that urllib3 rejects as an invalid method.
+    """
+    violation = _violation("L3")
+    violation.steps[0].method = "PUT"
+    violation.steps[0].body = {"label": "mizan-probe-x"}
+    source = render_test(violation)
+    compile(source, "test_mizan_l3.py", "exec")
+    assert 'requests.request("PUT"' in source
+    assert "{ATTACK.METHOD}" not in source
+    assert "{attack.method}" not in source
+
+
 def test_attack_is_built_from_the_first_step() -> None:
     attack = build_attack(_violation("L2"))
     assert attack is not None

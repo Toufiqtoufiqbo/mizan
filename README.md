@@ -587,3 +587,40 @@ Still unsupported: arbitrary production databases without the required
 privileges, cluster-wide role/tablespace/extension changes, and non-disposable
 target execution. A skipped external target is always reported as SKIPPED, not
 PASSED.
+
+### PostgreSQL as a generic engine backend (Phase VII)
+
+The same `Mizan` engine now runs against both SQLite and PostgreSQL. Select the
+backend on the generic command:
+
+```bash
+mizan twin --backend postgres \
+  --command "python tests/fixtures/external_apps/postgres_store/app.py --port {port}" \
+  --dsn-env MIZAN_DATABASE_URL --schema pgstore \
+  --allow-disposable --workers 4 --spec app/openapi.json \
+  --token alice=twin-alice --token bob=twin-bob \
+  --workdir mizan-run --out mizan-proofs
+```
+
+`--backend postgres` uses the verified disposable Twin: an immutable seed, one
+database and process per worker, schema allowlisting, the existing
+`PostgresAttributor` for ownership evidence, the normal probe/law/proof/replay
+path, and the full verified cleanup lifecycle. The source database is never
+attacked or modified. `postgres-evidence` and `postgres-twin` remain available.
+
+Law capability matrix (honest reporting; missing evidence is never clean):
+
+| Law | SQLite | PostgreSQL | Notes |
+|---|---|---|---|
+| L1 | SUPPORTED | SUPPORTED | existing identity provenance rules |
+| L2 | SUPPORTED | SUPPORTED | PostgreSQL-backed ownership evidence |
+| L3 | SUPPORTED | SUPPORTED | requires confirmed audit attribution |
+| L4 | PARTIAL | UNSUPPORTED | database alone cannot prove client field origin |
+| L5 | SUPPORTED | PARTIAL | race harness runs on an isolated worker |
+| L6 | UNSUPPORTED | UNSUPPORTED | no complete bounded-state evidence |
+| L7 | UNSUPPORTED | UNSUPPORTED | no cache/queue/log/metric provider |
+
+The command prints a machine-readable `postgres backend status` line with laws
+executed, requests, attributed writes, findings, inconclusive outcomes and
+worker count. `benchmarks/postgres_engine/run.py` compares serial and parallel
+runs and records timings and normalized findings.

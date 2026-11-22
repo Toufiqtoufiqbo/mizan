@@ -1,39 +1,168 @@
 {
-  "openapi": "3.0.3",
-  "info": { "title": "PostgreSQL Ownership Fixture", "version": "1.0.0" },
-  "servers": [{ "url": "/" }],
-  "components": {
-    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
-    "schemas": {
-      "Login": {
-        "type": "object",
-        "required": ["username", "password"],
-        "properties": {
-          "username": { "type": "string", "examples": ["alice"] },
-          "password": { "type": "string", "examples": ["alice-secret"] }
-        }
-      },
-      "Item": {
-        "type": "object",
-        "properties": { "item_ref": { "type": "string" }, "label": { "type": "string" } }
-      },
-      "NewLabel": {
-        "type": "object",
-        "required": ["label"],
-        "properties": { "label": { "type": "string", "examples": ["Changed"] } }
-      }
-    }
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Mīzān PostgreSQL test application",
+    "version": "1.0.0"
   },
   "paths": {
-    "/health": { "get": { "responses": { "200": { "description": "OK" } } } },
-    "/login": { "post": { "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Login" } } } }, "responses": { "200": { "description": "OK" } } } },
-    "/whoami": { "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK" } } } },
-    "/items": { "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } } } } } } } },
-    "/items/{item_ref}": {
-      "parameters": [{ "name": "item_ref", "in": "path", "required": true, "schema": { "type": "string" } }],
-      "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Item" } } } } } },
-      "put": { "security": [{ "bearerAuth": [] }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NewLabel" } } } }, "responses": { "200": { "description": "OK" } } }
+    "/health": {
+      "get": {"responses": {"200": {"description": "ok"}}}
     },
-    "/pairs": { "get": { "security": [{ "bearerAuth": [] }], "responses": { "200": { "description": "OK" } } } }
+    "/login": {
+      "post": {
+        "summary": "Authenticate a principal",
+        "responses": {"200": {"description": "token"}, "401": {"description": "invalid credentials"}},
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {"type": "string"},
+                  "principal": {"type": "string"},
+                  "password": {"type": "string"}
+                },
+                "required": ["username", "principal", "password"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/whoami": {
+      "get": {
+        "summary": "Return the authenticated principal",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "p_key": {"type": "string"},
+                    "label": {"type": "string"}
+                  },
+                  "required": ["p_key", "label"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items": {
+      "get": {
+        "summary": "List items",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "item_ref": {"type": "string"},
+                      "label": {"type": "string"}
+                    },
+                    "required": ["item_ref", "label"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items/{item_ref}": {
+      "get": {
+        "parameters": [{"name": "item_ref", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "item_ref": {"type": "string"},
+                    "label": {"type": "string"}
+                  },
+                  "required": ["item_ref", "label"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "parameters": [{"name": "item_ref", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "updated"}},
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"type": "object", "properties": {"label": {"type": "string"}}, "required": ["label"]}
+            }
+          }
+        }
+      }
+    },
+    "/pairs": {
+      "get": {"summary": "List pairs", "responses": {"200": {"description": "pairs"}}}
+    },
+    "/mass": {
+      "put": {
+        "responses": {"200": {"description": "updated"}},
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object"}}}
+        }
+      }
+    },
+    "/counter": {"get": {"summary": "Read a counter", "responses": {"200": {"description": "counter"}}}},
+    "/wasteful": {"get": {"summary": "Generate waste", "responses": {"200": {"description": "waste"}}}},
+    "/state": {"get": {"summary": "Read application state", "responses": {"200": {"description": "state"}}}},
+    "/path": {"get": {"summary": "Cache leak path", "responses": {"200": {"description": "path"}}}},
+    "/cascade": {"get": {"summary": "Cascade path", "responses": {"200": {"description": "cascade"}}}},
+    "/deposit": {
+      "post": {
+        "summary": "Deposit funds",
+        "responses": {"200": {"description": "deposited"}},
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {"schema": {"type": "object", "properties": {"amount": {"type": "number"}}}}
+          }
+        }
+      }
+    },
+    "/withdraw": {
+      "post": {
+        "summary": "Withdraw funds",
+        "responses": {"200": {"description": "withdrawn"}},
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {"schema": {"type": "object", "properties": {"amount": {"type": "number"}}}}
+          }
+        }
+      }
+    },
+    "/approve": {
+      "post": {
+        "summary": "Approve a request",
+        "responses": {"200": {"description": "approved"}},
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {"schema": {"type": "object", "properties": {"request_id": {"type": "string"}, "approved": {"type": "boolean"}}}}
+          }
+        }
+      }
+    },
+    "/reset": {"post": {"summary": "Reset state", "responses": {"200": {"description": "reset"}}}},
+    "/unlock": {"post": {"summary": "Unlock resource", "responses": {"200": {"description": "unlocked"}}}},
+    "/transfer": {"post": {"summary": "Transfer", "responses": {"200": {"description": "transferred"}}}}
   }
 }

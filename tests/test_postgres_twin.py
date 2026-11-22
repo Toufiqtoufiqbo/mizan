@@ -3062,3 +3062,103 @@ def test_registry_permissions_and_durability_report(source) -> None:
         assert isinstance(registry.last_directory_synced, bool)
         assert registry.last_directory_sync_supported is True
     assert [path.name for path in workspace.iterdir() if path.name.endswith(".tmp")] == []
+
+
+def test_normalize_finding_includes_action_and_owners_and_ignores_timestamps() -> None:
+    from mizan.postgres_engine import normalize_finding
+
+    class V:
+        law = "L2"
+        principal = "alice"
+        resource = "pgstore.inventory_items:item-a1"
+        action = "read"
+        severity = "high"
+        evidence = {"expected_owner": "alice", "observed_owner": "bob", "ts": 123.456}
+
+    v = V()
+    normalized = normalize_finding(v)
+    assert normalized[3] == "read"
+    assert "alice" in normalized
+    assert "bob" in normalized
+    v2 = type("V2", (V,), {"evidence": {"expected_owner": "alice", "observed_owner": "bob", "ts": 999.0}})()
+    assert normalize_finding(v2) == normalized
+
+
+def test_normalize_finding_distinguishes_actions_and_missing_values() -> None:
+    from mizan.postgres_engine import normalize_finding
+
+    class V:
+        def __init__(self, action: str | None, evidence: dict[str, Any]) -> None:
+            self.law = "L3"
+            self.principal = "alice"
+            self.resource = "pgstore.inventory_items:item-a1"
+            self.action = action
+            self.severity = "high"
+            self.evidence = evidence
+
+    read = V("read", {})
+    write = V("write", {})
+    assert normalize_finding(read) != normalize_finding(write)
+    assert normalize_finding(V("read", {"expected_owner": "alice"})) != normalize_finding(
+        V("read", {"expected_owner": "bob"})
+    )
+    assert normalize_finding(V("read", {"expected_owner": ""})) != normalize_finding(
+        V("read", {"expected_owner": "alice"})
+    )
+
+
+def test_normalize_finding_is_deterministic() -> None:
+    from mizan.postgres_engine import normalize_finding
+
+    v = type(
+        "V",
+        (),
+        {
+            "law": "L2",
+            "principal": "a",
+            "resource": "r",
+            "action": "read",
+            "severity": "high",
+            "evidence": {"subtype": "owner"},
+        },
+    )()
+    assert normalize_finding(v) == normalize_finding(v)
+
+
+def test_normalize_finding_prefers_the_mapped_api_resource() -> None:
+    from mizan.postgres_engine import normalize_finding
+
+    v = type(
+        "V",
+        (),
+        {
+            "law": "L3",
+            "principal": "bob",
+            "resource": "pgstore.inventory_items:item-a1",
+            "action": "write",
+            "severity": "high",
+            "title": "bob wrote into an object owned by alice",
+            "evidence": {"resource_mapping": {"api_resource": "items:item-a1"}},
+        },
+    )()
+    assert normalize_finding(v)[2] == "items:item-a1"
+
+
+def test_findings_equivalent_ignores_duplicate_worker_observations() -> None:
+    from mizan.postgres_engine import findings_equivalent
+
+    v = type(
+        "V",
+        (),
+        {
+            "law": "L2",
+            "principal": "bob",
+            "resource": "items:item-a1",
+            "action": "read",
+            "severity": "high",
+            "title": "bob read an object owned by alice",
+            "evidence": {},
+        },
+    )()
+    assert findings_equivalent([v], [v, v])
+    assert not findings_equivalent([v], [])

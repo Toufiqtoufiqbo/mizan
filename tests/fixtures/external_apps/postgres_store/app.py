@@ -18,10 +18,17 @@ Variants:
   clean            - owner-only reads and writes
   read             - any authenticated principal may read an item
   write            - any authenticated principal may write an item
+  both             - any authenticated principal may read AND write an item
   grant_read       - collaborator may read, never write
   grant_write      - collaborator may read AND write (unauthorized write)
   unknown          - item has no ownership signal at all
   composite        - items are identified by (tenant_ref, item_ref)
+
+Concurrency endpoint (independent of Mīzān):
+  POST /__barrier   - block until ``parties`` requests have arrived. A test can
+                      use it to prove that several worker processes were alive
+                      at the same instant. It is deliberately absent from the
+                      OpenAPI document so the learning phase never sees it.
 """
 
 from __future__ import annotations
@@ -35,6 +42,7 @@ import secrets
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -45,11 +53,16 @@ VARIANTS = (
     "clean",
     "read",
     "write",
+    "both",
     "grant_read",
     "grant_write",
     "unknown",
     "composite",
 )
+
+#: Independent request rendezvous used only by concurrency tests.
+_BARRIERS: dict[str, tuple[threading.Barrier, int]] = {}
+_BARRIER_LOCK = threading.Lock()
 
 
 def _dsn() -> str:
@@ -361,8 +374,8 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
             return True
         mode = app.config["VARIANT"]
         if write:
-            return mode == "write" or (mode == "grant_write" and key == "bob")
-        return mode in {"read", "grant_read", "grant_write"} and key == "bob"
+            return mode in {"write", "both"} or (mode == "grant_write" and key == "bob")
+        return mode in {"read", "both", "grant_read", "grant_write"} and key == "bob"
 
     @app.get("/items")
     def list_items():
@@ -397,6 +410,41 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
                 cursor.execute(f"UPDATE {q('inventory_items')} SET label = %s WHERE item_ref = %s", (label, item_ref))
             connection.commit()
         return jsonify({"item_ref": item_ref, "label": label})
+
+    @app.post("/__barrier")
+    def barrier():
+        """Wait until ``parties`` requests have arrived (across processes).
+
+        With ``MIZAN_FIXTURE_RENDEZVOUS_DIR`` set, arrival markers are files in
+        that shared directory. This is how several independent worker processes
+        can rendezvous; each one has its own interpreter and its own memory.
+        Without it, the in-process barrier serves single-process callers.
+        """
+        body = request.get_json(silent=True) or {}
+        key = str(body.get("id", "default"))
+        parties = max(1, min(32, int(body.get("parties", 2))))
+        timeout = max(0.1, min(60.0, float(body.get("timeout", 10.0))))
+        directory = os.environ.get("MIZAN_FIXTURE_RENDEZVOUS_DIR")
+        if directory:
+            root = Path(directory) / key
+            root.mkdir(parents=True, exist_ok=True)
+            (root / f"{os.getpid()}-{threading.get_ident()}").write_text("arrived", encoding="utf-8")
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                if len(list(root.glob("*"))) >= parties:
+                    return jsonify({"id": key, "parties": parties, "mode": "filesystem"})
+                time.sleep(0.05)
+            return jsonify({"error": "barrier timeout", "id": key}), 408
+        with _BARRIER_LOCK:
+            entry = _BARRIERS.get(key)
+            if entry is None or entry[1] != parties or entry[0].broken:
+                entry = (threading.Barrier(parties), parties)
+                _BARRIERS[key] = entry
+        try:
+            entry[0].wait(timeout=timeout)
+        except threading.BrokenBarrierError:
+            return jsonify({"error": "barrier timeout", "id": key}), 408
+        return jsonify({"id": key, "parties": parties})
 
     @app.get("/pairs")
     def list_pairs():
