@@ -356,7 +356,9 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
         return jsonify({"p_key": key, "label": f"Label of {key}"}) if key else (jsonify({"error": "unauthorized"}), 401)
 
     def item_json(row: Any) -> dict[str, Any]:
-        return {"item_ref": row[0], "label": row[1]}
+        # The owner is part of the application's real response, not a hint
+        # injected by Mīzān. Learning therefore sees a genuine ownership signal.
+        return {"item_ref": row[0], "label": row[1], "owner_id": row[2]}
 
     def load_item(item_ref: str):
         with connect() as connection:
@@ -385,7 +387,7 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
         with connect() as connection:
             with connection.cursor() as cursor:
                 context(connection, key)
-                cursor.execute(f"SELECT item_ref, label FROM {q('inventory_items')} ORDER BY item_ref")
+                cursor.execute(f"SELECT item_ref, label, originator_ref FROM {q('inventory_items')} ORDER BY item_ref")
                 return jsonify([item_json(row) for row in cursor.fetchall()])
 
     @app.get("/items/<item_ref>")
@@ -409,7 +411,7 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
                 context(connection, key)
                 cursor.execute(f"UPDATE {q('inventory_items')} SET label = %s WHERE item_ref = %s", (label, item_ref))
             connection.commit()
-        return jsonify({"item_ref": item_ref, "label": label})
+        return jsonify({"item_ref": item_ref, "label": label, "owner_id": row[2]})
 
     @app.post("/__barrier")
     def barrier():

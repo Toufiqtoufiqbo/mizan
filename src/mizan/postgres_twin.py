@@ -293,11 +293,25 @@ def control_session_identity(run_id: str, worker_id: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def require_psycopg() -> Any:
+    """Import the optional PostgreSQL driver with an actionable error."""
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise TwinLifecycleError(
+            "PostgreSQL support requires the optional psycopg driver; install it with pip install -e '.[postgres]'"
+        ) from exc
+    return psycopg
+
+
 def _conninfo(dsn: str) -> dict[str, str]:
+    require_psycopg()
     try:
         from psycopg.conninfo import conninfo_to_dict
-    except ImportError as exc:  # pragma: no cover - psycopg is a dev dependency
-        raise TwinLifecycleError("psycopg is required for PostgreSQL support") from exc
+    except ImportError as exc:  # pragma: no cover - guarded by require_psycopg
+        raise TwinLifecycleError(
+            "PostgreSQL support requires psycopg; install it with pip install -e '.[postgres]'"
+        ) from exc
     try:
         return {key: str(value) for key, value in conninfo_to_dict(dsn).items() if value is not None}
     except Exception:
@@ -446,8 +460,7 @@ def find_tool(name: str) -> str | None:
 
 
 def _connect(dsn: str):
-    import psycopg
-
+    psycopg = require_psycopg()
     return psycopg.connect(dsn, autocommit=True, connect_timeout=10)
 
 
@@ -1234,10 +1247,19 @@ class DatabaseRegistry:
     def load(self) -> dict[str, dict[str, Any]]:
         if not self.path.exists():
             return {}
-        try:
-            text = self.path.read_text(encoding="utf-8")
-        except OSError:
-            raise OwnershipError("the ownership registry could not be read") from None
+        # Workers write the shared registry by atomic replace. On Windows a
+        # concurrently replaced file can make a reader fail transiently; retry
+        # briefly instead of failing a whole parallel run. This never relaxes
+        # ownership validation - it only makes the read itself reliable.
+        deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                text = self.path.read_text(encoding="utf-8")
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise OwnershipError("the ownership registry could not be read") from None
+                time.sleep(0.01)
         if not text.strip():
             return {}
         try:

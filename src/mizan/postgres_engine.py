@@ -110,6 +110,11 @@ class PostgresRun:
         self.twins: list[PostgresTwin] = []
         self.results: list[Any] = []
         self.parallel_results: list[Any] = []
+        #: Per-worker execution evidence, keyed by worker id. This is the single
+        #: source of truth for benchmarks/cli that compare serial and parallel
+        #: runs: it records what the engines actually did, not what a label says.
+        self.worker_metrics: dict[str, dict[str, Any]] = {}
+        self.parallel_metrics: list[dict[str, Any]] = []
         self._twins_lock = threading.Lock()
 
     # -- workers ------------------------------------------------------------ #
@@ -180,6 +185,18 @@ class PostgresRun:
         # parallel finding is the same engine's output, not a replay of w0's.
         engine.learn()
         violations = engine.attack()
+        coverage = engine.coverage()
+        self.worker_metrics[twin.worker_id] = {
+            "worker": twin.worker_id,
+            "requests": engine.requests,
+            "probe_candidates": engine.probe_candidates,
+            "probes_executed": engine.probes_executed,
+            "resources": len(engine.policy.resources),
+            "rules": len(engine.policy.rules),
+            "findings": len(violations),
+            "inconclusive": len(engine.inconclusive_checks),
+            "coverage": coverage.to_dict(),
+        }
         self.results.extend(violations)
         return violations
 
@@ -270,6 +287,9 @@ class PostgresRun:
             raise TwinLifecycleError("worker cleanup failed: " + "; ".join(cleanup_errors))
         order = {worker_id: index for index, worker_id in enumerate(worker_ids)}
         results.sort(key=lambda item: order[item[0]])
+        self.parallel_metrics = [
+            self.worker_metrics[worker_id] for worker_id in worker_ids if worker_id in self.worker_metrics
+        ]
         self.parallel_results = dedupe_findings([finding for _, findings in results for finding in findings])
         return results
 
