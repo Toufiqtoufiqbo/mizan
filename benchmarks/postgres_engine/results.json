@@ -3,15 +3,15 @@
   "comparison": {
     "mode": "replicated worker isolation and normalized finding equivalence",
     "parallel_durations_seconds": [
-      21.6813,
-      30.9834
+      29.7706,
+      44.8653
     ],
-    "serial_duration_seconds": 13.2626,
+    "serial_duration_seconds": 17.1838,
     "speedup_claim": null
   },
   "environment": {
-    "cluster": "7710958324059037072",
-    "git_sha": "548949fac44c4979e8bb8866c57a6f7498f9dd19",
+    "cluster": "7711009630309361428",
+    "git_sha": "29c0ec19a56487e5fef65b26a4616d2b3fd2300a",
     "platform": "Windows-10-10.0.19045-SP0",
     "psycopg": "3.3.9",
     "python": "3.11.9"
@@ -19,16 +19,61 @@
   "execution_mode": "replicated: each isolated worker runs the full learn()->attack() workload",
   "failures": [],
   "fixture": {
-    "app_sha256": "ac00097ed30e6689a31c1c8219fb0e7d6c68fe2dac140e454db7c15800d60840",
+    "app_sha256": "fc347cad03902fc6d0f3cf17cde39887b50b384c4630b3fb1b0a3938842c39b5",
     "contract_sha256": "7c55e623b37da9efb9238a52026250a27dda1e3583bff73800520ea6f3303ece",
     "name": "postgres_store",
     "schema": "pgstore",
     "spec_sha256": "1834ea05cea898bd66f14009cbf07ad86a0a111c7f9b1c4dc3fec0956bbafadd",
     "variant": "both"
   },
+  "law_benchmark_problems": [],
+  "laws": [
+    {
+      "attempted_probes": 2,
+      "backend": "postgres",
+      "database_operations": 2,
+      "duration_seconds": 4.2871,
+      "eligible_probes": 4,
+      "executed_probes": 1,
+      "execution_mode": "single disposable worker",
+      "failures": [],
+      "findings": 1,
+      "fixture": "mizan-laws.json",
+      "fixture_sha256": "456e7e2e7914654cb37a31256791e52a2c002bb885861ab8f18301aa2ac591af",
+      "inconclusive": 2,
+      "law": "L4",
+      "learning_requests": 10,
+      "resources_discovered": 3,
+      "rules_learned": 3,
+      "traffic_records": 10,
+      "variant": "l4_vulnerable",
+      "workers": 1
+    },
+    {
+      "attempted_probes": 4,
+      "backend": "postgres",
+      "database_operations": 8,
+      "duration_seconds": 5.138,
+      "eligible_probes": 4,
+      "executed_probes": 1,
+      "execution_mode": "single disposable worker",
+      "failures": [],
+      "findings": 3,
+      "fixture": "mizan-laws.json",
+      "fixture_sha256": "456e7e2e7914654cb37a31256791e52a2c002bb885861ab8f18301aa2ac591af",
+      "inconclusive": 1,
+      "law": "L6",
+      "learning_requests": 10,
+      "resources_discovered": 3,
+      "rules_learned": 3,
+      "traffic_records": 10,
+      "variant": "l6_vulnerable",
+      "workers": 1
+    }
+  ],
   "parallel": [
     {
-      "duration_seconds": 21.6813,
+      "duration_seconds": 29.7706,
       "equivalent_to_serial": true,
       "findings": 2,
       "normalized_findings": [
@@ -77,7 +122,7 @@
       "workers": 2
     },
     {
-      "duration_seconds": 30.9834,
+      "duration_seconds": 44.8653,
       "equivalent_to_serial": true,
       "findings": 2,
       "normalized_findings": [
@@ -141,10 +186,10 @@
     }
   ],
   "parallel_duration_seconds": [
-    21.6813,
-    30.9834
+    29.7706,
+    44.8653
   ],
-  "parallel_median_seconds": 26.3323,
+  "parallel_median_seconds": 37.3179,
   "problems": [],
   "serial": {
     "coverage": {
@@ -209,7 +254,7 @@
       "sharing_semantics_ambiguous": 2,
       "unresolved_checks": 1
     },
-    "duration_seconds": 13.2626,
+    "duration_seconds": 17.1838,
     "findings": 2,
     "inconclusive": 1,
     "laws": [

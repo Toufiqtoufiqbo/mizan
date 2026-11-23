@@ -58,6 +58,10 @@ VARIANTS = (
     "grant_write",
     "unknown",
     "composite",
+    "l4_vulnerable",
+    "l4_secure",
+    "l6_vulnerable",
+    "l6_secure",
 )
 
 #: Independent request rendezvous used only by concurrency tests.
@@ -203,7 +207,7 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
                 cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {_quote(app.config['PG_SCHEMA'])}")
                 cursor.execute(
                     f"""CREATE TABLE IF NOT EXISTS {q("principals_registry")} (
-                        p_key TEXT PRIMARY KEY, label TEXT NOT NULL)"""
+                        p_key TEXT PRIMARY KEY, label TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'user')"""
                 )
                 cursor.execute(
                     f"""CREATE TABLE IF NOT EXISTS {q("auth_tokens")} (
@@ -254,6 +258,16 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
                     f"INSERT INTO {q('inventory_items')} (item_ref, originator_ref, label) VALUES (%s, %s, %s) "
                     "ON CONFLICT (item_ref) DO NOTHING",
                     ("item-a1", owner, "Item A"),
+                )
+                cursor.execute(
+                    f"""CREATE TABLE IF NOT EXISTS {q("capabilities")} (
+                        code TEXT PRIMARY KEY, originator_ref TEXT REFERENCES {q("principals_registry")}(p_key),
+                        consumed_at REAL)"""
+                )
+                cursor.execute(
+                    f"""INSERT INTO {q("capabilities")} (code, originator_ref, consumed_at) VALUES (%s,%s,%s)
+                        ON CONFLICT (code) DO NOTHING""",
+                    ("cap-alice", "alice", None),
                 )
                 cursor.execute(
                     f"""INSERT INTO {q("item_relations")}
@@ -465,6 +479,95 @@ def create_app(variant: str = "clean", *, dsn: str | None = None, schema: str | 
                         for row in cursor.fetchall()
                     ]
                 )
+
+    @app.get("/users")
+    def list_users():
+        if not caller():
+            return jsonify({"error": "unauthorized"}), 401
+        with connect() as connection:
+            with connection.cursor() as cursor:
+                context(connection, caller())
+                cursor.execute(f"SELECT p_key, label, role FROM {q('principals_registry')} ORDER BY p_key")
+                return jsonify([{"user_id": row[0], "label": row[1], "role": row[2]} for row in cursor.fetchall()])
+
+    @app.get("/capabilities")
+    def list_capabilities():
+        if not caller():
+            return jsonify({"error": "unauthorized"}), 401
+        with connect() as connection:
+            with connection.cursor() as cursor:
+                context(connection, caller())
+                cursor.execute(f"SELECT code, consumed_at FROM {q('capabilities')} ORDER BY code")
+                return jsonify([{"code": row[0], "consumed_at": row[1]} for row in cursor.fetchall()])
+
+    @app.patch("/users/<user_id>")
+    def set_user_role(user_id: str):
+        """L4 fixture: the vulnerable variant lets any caller set `role`."""
+        key = caller()
+        if not key:
+            return jsonify({"error": "unauthorized"}), 401
+        body = request.get_json(silent=True) or {}
+        role = body.get("role")
+        if not isinstance(role, str):
+            return jsonify({"error": "invalid"}), 400
+        mode = app.config["VARIANT"]
+        if mode in {"l4_secure", "l6_secure"}:
+            with connect() as check:
+                with check.cursor() as cursor:
+                    cursor.execute(f"SELECT role FROM {q('principals_registry')} WHERE p_key = %s", (key,))
+                    acting = cursor.fetchone()
+            if acting is None or str(acting[0]) != "admin":
+                return jsonify({"error": "forbidden"}), 403
+        with connect() as connection:
+            with connection.cursor() as cursor:
+                context(connection, key)
+                cursor.execute(f"UPDATE {q('principals_registry')} SET role = %s WHERE p_key = %s", (role, user_id))
+            connection.commit()
+        return jsonify({"user_id": user_id, "role": role})
+
+    @app.post("/items")
+    def create_item():
+        """L6 fixture: a declared per-principal collection bound."""
+        key = caller()
+        if not key:
+            return jsonify({"error": "unauthorized"}), 401
+        body = request.get_json(silent=True) or {}
+        label = body.get("label")
+        if not isinstance(label, str):
+            return jsonify({"error": "invalid"}), 400
+        with connect() as connection:
+            with connection.cursor() as cursor:
+                context(connection, key)
+                cursor.execute(f"SELECT count(*) FROM {q('inventory_items')} WHERE originator_ref = %s", (key,))
+                current = int(cursor.fetchone()[0])
+                if app.config["VARIANT"] in {"l6_secure", "l4_secure"} and current >= 2:
+                    return jsonify({"error": "quota exceeded"}), 409
+                item_ref = f"item-{secrets.token_hex(4)}"
+                cursor.execute(
+                    f"INSERT INTO {q('inventory_items')} (item_ref, originator_ref, label) VALUES (%s,%s,%s)",
+                    (item_ref, key, label),
+                )
+            connection.commit()
+        return jsonify({"item_ref": item_ref, "label": label, "owner_id": key}), 201
+
+    @app.post("/capabilities/<code>/consume")
+    def consume_capability(code: str):
+        """L6 fixture: an explicitly single-use capability."""
+        key = caller()
+        if not key:
+            return jsonify({"error": "unauthorized"}), 401
+        with connect() as connection:
+            with connection.cursor() as cursor:
+                context(connection, key)
+                cursor.execute(f"SELECT originator_ref, consumed_at FROM {q('capabilities')} WHERE code = %s", (code,))
+                row = cursor.fetchone()
+                if row is None or str(row[0]) != key:
+                    return jsonify({"error": "not found"}), 404
+                if row[1] is not None and app.config["VARIANT"] in {"l6_secure", "l4_secure"}:
+                    return jsonify({"error": "already consumed"}), 409
+                cursor.execute(f"UPDATE {q('capabilities')} SET consumed_at = %s WHERE code = %s", (time.time(), code))
+            connection.commit()
+        return jsonify({"code": code, "consumed": True})
 
     return app
 

@@ -283,6 +283,81 @@ def check_results(results: dict[str, Any]) -> list[str]:
     return problems
 
 
+def _run_law_once(dsn: str, law: str, variant: str) -> dict[str, Any]:
+    """Measure one law on its own real workload and disposable database."""
+    import sys as _sys
+
+    from mizan.learning import learn_from_spec
+    from mizan.ownership import RelationshipContract
+    from mizan.postgres_engine import PostgresRun
+    from mizan.postgres_twin import DatabaseRegistry, PostgresSource
+    from mizan.proxy import RecordingProxy
+
+    spec = FIXTURE / "openapi-laws.json"
+    law_contract = FIXTURE / "mizan-laws.json"
+    workspace = Path(tempfile.mkdtemp(prefix=f"mizan-viii-bench-{law.lower()}-"))
+    os.environ[DSN_ENV] = dsn
+    source = PostgresSource(DSN_ENV, schemas=(SCHEMA,))
+    run = PostgresRun(
+        source,
+        source.prepare_baseline(workspace),
+        DatabaseRegistry(workspace / "ownership.json"),
+        workspace,
+        [_sys.executable, str(FIXTURE / "app.py"), "--port", "{port}", "--vulnerability", variant],
+        tokens=dict(TOKENS),
+        relationship_contract=RelationshipContract.load(law_contract, strict=True),
+        traffic_path=workspace / "traffic.jsonl",
+        env={"MIZAN_PG_SCHEMA": SCHEMA},
+    )
+    failures: list[str] = []
+    try:
+        twin = run.start_worker("w0")
+        proxy = RecordingProxy(
+            twin.base_url, workspace / "traffic.jsonl", identity_map={token: name for name, token in TOKENS.items()}
+        )
+        proxy.start()
+        try:
+            learned = learn_from_spec(spec, proxy.base_url, identities=dict(TOKENS), exclude_paths=("/login",))
+        finally:
+            proxy.stop()
+        engine = run.build_engine(twin, workspace / "proofs")
+        policy = engine.learn()
+        started = time.perf_counter()
+        violations = engine.attack(groups=[law])
+        duration = time.perf_counter() - started
+        coverage = engine.coverage()
+        if engine.probes_executed == 0 or not violations:
+            failures.append(f"{law} executed {engine.probes_executed} probes and produced {len(violations)} findings")
+        return {
+            "backend": "postgres",
+            "law": law,
+            "fixture": law_contract.name,
+            "variant": variant,
+            "fixture_sha256": hashlib.sha256(law_contract.read_bytes()).hexdigest(),
+            "learning_requests": len(learned),
+            "traffic_records": len(engine.traffic),
+            "resources_discovered": len(policy.resources),
+            "rules_learned": len(policy.rules),
+            "eligible_probes": engine.probe_candidates,
+            "attempted_probes": coverage.laws.get(law).attempted if law in coverage.laws else 0,
+            "executed_probes": engine.probes_executed,
+            "findings": len(violations),
+            "inconclusive": len(engine.inconclusive_checks),
+            "duration_seconds": round(duration, 4),
+            "database_operations": len(engine._ledger_events()),
+            "workers": 1,
+            "execution_mode": "single disposable worker",
+            "failures": failures,
+        }
+    finally:
+        try:
+            removed = run.cleanup()
+            if not removed:
+                failures.append("no database was cleaned up")
+        except Exception as exc:  # pragma: no cover - defensive
+            failures.append(f"cleanup failed: {exc}")
+
+
 def main() -> None:
     from mizan.ownership import RelationshipContract
 
@@ -305,6 +380,11 @@ def main() -> None:
         for workers in (2, 4)
     ]
     durations = [item["parallel"]["duration_seconds"] for item in parallel_runs]
+    law_runs = [
+        _run_law_once(dsn, "L4", "l4_vulnerable"),
+        _run_law_once(dsn, "L6", "l6_vulnerable"),
+    ]
+    law_problems = [f"{item['law']}: {problem}" for item in law_runs for problem in item["failures"]]
     results = {
         "benchmark_version": BENCHMARK_VERSION,
         "environment": {
@@ -323,6 +403,8 @@ def main() -> None:
         "parallel_duration_seconds": durations,
         "parallel_median_seconds": round(statistics.median(durations), 4),
         "workload": result["workload"],
+        "laws": law_runs,
+        "law_benchmark_problems": law_problems,
         "comparison": {
             "mode": "replicated worker isolation and normalized finding equivalence",
             "speedup_claim": None,
@@ -345,7 +427,7 @@ def main() -> None:
     (Path(__file__).resolve().parent / "results.json").write_text(text, encoding="utf-8")
     print(text)
     server.cleanup()
-    problems = check_results(results)
+    problems = check_results(results) + law_problems
     if problems:
         raise SystemExit("benchmark validation failed: " + "; ".join(problems))
 

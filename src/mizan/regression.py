@@ -203,6 +203,13 @@ def build_attack(violation: Violation) -> Attack | None:
     if violation.law == "L2" and not object_id:
         supported = False
         reason = "the proof does not identify the object that must not be disclosed"
+    if violation.law == "L6" and not (
+        evidence.get("verification_path") and evidence.get("count_endpoint") and evidence.get("bound") is not None
+    ):
+        # A cardinality bound cannot be asserted over HTTP from a status code
+        # alone. Without an explicit state endpoint in the proof, refuse.
+        supported = False
+        reason = "the proof does not provide a verifiable cardinality state endpoint"
 
     return Attack(
         law=violation.law,

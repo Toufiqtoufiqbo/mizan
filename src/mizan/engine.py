@@ -142,6 +142,10 @@ class Mizan:
         self._outcome_index: dict[tuple[str, str, str, str], int] = {}
         self._inconclusive_index: dict[tuple[str, str, str, str], int] = {}
         self._inconclusive_seen: set[tuple[str, str, str, str]] = set()
+        #: Database rows observed at learning time, used as the original state
+        #: for L4/L6 evidence. Never used as a substitute for a post-mutation
+        #: readback.
+        self.db_rows: dict[str, list[dict[str, Any]]] = {}
         #: Eligible checks per law, computed before the probes run.
         self.eligible_by_law: dict[str, int] = {}
         #: How many requests the engine sent - the cost of a finding.
@@ -205,6 +209,7 @@ class Mizan:
         db_rows: dict[str, list[dict[str, Any]]] = {}
         if schema is not None and hasattr(self.attributor, "rows"):
             db_rows = {name: self.attributor.rows(name) for name in schema.tables}
+        self.db_rows = db_rows
         # Phase V.2: an operator-supplied contract is configuration, not a hint.
         # It must describe this database, and a bad declaration stops the scan
         # instead of silently running with different semantics.
@@ -357,7 +362,7 @@ class Mizan:
                 # ``T`` is the data-level view, not a standalone law probe. L6
                 # is only inferred through the L5 race heuristic and is never
                 # claimed as an independently executed law.
-                if name in {"L1", "L2", "L3", "L4", "L5"}:
+                if name in {"L1", "L2", "L3", "L4", "L5", "L6"}:
                     self.executed_by_law[name] = self.executed_by_law.get(name, 0) + 1
         return _dedupe(violations)
 
@@ -746,7 +751,14 @@ class Mizan:
             records = [item for item in self.outcomes if item.get("law") == law]
             eligible = self.eligible_by_law.get(law, 0)
             executed = self.executed_by_law.get(law, 0)
-            if not eligible and not records and not executed and law not in ScanCoverage.required_laws:
+            declared_law = law in {"L4", "L6"} and self._law_policy_enabled
+            if (
+                not eligible
+                and not records
+                and not executed
+                and law not in ScanCoverage.required_laws
+                and not declared_law
+            ):
                 continue
             # Every recorded outcome is, by definition, an eligible check that
             # actually ran. Ledger writes discovered only while the probes run
@@ -757,8 +769,8 @@ class Mizan:
                 eligible=max(eligible, len(records)),
                 attempted=len(records),
                 executed=executed,
-                skipped=law == "L6",
-                supported=law not in {"L6", "L7"},
+                skipped=law == "L6" and not self._law_policy_enabled,
+                supported=law != "L7" and (law != "L6" or self._law_policy_enabled),
             )
             for item in records:
                 value = item.get("outcome")
@@ -798,6 +810,12 @@ class Mizan:
         """Run only the named probes."""
         return self.attack(groups=groups)
 
+    @property
+    def _law_policy_enabled(self) -> bool:
+        """Whether trusted L4/L6 declarations are available for this scan."""
+        contract = self.relationship_contract
+        return contract is not None and bool(contract.protected_fields or contract.cardinality)
+
     def probe_groups(self) -> list[tuple[str, Any]]:
         """The probes of the engine.
 
@@ -805,14 +823,20 @@ class Mizan:
         changes the state of a resource would hide a race on it. (With a local
         twin each probe gets a fresh snapshot instead.)
         """
-        return [
+        groups = [
             ("L5", self._probe_races),
             ("L1", self._probe_identity_coherence),
             ("L2", self._probe_read_authorization),
             ("L3", self._probe_write_authorization),
-            ("L4", self._probe_authority_creation),
-            ("T", self._probe_data_view),
+            (
+                "L4",
+                self._probe_authority_creation_policy if self._law_policy_enabled else self._probe_authority_creation,
+            ),
         ]
+        if self._law_policy_enabled:
+            groups.append(("L6", self._probe_cardinality))
+        groups.append(("T", self._probe_data_view))
+        return groups
 
     def _data_view_graph(self) -> OwnershipGraph | None:
         """The graph the data-level analyzer may use.
@@ -834,6 +858,11 @@ class Mizan:
         """
         analyzer = TaintAnalyzer(self.policy, graph=self._data_view_graph())
         violations = analyzer.analyze(self._ledger_events())
+        if self._law_policy_enabled:
+            # The policy-backed L4 probe has already verified authority with
+            # declared policy and attributed state; the heuristic data-view
+            # finding would be a weaker duplicate of the same claim.
+            violations = [item for item in violations if item.law != "L4"]
         for item in analyzer.inconclusive:
             if not self._relevant_data_view_resource(item.get("resource", "")):
                 continue
@@ -1332,6 +1361,281 @@ class Mizan:
                     )
         return violations
 
+    def _live_rows(self, table: str) -> list[dict[str, Any]]:
+        """Read the current database state; never reuse the learning snapshot."""
+        if self.attributor is None or not hasattr(self.attributor, "rows"):
+            return []
+        try:
+            return list(self.attributor.rows(table))
+        except Exception:
+            return []
+
+    def _count_rows_for_principal(self, rows: list[dict[str, Any]], invariant: Any, principal_id: str) -> int:
+        column = None
+        contract = self.relationship_contract
+        if contract is not None:
+            declared = contract.ownership.get(invariant.resource_type)
+            if declared is not None:
+                column = declared[1]
+        if column:
+            return sum(1 for row in rows if str(row.get(column, "")) == principal_id)
+        return len(rows) if invariant.scope == "global" else 0
+
+    def _probe_cardinality(self) -> list[Violation]:
+        """L6: verify an explicitly declared cardinality invariant from state."""
+        violations: list[Violation] = []
+        contract = self.relationship_contract
+        if contract is None:
+            return violations
+        self._restore()
+        for invariant in contract.cardinality:
+            table = invariant.table or self._table_for_resource(invariant.resource_type)
+            if not table:
+                self._inconclusive(
+                    "L6", invariant.resource_type, "the invariant has no verifiable database table", action="create"
+                )
+                continue
+            operation = next(
+                (
+                    (method, records)
+                    for (method, template), records in self._examples().items()
+                    if method == "POST"
+                    and records
+                    and (
+                        invariant.resource_type.lower() in template.lower()
+                        or template.rstrip("/").endswith(invariant.resource_type.lower())
+                    )
+                ),
+                None,
+            )
+            if operation is None:
+                self._inconclusive(
+                    "L6", invariant.resource_type, "no create operation is available for the invariant", action="create"
+                )
+                continue
+            method, records = operation
+            record = self._primary_record(records)
+            body = record.body if isinstance(record.body, dict) else {}
+            for principal in self.target.principals:
+                if not principal.token or not self._is_testable(principal):
+                    continue
+                before_rows = self._live_rows(table)
+                before = self._count_rows_for_principal(before_rows, invariant, principal.id)
+                url = self._url(record.path)
+                session = self.target.session_for(principal)
+                responses = []
+                if invariant.enforcement == "single_use":
+                    for _attempt in range(2):
+                        responses.append(self._request(session, method, url, json=body, timeout=self.target.timeout))
+                else:
+                    for _attempt in range(invariant.bound + 1):
+                        responses.append(self._request(session, method, url, json=body, timeout=self.target.timeout))
+                after_rows = self._live_rows(table)
+                after = self._count_rows_for_principal(after_rows, invariant, principal.id)
+                key = f"{invariant.resource_type}:{principal.id}"
+                if invariant.enforcement == "single_use":
+                    violated = (
+                        after - before > 1 or sum(1 for response in responses if 200 <= response.status_code < 300) > 1
+                    )
+                else:
+                    violated = after > invariant.bound
+                self._outcome(
+                    "L6",
+                    "create" if invariant.enforcement != "single_use" else "consume",
+                    key,
+                    principal.id,
+                    AuthorizationOutcome.VIOLATION if violated else AuthorizationOutcome.DECIDED,
+                )
+                if not violated:
+                    continue
+                violations.append(
+                    Violation(
+                        law="L6",
+                        title=f"{principal.id} exceeded the {invariant.resource_type} bound",
+                        detail=(
+                            f"The declared {invariant.scope} bound of {invariant.bound} {invariant.unit} "
+                            f"({invariant.source}) was exceeded: {before} before, {after} after."
+                        ),
+                        severity="medium",
+                        principal=principal.id,
+                        resource=key,
+                        action="create",
+                        evidence={
+                            "invariant": invariant.to_dict(),
+                            "bound": invariant.bound,
+                            "unit": invariant.unit,
+                            "scope": invariant.scope,
+                            "source": invariant.source,
+                            "principal": principal.id,
+                            "initial_count": before,
+                            "final_count": after,
+                            "operations": len(responses),
+                            "statuses": [getattr(response, "status_code", None) for response in responses],
+                            "verification": "database row count",
+                            "table": table,
+                            "outcome": "cardinality_exceeded",
+                        },
+                        steps=[
+                            Step(
+                                method=method,
+                                url=url,
+                                headers=mask_authorization(
+                                    {"Authorization": f"Bearer {principal.token}"}, principal.id
+                                ),
+                                body=body,
+                                status=getattr(responses[-1], "status_code", None) if responses else None,
+                                note="boundary operation beyond the declared bound",
+                            )
+                        ],
+                    )
+                )
+        return violations
+
+    def _original_row_state(
+        self, table: str | None, resource: Resource | None, field: str
+    ) -> tuple[Any, dict[str, Any] | None]:
+        """The declared field's value before the probe, from observed state."""
+        if not table or resource is None:
+            return None, None
+        rows = next(
+            (values for key, values in self.db_rows.items() if key == table or key.endswith("." + table)),
+            [],
+        )
+        for row in rows:
+            if any(str(value) == str(resource.id) for value in row.values() if value is not None):
+                return row.get(field), dict(row)
+        return None, None
+
+    def _probe_authority_creation_policy(self) -> list[Violation]:
+        """L4 with a trusted protected-field policy and persisted-state proof.
+
+        A name is never the evidence: the field must be declared with a source
+        and confidence. A confirmed finding additionally requires an attributed
+        database write whose persisted column carries the controlled value.
+        """
+        violations: list[Violation] = []
+        contract = self.relationship_contract
+        if contract is None:
+            return violations
+        self._restore()
+        for declaration in contract.protected_fields:
+            for (method, template), records in self._examples().items():
+                if method not in {"POST", "PUT", "PATCH"}:
+                    continue
+                record = next(
+                    (item for item in records if isinstance(item.body, dict) and declaration.field in item.body),
+                    None,
+                )
+                if record is None:
+                    continue
+                working = self._primary_record(records)
+                if working is not None:
+                    record = working
+                body = dict(record.body)
+                resource = record.resource or self.policy.resource(
+                    f"{declaration.resource_type}:{urlsplit(record.path).path.rstrip('/').rsplit('/', 1)[-1]}"
+                )
+                original, original_row = self._original_row_state(
+                    declaration.table or self._table_for_resource(declaration.resource_type),
+                    resource,
+                    declaration.field,
+                )
+                sentinel = f"mizan-probe-{declaration.field}"
+                body[declaration.field] = sentinel
+                url = self._url(record.path)
+                for principal in self.target.principals:
+                    if not principal.token or not self._is_testable(principal):
+                        continue
+                    if any(role in declaration.authorized_roles for role in principal.roles):
+                        continue
+                    key = f"{declaration.resource_type}:{resource.id if resource else urlsplit(record.path).path}"
+                    before = len(self._ledger_events())
+                    session = self.target.session_for(principal)
+                    response = self._request(session, method, url, json=body, timeout=self.target.timeout)
+                    events = self._ledger_events()[before:]
+                    confirmed = [
+                        event
+                        for event in events
+                        if event.principal == principal.id
+                        and event.attribution == "confirmed"
+                        and str(event.columns.get(declaration.field, "")) == sentinel
+                    ]
+                    resource_key = confirmed[0].resource_key if confirmed else key
+                    if confirmed:
+                        outcome = AuthorizationOutcome.VIOLATION
+                    elif events:
+                        outcome = AuthorizationOutcome.INCONCLUSIVE
+                    else:
+                        outcome = AuthorizationOutcome.DECIDED
+                    self._outcome("L4", "write", resource_key, principal.id, outcome)
+                    if outcome is not AuthorizationOutcome.VIOLATION:
+                        if outcome is AuthorizationOutcome.INCONCLUSIVE:
+                            self._inconclusive(
+                                "L4",
+                                resource_key,
+                                "the mutation was observed but its authority-sensitive value was not confirmed",
+                                action="write",
+                                principal=principal.id,
+                            )
+                        continue
+                    event = confirmed[0]
+                    violations.append(
+                        Violation(
+                            law="L4",
+                            title=f"{principal.id} changed protected field `{declaration.field}`",
+                            detail=(
+                                f"`{method} {url}` persisted `{declaration.field}={sentinel!r}` on `{resource_key}` "
+                                f"although the trusted policy authorizes only "
+                                f"{sorted(declaration.authorized_roles) or 'a different authority'}."
+                            ),
+                            severity="critical",
+                            principal=principal.id,
+                            resource=resource_key,
+                            action="write",
+                            evidence={
+                                "actor": principal.id,
+                                "resource": resource_key,
+                                "field": declaration.field,
+                                "original_value": original,
+                                "original_row": original_row,
+                                "attempted_value": sentinel,
+                                "persisted_value": event.columns.get(declaration.field),
+                                "expected_invariant": "only an authorized authority may set this field",
+                                "policy_source": declaration.source,
+                                "confidence": declaration.confidence,
+                                "authorized_roles": sorted(declaration.authorized_roles),
+                                "state_verification": "attributed database write",
+                                "attribution": event.attribution,
+                                "event": event.to_dict(),
+                                "http_status": response.status_code,
+                                "outcome": "unauthorized_persisted_mutation",
+                                "verification_path": urlsplit(url).path or self._state_verification_path(),
+                            },
+                            steps=[
+                                Step(
+                                    method=method,
+                                    url=url,
+                                    headers=mask_authorization(
+                                        {"Authorization": f"Bearer {principal.token}"}, principal.id
+                                    ),
+                                    body=body,
+                                    status=response.status_code,
+                                    note="unauthorized protected-field mutation",
+                                )
+                            ],
+                        )
+                    )
+        return violations
+
+    def _table_for_resource(self, resource_type: str) -> str | None:
+        """The table a resource type is mapped to, when the graph knows it."""
+        if self.graph is None:
+            return None
+        for _key, (table, _values) in self.graph.resource_rows.items():
+            if _key.startswith(f"{resource_type}:"):
+                return table
+        return None
+
     def _probe_authority_creation(self) -> list[Violation]:
         """L4 - can a caller mint authority for itself?"""
         violations: list[Violation] = []
@@ -1438,6 +1742,10 @@ class Mizan:
                 )
                 if violation is None:
                     continue
+                if self._law_policy_enabled and violation.law == "L6":
+                    # With an explicit L6 invariant available, a race is an
+                    # atomicity (L5) failure, not a cardinality conclusion.
+                    violation.law = "L5"
                 violation.steps = [
                     Step(
                         method=method,

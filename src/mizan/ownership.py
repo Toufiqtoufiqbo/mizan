@@ -132,6 +132,56 @@ def _parse_grant_actions(table: str, declaration: dict[str, Any], *, strict: boo
 
 
 @dataclass(frozen=True)
+class ProtectedField:
+    """A field whose value is controlled by a trusted authority.
+
+    The classification always has a documented ``source`` and ``confidence``.
+    A field name by itself is never a sufficient reason to call it privileged.
+    """
+
+    resource_type: str
+    field: str
+    source: str
+    confidence: str
+    authorized_roles: frozenset[str] = frozenset()
+    table: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "resource_type": self.resource_type,
+            "field": self.field,
+            "source": self.source,
+            "confidence": self.confidence,
+            "authorized_roles": sorted(self.authorized_roles),
+            **({"table": self.table} if self.table else {}),
+        }
+
+
+@dataclass(frozen=True)
+class CardinalityInvariant:
+    """An explicit bound that the application is expected to enforce."""
+
+    resource_type: str
+    bound: int
+    scope: str
+    unit: str
+    source: str
+    enforcement: str
+    table: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "resource_type": self.resource_type,
+            "bound": self.bound,
+            "scope": self.scope,
+            "unit": self.unit,
+            "source": self.source,
+            "enforcement": self.enforcement,
+            **({"table": self.table} if self.table else {}),
+        }
+
+
+@dataclass(frozen=True)
 class RelationshipContract:
     """Explicit, trusted semantic declarations about an application.
 
@@ -152,6 +202,10 @@ class RelationshipContract:
     #: ``actions`` is the explicit, non-empty scope of the grant: a grant is
     #: never interpreted as permission for an operation it does not declare.
     sharing: dict[str, tuple[str, str, str, str, frozenset[str]]] = field(default_factory=dict)
+    #: Trusted L4 declarations. A field name alone is never evidence.
+    protected_fields: tuple[ProtectedField, ...] = ()
+    #: Trusted L6 declarations. Each one is a separate, scoped invariant.
+    cardinality: tuple[CardinalityInvariant, ...] = ()
     variants: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def _merged_data(self, name: str, override: dict[str, Any]) -> dict[str, Any]:
@@ -172,6 +226,10 @@ class RelationshipContract:
                 }
                 for key, value in self.sharing.items()
             },
+            "authority": {
+                "fields": [item.to_dict() for item in self.protected_fields],
+            },
+            "cardinality": [item.to_dict() for item in self.cardinality],
         }
         for section, value in override.items():
             if value is None:
@@ -187,6 +245,96 @@ class RelationshipContract:
         if not name or name not in self.variants:
             return self
         return RelationshipContract.from_dict(self._merged_data(name, self.variants[name]), strict=strict)
+
+    @staticmethod
+    def _parse_protected_fields(data: Any, *, strict: bool) -> tuple[ProtectedField, ...]:
+        if data is None:
+            return ()
+        if not isinstance(data, dict):
+            if strict:
+                raise RelationshipContractError("authority must be an object")
+            return ()
+        fields_data = data.get("fields") or []
+        if not isinstance(fields_data, list):
+            if strict:
+                raise RelationshipContractError("authority.fields must be an array")
+            return ()
+        parsed: list[ProtectedField] = []
+        for item in fields_data:
+            if not isinstance(item, dict) or not item.get("resource_type") or not item.get("field"):
+                if strict:
+                    raise RelationshipContractError("each protected field must name resource_type and field")
+                continue
+            source = str(item.get("source") or "")
+            confidence = str(item.get("confidence") or "")
+            if not source or not confidence:
+                if strict:
+                    raise RelationshipContractError(
+                        f"protected field {item['field']!r} must declare source and confidence"
+                    )
+                continue
+            roles = item.get("authorized_roles") or []
+            if not isinstance(roles, list) or any(not isinstance(role, str) for role in roles):
+                if strict:
+                    raise RelationshipContractError(f"protected field {item['field']!r} has invalid authorized_roles")
+                roles = []
+            parsed.append(
+                ProtectedField(
+                    resource_type=str(item["resource_type"]),
+                    field=str(item["field"]),
+                    source=source,
+                    confidence=confidence,
+                    authorized_roles=frozenset(str(role) for role in roles),
+                    table=str(item["table"]) if item.get("table") else None,
+                )
+            )
+        return tuple(parsed)
+
+    @staticmethod
+    def _parse_cardinality(data: Any, *, strict: bool) -> tuple[CardinalityInvariant, ...]:
+        if data is None:
+            return ()
+        if not isinstance(data, list):
+            if strict:
+                raise RelationshipContractError("cardinality must be an array")
+            return ()
+        parsed: list[CardinalityInvariant] = []
+        for item in data:
+            if not isinstance(item, dict):
+                if strict:
+                    raise RelationshipContractError("each cardinality declaration must be an object")
+                continue
+            required = ("resource_type", "bound", "scope", "unit", "source", "enforcement")
+            if any(key not in item for key in required):
+                if strict:
+                    raise RelationshipContractError(
+                        "a cardinality declaration must name resource_type, bound, scope, unit, source and enforcement"
+                    )
+                continue
+            if not isinstance(item["bound"], int) or isinstance(item["bound"], bool) or item["bound"] < 0:
+                if strict:
+                    raise RelationshipContractError("cardinality bound must be a non-negative integer")
+                continue
+            if str(item["enforcement"]) not in {"reject_beyond", "single_use"}:
+                if strict:
+                    raise RelationshipContractError(f"unsupported cardinality enforcement {item['enforcement']!r}")
+                continue
+            if str(item["scope"]) not in {"principal", "global"}:
+                if strict:
+                    raise RelationshipContractError(f"unsupported cardinality scope {item['scope']!r}")
+                continue
+            parsed.append(
+                CardinalityInvariant(
+                    resource_type=str(item["resource_type"]),
+                    bound=int(item["bound"]),
+                    scope=str(item["scope"]),
+                    unit=str(item["unit"]),
+                    source=str(item["source"]),
+                    enforcement=str(item["enforcement"]),
+                    table=str(item["table"]) if item.get("table") else None,
+                )
+            )
+        return tuple(parsed)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None, *, strict: bool = False) -> RelationshipContract:
@@ -293,7 +441,17 @@ class RelationshipContract:
                         )
                 if isinstance(value, dict):
                     variants[name] = value
-        contract = cls(version=1, identity=identity_pair, ownership=ownership, sharing=sharing, variants=variants)
+        protected_fields = cls._parse_protected_fields(data.get("authority"), strict=strict)
+        cardinality = cls._parse_cardinality(data.get("cardinality"), strict=strict)
+        contract = cls(
+            version=1,
+            identity=identity_pair,
+            ownership=ownership,
+            sharing=sharing,
+            protected_fields=protected_fields,
+            cardinality=cardinality,
+            variants=variants,
+        )
         if strict:
             # A variant override is the same kind of declaration as the base
             # contract. Re-validate the merged result now: an invalid override
@@ -366,6 +524,19 @@ class RelationshipContract:
                 continue
             if declared.column(column) is None:
                 problems.append(f"{resource_type!r} has no ownership column {column!r}")
+        for declaration in (*self.protected_fields, *self.cardinality):
+            table = declaration.table
+            if not table:
+                continue
+            try:
+                resolved = _resolve_declared_table(schema.tables if schema is not None else (), table)
+            except RelationshipContractError:
+                resolved = None
+            if resolved is None:
+                problems.append(f"{declaration.resource_type!r} law declaration names unknown table {table!r}")
+                continue
+            if isinstance(declaration, ProtectedField) and resolved.column(declaration.field) is None:
+                problems.append(f"protected field {table}.{declaration.field} does not exist")
         if problems:
             raise RelationshipContractError("; ".join(problems))
 
