@@ -9,13 +9,19 @@ L7 remains unsupported by design. All focused suites, the complete test corpus
 single-process runs), lint, formatting, the corrected benchmark and mandatory
 CI are green.
 
-## 2. Baseline and final SHA
+## 2. Baseline and verification SHAs
 
 - Baseline / merged `origin/main`: `c131faecb5438617aeaa31ba4e23a4dc752ad46a`
-- Final SHA: `_TBD after report commit_`
-- Branch: `feat/phase-viii-pg-l4-l6`
-- The last code commit (all implementation and tests) was `2cc297f`; the final
-  commit adds only this report, so the full corpus was executed on that code.
+  (verified as the current remote `main` during closure; unchanged).
+- Implementation-code SHA: `29c0ec19a56487e5fef65b26a4616d2b3fd2300a` — the
+  last commit touching `src/`, tests or the benchmark.
+- Code-verification / pre-closure PR HEAD: `29928d617eb400281aa6d5577390004730a13888` —
+  the HEAD tested by CI #289. Relative to the implementation commit it changed
+  only `benchmarks/postgres_engine/results.json` and this report.
+- Documentation-closure commit: the commit immediately after `29928d6` on
+  `feat/phase-viii-pg-l4-l6`; its SHA and CI result are recorded in PR #13
+  metadata, not inside this file (avoiding a circular SHA reference).
+- Branch: `feat/phase-viii-pg-l4-l6`; PR #13 open, unmerged.
 
 ## 3. Architecture audit
 
@@ -37,6 +43,9 @@ CI are green.
 - Outcomes: unauthorized persisted mutation (finding), blocked/no persisted
   change (decided), unattributed mutation (inconclusive), missing policy/readback
   (unsupported). Response echo and HTTP 200 are never proof.
+- Scope: the verified authority mutation is a protected scalar field declared
+  by the trusted policy. Relationship-based authority expansion (grant tables,
+  tenant membership relations) is **not** implemented and remains debt.
 
 ## 5. L4 fixture results
 
@@ -54,9 +63,10 @@ CI are green.
 
 - Explicit `cardinality` declarations with bound, scope (`principal`/`global`),
   unit, source and enforcement (`reject_beyond` or `single_use`).
-- Supported categories verified: per-principal collection bounds and single-use
-  capabilities. Bound-input arrays and global quotas are declared but not yet
-  fixture-verified (see section 16).
+- Supported and fixture-verified categories: per-principal collection bounds and
+  single-use capabilities. Global quotas and bounded input collection semantics
+  are **not** verified; `maxItems` on a request array is an input contract and a
+  database uniqueness constraint is not a maximum collection size.
 - L6 has its own probe group and execution record; a race is classified as L5
   whenever an explicit L6 invariant is available.
 
@@ -120,36 +130,84 @@ still reports no speedup.
 
 ## 12. Tests
 
-The 795 collected tests were executed in three disjoint batches because the
-agent harness terminated single runs of ~18 minutes:
+`pytest --collect-only -q` collected **795 tests**. Two attempts at one
+uninterrupted ~18-minute run were terminated by harness restarts before a
+summary was produced, so the corpus was executed as **three disjoint final
+batches** covering every collected test exactly once:
 
-| Batch | Result |
-|---|---|
-| A (19 files, incl. `test_pg_l4_l6.py`) | 324 passed |
-| B (11 files: regressions, parallel, proof, coverage, policies) | 168 passed |
-| C (17 files: PostgreSQL attribution/twin/lifecycle, validation, misc.) | 300 passed, 3 skipped |
+| Batch | Files | Result | Runtime |
+|---|---|---|---|
+| A1 | 10 files: adversarial store, benchmark, control-plane audit, cross-framework benchmark, database migration, dogfood, evidence integrity, Express/FastAPI/external validation | 172 passed | 149.18 s |
+| A2 | 9 files: identity map, law execution states, linked store, mizan, opaque CLI, ownership graph/semantics, packaging, `test_pg_l4_l6.py` | 152 passed | 155.14 s |
+| B | 11 files: regression, parallel, generic-proof, `test_phase_v2_*`, benchmark validation, law policy/state/failure-mode tests | 168 passed | 370.13 s |
+| C | 17 files: PostgreSQL attribution/audit/engine/ownership/roundtrip/twin, recorder, request accounting, SARIF, search, seed-session race, tokens, trusted identity, twin, validation | 300 passed, 3 skipped | 619.42 s |
 
-**Total: 792 passed, 3 skipped, 1 warning** (pre-existing Starlette/httpx
-deprecation). Runtimes: 149 s + 155 s + 370 s + 619 s across the batches.
-OS: Windows 10/11, Python 3.11.9, PostgreSQL via `pgserver`.
+Batch A is therefore two executions (A1 + A2), which explains four runtime
+figures for three logical batches. An earlier A-style run of the same files
+finished in 363.32 s with one failure only because `test_packaging.py` still
+asserted the pre-Phase-VIII capability matrix; that assertion was corrected and
+A1/A2 above are the final runs.
+
+**Total: 792 passed, 3 skipped, 0 failed, 1 warning.** The 3 skips are the
+pre-existing POSIX-only signal tests on Windows; the single warning is the
+`StarletteDeprecationWarning` from `fastapi/testclient.py` about `httpx`
+(install `httpx2`). OS: Windows 10/11, Python 3.11.9, PostgreSQL via `pgserver`.
 `ruff check .`: all checks passed; `ruff format --check .`: 178 files formatted.
-Two transient PostgreSQL-twin tests failed only while the benchmark ran
-concurrently; both pass in isolation and in the clean batch C.
+
+### Transient PostgreSQL Twin failures (disclosed)
+
+During a full-suite attempt that overlapped the PostgreSQL benchmark, two old
+tests failed:
+`test_session_that_disappears_during_preflight_allows_cleanup` and
+`test_valid_cleaned_intent_and_cleaned_record_are_idempotent` in
+`tests/test_postgres_twin.py`. Phase VIII did not modify `postgres_twin.py`.
+Both passed in isolation (`2 passed in 16.72 s`) and in the clean, sequential
+batch C. The most likely cause is PostgreSQL resource contention from the
+concurrent benchmark; it was not reproduced afterwards. This is preserved as a
+known limitation rather than dismissed: no retry rules, skips or `xfail` were
+added, and a genuine intermittent concurrency defect cannot be ruled out from
+the available evidence alone.
 
 ## 13. CI
 
-_TBD after final push._
+Verification of the code HEAD `29928d617eb400281aa6d5577390004730a13888`:
+
+- Workflow: `mizan`
+- Run number: **#289**, run ID **`45053166682`**
+- Conclusion: **success**
+- Exact tested SHA: `29928d617eb400281aa6d5577390004730a13888`
+- https://github.com/Toufiqtoufiqbo/mizan/actions/runs/45053166682
+
+| Job | Conclusion |
+|---|---|
+| A — static & unit | success |
+| B — PostgreSQL | success |
+| B2 — PostgreSQL lifecycle & destructive cleanup | success |
+| C — security regression | success |
+| D — benchmark | success |
+| E — Mizan scans Mizan | success |
+| F — independent application | success |
+| G — cross-framework gate | success |
+| S — status summary | success |
+| G — external target (opt-in) | skipped by design |
+
+All nine mandatory jobs succeeded. No newer run existed for that SHA at closure
+time. CI #289 did **not** test the documentation-closure commit; the follow-up
+run on the final documentation HEAD is recorded in PR #13 metadata.
 
 ## 14. Remaining limitations
 
 - Generic/SQLite L4 and L6 remain partial; only PostgreSQL has the new
-  declaration-backed evidence path.
+  declaration-backed evidence path. PostgreSQL L4 covers declared scalar
+  protected fields, not relationship-based authority changes.
 - L6 proof bundles intentionally produce an `unsupported` regression unless an
   HTTP state endpoint is supplied; status-only regressions are not generated.
-- Bounded input collections (OpenAPI `maxItems`) are treated as input contracts,
-  not as server-side resource quotas.
+- Global quota verification and bounded input collection semantics (`maxItems`)
+  are not implemented/verified.
 - Single-use capability concurrency is detected as L5 when a real race occurs;
   L6 requires the persisted consumption evidence.
+- The two intermittent PostgreSQL Twin lifecycle failures described in section
+  12 remain unexplained definitively.
 
 ## 15. L7 feasibility
 
@@ -164,7 +222,10 @@ no weak detector was added.
 
 ## 17. Git state
 
-- Branch `feat/phase-viii-pg-l4-l6`, pushed to `origin`; final SHA recorded after
-  the report commit.
-- `main` and merged PRs #11/#12 were never modified.
+- Branch `feat/phase-viii-pg-l4-l6`, pushed to `origin`; pre-closure HEAD
+  `29928d617eb400281aa6d5577390004730a13888`; final documentation HEAD recorded
+  in PR #13 metadata.
+- Remote `main` verified at `c131faecb5438617aeaa31ba4e23a4dc752ad46a` and never
+  modified; merged PRs #11/#12 untouched.
+- PR #13 open, unmerged, mergeable (`clean`) throughout closure.
 - No merge, force-push or history rewrite was performed.
