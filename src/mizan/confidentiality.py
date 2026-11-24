@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
@@ -129,6 +130,7 @@ class ProviderEvidence:
     outcome: str
     events: list[dict[str, Any]] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
+    provider_config: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -143,6 +145,7 @@ class ProviderEvidence:
             "outcome": self.outcome,
             "events": self.events,
             "limitations": self.limitations,
+            "provider_config": self.provider_config,
         }
 
 
@@ -392,8 +395,13 @@ def evaluate(
     request_id: str = "",
 ) -> ProviderEvidence:
     """Run one provider check and classify it without guessing."""
+    config = {"shared_key": bool(getattr(provider, "shared_key", False))}
+
+    def _evidence(*args: Any, **kwargs: Any) -> ProviderEvidence:
+        return ProviderEvidence(*args, provider_config=config, **kwargs)
+
     if provider.category not in IMPLEMENTED_CATEGORIES:
-        return ProviderEvidence(
+        return _evidence(
             provider.category,
             provider.name,
             getattr(provider, "namespace", ""),
@@ -404,7 +412,7 @@ def evaluate(
             "unsupported category",
         )
     if policy is None:
-        return ProviderEvidence(
+        return _evidence(
             provider.category,
             provider.name,
             getattr(provider, "namespace", ""),
@@ -415,7 +423,7 @@ def evaluate(
             "no trusted confidentiality policy",
         )
     if not artifact.producer or not consumer:
-        return ProviderEvidence(
+        return _evidence(
             provider.category,
             provider.name,
             getattr(provider, "namespace", ""),
@@ -429,7 +437,7 @@ def evaluate(
         provider.write(artifact)
         observation = provider.observe(artifact.artifact_id, consumer, request_id=request_id)
     except Exception as exc:  # provider outage must fail closed
-        return ProviderEvidence(
+        return _evidence(
             provider.category,
             provider.name,
             getattr(provider, "namespace", ""),
@@ -447,7 +455,7 @@ def evaluate(
     else:
         state = EvidenceState.BLOCKED
         outcome = "blocked_or_not_observable"
-    return ProviderEvidence(
+    return _evidence(
         provider.category,
         provider.name,
         getattr(provider, "namespace", ""),
@@ -477,6 +485,48 @@ def policy_from_dict(data: dict[str, Any]) -> ConfidentialityPolicy | None:
         source=str(data["source"]),
         confidence=str(data["confidence"]),
     )
+
+
+def provider_from_evidence(data: dict[str, Any], dsn: str) -> ConfidentialityEvidenceProvider | None:
+    """Reconstruct a provider from proof evidence for replay."""
+    name = data.get("provider")
+    namespace = data.get("namespace") or f"replay-{uuid.uuid4().hex}"
+    shared_key = bool((data.get("provider_config") or {}).get("shared_key", False))
+    if name == PostgresCacheProvider.name:
+        return PostgresCacheProvider(dsn, namespace=namespace, shared_key=shared_key)
+    if name == PostgresQueueProvider.name:
+        return PostgresQueueProvider(dsn, namespace=namespace, shared_key=shared_key)
+    return None
+
+
+def replay_l7(evidence: dict[str, Any], dsn: str) -> tuple[bool, str]:
+    """Replay a producer-to-consumer sequence from a proof bundle.
+
+    Returns ``(still_vulnerable, reason)``. Missing evidence fails closed: it
+    never produces a confirmed result.
+    """
+    provider = provider_from_evidence(evidence, dsn)
+    if provider is None:
+        return False, "unsupported provider"
+    artifact_data = evidence.get("artifact") or {}
+    observation = evidence.get("observation") or {}
+    policy = policy_from_dict(evidence.get("policy") or {})
+    if not artifact_data.get("artifact_id") or not artifact_data.get("producer") or not observation.get("consumer"):
+        return False, "insufficient provenance"
+    if policy is None:
+        return False, "insufficient policy"
+    artifact = Artifact(
+        artifact_id=str(artifact_data["artifact_id"]),
+        producer=str(artifact_data["producer"]),
+        scope=str(artifact_data.get("scope", "")),
+        payload=str(artifact_data.get("payload_digest", "mizan-replay-marker")),
+        request_id="mizan-l7-replay",
+    )
+    try:
+        result = evaluate(provider, artifact, str(observation["consumer"]), policy)
+    finally:
+        provider.cleanup()
+    return result.state is EvidenceState.CONFIRMED_DISCLOSURE, result.state.value
 
 
 def serialize_evidence(evidence: ProviderEvidence) -> str:
