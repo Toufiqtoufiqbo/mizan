@@ -75,8 +75,10 @@
       persisted-state verification (Phase VIII)
 - [x] **PostgreSQL L6**: explicit scoped cardinality invariants verified from
       database state, independent of L5 execution accounting (Phase VIII)
-- [ ] **Full L6/L7 coverage**: generic L6 remains partial; L7 needs cache/queue/log
-      providers (see `PHASE_VIII_L7_FEASIBILITY.md`)
+- [x] **v1 law scope closed**: generic/SQLite L4 and L6 reach verified parity;
+      L7 cache and queue providers are implemented with real PostgreSQL state
+- [ ] **Full L7 coverage**: logs, metrics and background jobs remain deferred
+      (see `MIZAN_V1_SCOPE.md`)
 - [ ] **Multi-stack independent PostgreSQL validation**: only one independent
       PostgreSQL-backed fixture exists today
 - [x] **An identity map in the CLI** (`--identity-map`): already implemented

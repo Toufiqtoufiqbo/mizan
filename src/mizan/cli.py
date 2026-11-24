@@ -389,6 +389,7 @@ def postgres_backend_status(engine: Any, violations: list[Any], workers: int) ->
         "laws_by_status": {law: details["state"] for law, details in law_details.items()},
         "laws_unsupported": sorted(law for law, details in law_details.items() if details["state"] == "unsupported"),
         "laws_skipped": sorted(law for law, details in law_details.items() if details["state"] == "skipped"),
+        "l7_categories": coverage.to_dict().get("l7_categories", {}),
         "probe_candidates": engine.probe_candidates,
         "probes_executed": engine.probes_executed,
         "requests": engine.requests,

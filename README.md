@@ -35,6 +35,22 @@ pip install -e '.[postgres]'
 Missing driver produces an actionable error naming that command rather than a
 bare `ImportError`.
 
+## v1 quickstart
+
+```bash
+pip install -e '.[dev]'
+python -m pytest -q                      # full suite (PostgreSQL via pgserver)
+mizan demo --out mizan-proofs            # learn, attack, write proof bundles
+mizan replay mizan-proofs --target http://127.0.0.1:8000
+mizan regress mizan-proofs/L4-... --out tests/
+```
+
+PostgreSQL example: `mizan twin --backend postgres --allow-disposable --schema
+pgstore --spec openapi.json --relationship-contract contract.json --token
+alice=... --workdir run --out proofs`. L7 providers use a disposable PostgreSQL
+namespace; set `MIZAN_L7_DSN` to replay or regenerate an L7 finding. See
+`MIZAN_V1_SCOPE.md` for the frozen scope and deferred capabilities.
+
 ## Try it in 30 seconds
 
 ```bash
@@ -637,10 +653,16 @@ Law capability matrix (honest reporting; missing evidence is never clean):
 | L1 | SUPPORTED | SUPPORTED | identity coherence from a trusted identity endpoint |
 | L2 | SUPPORTED | SUPPORTED | confirmed ownership evidence required |
 | L3 | SUPPORTED | SUPPORTED | confirmed transaction-local attribution required |
-| L4 | PARTIAL | SUPPORTED | PostgreSQL requires a trusted protected-field policy and an attributed persisted mutation; generic path remains partial |
+| L4 (field-based) | SUPPORTED | SUPPORTED | trusted protected-field policy + persisted mutation (`MIZAN_V1_CAPABILITY_MATRIX.md`) |
 | L5 | SUPPORTED | PARTIAL | POST-only race probe, executed on an isolated worker |
-| L6 | PARTIAL | SUPPORTED | explicit scoped cardinality invariants verified from database state; generic path remains partial |
-| L7 | UNSUPPORTED | UNSUPPORTED | no cache/queue/log/metric provider; see `PHASE_VIII_L7_FEASIBILITY.md` |
+| L6 (bounds + single-use) | SUPPORTED | SUPPORTED | explicit scoped invariants verified from database state |
+| L7 cache | SUPPORTED | SUPPORTED | PostgreSQL-backed cache evidence provider |
+| L7 queue | SUPPORTED | SUPPORTED | PostgreSQL-backed queue evidence provider |
+| L7 logs / metrics | UNSUPPORTED | UNSUPPORTED | deferred from v1 |
+
+`mizan replay` replays L7 findings from proof evidence using `MIZAN_L7_DSN`;
+generated L7 regressions verify the same provider invariant. See
+`PHASE_IX_L7_PROVIDER_ARCHITECTURE.md` and `MIZAN_V1_SCOPE.md`.
 
 `SUPPORTED` for PostgreSQL L4/L6 means a declared invariant is exercised and its
 violation is confirmed from persisted database evidence (see
