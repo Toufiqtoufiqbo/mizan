@@ -13,7 +13,7 @@ success on this exact SHA after rerun of the single transient A-job failure).
 | L4 | Field-based authority creation / mass assignment, on both backends |
 | L5 | Atomicity / TOCTOU on supported methods (POST) |
 | L6 | Per-principal collection bounds and single-use capabilities, on both backends |
-| L7 | Cache and queue/message path confidentiality only |
+| L7 | Cache and queue path confidentiality via real application HTTP operations (PostgreSQL-backed fixture only) |
 
 Providers and backends must report capability per category, not as a single
 umbrella claim.

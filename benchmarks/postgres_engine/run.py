@@ -359,57 +359,78 @@ def _run_law_once(dsn: str, law: str, variant: str) -> dict[str, Any]:
 
 
 def _run_l7_once(dsn: str, category: str, *, shared_key: bool) -> dict[str, Any]:
-    """Measure one real L7 provider category on a vulnerable or secure setup."""
+    """Measure one L7 category against the fixture application over HTTP."""
+    import importlib.util
+    import threading
     import uuid
 
-    from mizan.confidentiality import (
-        Artifact,
-        ConfidentialityPolicy,
-        PostgresCacheProvider,
-        PostgresQueueProvider,
-        evaluate,
-    )
+    from werkzeug.serving import make_server
 
-    PostgresCacheProvider.install(dsn)
-    namespace = f"bench-{uuid.uuid4().hex}"
-    provider = (
-        PostgresCacheProvider(dsn, namespace=namespace, shared_key=shared_key)
-        if category == "cache"
-        else PostgresQueueProvider(dsn, namespace=namespace, shared_key=shared_key)
-    )
-    policy = ConfidentialityPolicy(
-        resource="items",
-        scope="tenant-a",
-        classification="private",
-        authorized_readers=frozenset({"alice"}),
-        source="trusted_contract",
-        confidence="confirmed",
-    )
-    artifact = Artifact(
-        artifact_id=f"bench-{category}-{uuid.uuid4().hex}",
-        producer="alice",
-        scope="tenant-a",
-        payload="mizan-v1-benchmark-marker",
+    from mizan.core import Principal
+    from mizan.engine import Mizan, Target
+
+    fixture = ROOT / "tests" / "fixtures" / "external_apps" / "l7_store" / "app.py"
+    spec = importlib.util.spec_from_file_location("pgstore_l7_bench", fixture)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    variant = "vulnerable" if shared_key else "secure"
+    os.environ["MIZAN_PG_DSN"] = dsn
+    tokens = {"alice": "twin-alice", "bob": "twin-bob"}
+    os.environ["MIZAN_TOKEN_ALICE"] = tokens["alice"]
+    os.environ["MIZAN_TOKEN_BOB"] = tokens["bob"]
+    server = make_server("127.0.0.1", 0, module.create_app(variant, dsn=dsn))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    policy = {
+        "category": category,
+        "resource": "items" if category == "cache" else "messages",
+        "scope": "tenant-a",
+        "classification": "private",
+        "authorized_readers": ["alice"],
+        "source": "trusted_contract",
+        "confidence": "confirmed",
+        "producer_path": "/artifacts" if category == "cache" else "/messages",
+        "consumer_path_template": "/artifacts/{id}" if category == "cache" else "/messages/{id}/consume",
+        "consumer_method": "GET" if category == "cache" else "POST",
+    }
+    if category == "cache":
+        from mizan.confidentiality import PostgresCacheProvider
+
+        provider = PostgresCacheProvider(dsn, namespace=f"bench-{uuid.uuid4().hex}")
+    else:
+        from mizan.confidentiality import PostgresQueueProvider
+
+        provider = PostgresQueueProvider(dsn, namespace=f"bench-{uuid.uuid4().hex}")
+    engine = Mizan(
+        Target(
+            base_url=f"http://127.0.0.1:{server.server_port}",
+            principals=[Principal(id=name, token=token, roles=("user",)) for name, token in tokens.items()],
+        ),
+        confidentiality_providers=[provider],
+        confidentiality_policies={category: policy},
     )
     started = time.perf_counter()
     try:
-        evidence = evaluate(provider, artifact, "bob", policy)
+        violations = engine.attack(groups=["L7"])
     finally:
         provider.cleanup()
+        server.shutdown()
+        thread.join(timeout=5)
     duration = time.perf_counter() - started
+    evidence = violations[0].evidence if violations else (engine.l7_evidence[0] if engine.l7_evidence else {})
     return {
         "backend": "postgres",
         "law": "L7",
         "category": category,
         "provider": provider.name,
-        "variant": "vulnerable" if shared_key else "secure",
-        "artifact": evidence.artifact,
-        "observation": evidence.observation,
-        "findings": 1 if evidence.state.value == "confirmed_disclosure" else 0,
-        "state": evidence.state.value,
-        "executed_probes": 1,
+        "variant": variant,
+        "artifact": evidence.get("artifact"),
+        "observation": evidence.get("observation"),
+        "findings": len(violations),
+        "state": evidence.get("state"),
+        "executed_probes": engine.probes_executed,
         "duration_seconds": round(duration, 4),
-        "provider_operations": len(evidence.events),
+        "provider_operations": len(evidence.get("events", [])),
         "cleanup": "completed",
         "failures": [],
     }

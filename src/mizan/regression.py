@@ -17,7 +17,6 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-import os
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -318,12 +317,9 @@ def attack_succeeds(attack: Attack, token: str, target: str) -> bool:
         return False
 
     if attack.law == "L7":
-        dsn = os.environ.get("MIZAN_L7_DSN") or os.environ.get("MIZAN_TEST_POSTGRES_DSN")
-        if not dsn:
-            return False
         from mizan.confidentiality import replay_l7
 
-        still_vulnerable, _state = replay_l7(attack.evidence, dsn)
+        still_vulnerable, _state = replay_l7(attack.evidence, target)
         return still_vulnerable
 
     responses = _replay_requests(attack, token, target)
@@ -419,12 +415,9 @@ def _assertion_body(attack: Attack) -> str:
     # An unreadable state endpoint cannot prove the invariant either way; it
     # is not silently interpreted as a fix or as a breach."""
     if attack.law == "L7":
-        return """    import os
-    from mizan.confidentiality import replay_l7
+        return """    from mizan.confidentiality import replay_l7
 
-    dsn = os.environ.get("MIZAN_L7_DSN") or os.environ.get("MIZAN_TEST_POSTGRES_DSN")
-    assert dsn, "L7 regression requires a disposable PostgreSQL DSN"
-    still_observable, state = replay_l7(EVIDENCE, dsn)
+    still_observable, state = replay_l7(EVIDENCE, TARGET)
     assert not still_observable, (EXPECTATION, state)"""
     if attack.law == "L5":
         return """    def call() -> int:

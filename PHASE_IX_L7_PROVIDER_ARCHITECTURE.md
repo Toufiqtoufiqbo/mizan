@@ -1,44 +1,51 @@
-# v1 L7 provider architecture
+# v1 L7 provider architecture (application-backed)
 
 ## Interface
 
 `mizan.confidentiality.ConfidentialityEvidenceProvider` is a typed protocol:
 `category`, `name`, `write(artifact)`, `observe(artifact_id, consumer, request_id)`,
 `events()`, `cleanup()`. `EvidenceState` enumerates nine explicit outcomes;
-missing policy/provenance or provider failure is never a confirmed finding.
+missing policy, missing provenance or provider failure is never a confirmed
+finding.
 
-## Trust model
+## Trust model (remediated)
 
-An `Artifact` carries producer, scope, payload digest, request id and a stable
-id. The producer is supplied by the engine from its authenticated principals —
-not by a client header. A `ConfidentialityPolicy` names resource, scope,
-classification, authorized readers, source and confidence. Authorization uses
-only the policy; a cache hit or message delivery is not evidence by itself.
+The fixture application (`tests/fixtures/external_apps/l7_store/app.py`) owns the
+cache/queue artifacts and records its **own** operations in `l7_events` with the
+inbound `X-Mizan-Request-Id`. Mīzān never writes these rows. Providers are
+read-only observers of application events:
 
-## Concrete providers
+- `PostgresCacheProvider`: observes `cache_write` / `cache_read` events.
+- `PostgresQueueProvider`: observes `queue_publish` / `queue_consume` events.
 
-- `PostgresCacheProvider`: table `mizan_v1_cache_artifacts`; secure key includes
-  tenant scope, vulnerable key omits it; events recorded in
-  `mizan_v1_cache_events`.
-- `PostgresQueueProvider`: table `mizan_v1_queue_messages` with intended consumer
-  and `consumed_by`; secure consume requires matching consumer, vulnerable
-  consume ignores it.
+`evaluate()` requires the application event's producer, digest and identity to
+match the HTTP operation. A digest mismatch, identity mismatch or missing event
+produces `inconclusive`, never a finding.
 
-Both use unique disposable namespaces and `cleanup()` deletes only rows in that
-namespace. PostgreSQL is the real service; no external cache/broker dependency
-is added. This is a bounded v1 implementation, not a general cache/broker
-scanner: provider events are controlled artifacts produced by Mīzān, not
-arbitrary application cache traffic.
+## HTTP sequence (engine probe)
+
+1. Producer Alice `POST /artifacts` (or `/messages`) with a controlled payload
+   and request id.
+2. Alice reads/consumes with her own identity — this must succeed and the
+   returned digest must match, otherwise the check is inconclusive (a secure
+   mode that blocks everyone is not accepted).
+3. Bob reads/consumes with his request id.
+4. The provider reads the corresponding application events and `evaluate()`
+   classifies: `confirmed_disclosure` only when Bob received the producer's
+   exact content without authorization.
 
 ## Replay and regression
 
-`replay_l7(evidence, dsn)` reconstructs a provider from proof evidence, rewrites
-the artifact into a fresh namespace, observes the recorded consumer and cleans
-up. Generated regressions call the same helper and assert the artifact is no
-longer observable without authorization. Missing evidence produces an explicit
-`unsupported` skip.
+`replay_l7(evidence, target)` re-executes the recorded three HTTP steps against
+the target with tokens resolved from the environment, recomputes digests and
+classifies again from the HTTP responses. `mizan replay` and generated L7
+regressions use this function. Provider tables are corroborating evidence only.
 
-## Deferred
+## Scope and limitations
 
-Logs, metrics and background-job output have no provider and remain
-`unsupported`.
+- The verified integration uses a PostgreSQL-backed fixture application. This
+  is not a general Redis/RabbitMQ/cache implementation; no such service is
+  claimed.
+- Logs, metrics and background-job categories remain unsupported.
+- Provider `cleanup()` clears only Mīzān's in-memory event list; it never deletes
+  application-owned rows.

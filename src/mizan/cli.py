@@ -557,16 +557,13 @@ def replay(bundles: str, target: str, token: str | None) -> None:
         if not steps:
             continue
         if payload.get("law") == "L7":
-            import os as _os
-
             from mizan.confidentiality import replay_l7
 
-            dsn = _os.environ.get("MIZAN_L7_DSN") or _os.environ.get("MIZAN_TEST_POSTGRES_DSN")
-            if not dsn:
-                click.echo("  ! L7 replay needs MIZAN_L7_DSN (PostgreSQL test DSN)")
+            still_works, reason = replay_l7(payload.get("evidence") or {}, target)
+            if reason.startswith("missing_consumer_token") or reason.startswith("replay_failed"):
+                click.echo(f"  ! L7 replay could not run: {reason}")
                 unreachable += 1
                 continue
-            still_works, _reason = replay_l7(payload.get("evidence") or {}, dsn)
             if still_works:
                 reproduced += 1
                 click.echo(f"  ✗ {payload['law']} {payload['title']} - STILL REPRODUCIBLE")

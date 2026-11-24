@@ -84,9 +84,14 @@ class Observation:
             "artifact_id": self.artifact_id,
             "consumer": self.consumer,
             "observable": self.observable,
-            "payload_digest": hashlib.sha256(self.payload.encode()).hexdigest() if self.payload else None,
+            "payload_digest": str(self.details.get("digest") or "")
+            if self.details.get("digest")
+            else (hashlib.sha256(self.payload.encode()).hexdigest() if self.payload else None),
             "request_id": self.request_id,
             "occurred_at": self.occurred_at,
+            "source": str(self.details.get("source", "")),
+            "principal": str(self.details.get("principal", "")),
+            "granted": bool(self.details.get("granted", False)),
             "details": self.details,
         }
 
@@ -173,11 +178,20 @@ class ConfidentialityEvidenceProvider(Protocol):
 
 
 class _PostgresProvider:
-    """Shared PostgreSQL plumbing for the two concrete providers."""
+    """Read-only observer of application-owned L7 event tables.
 
-    def __init__(self, dsn: str, namespace: str, *, shared_key: bool) -> None:
+    The fixture application writes its own cache/queue artifacts and records an
+    event for every HTTP-triggered operation. Mīzān reads those events; it never
+    manufactures them. ``namespace`` is only an evidence label, not a store.
+    """
+
+    operations: tuple[str, ...] = ()
+
+    def __init__(self, dsn: str, namespace: str, *, shared_key: bool = False) -> None:
         self.dsn = dsn
         self.namespace = namespace
+        # Kept for API compatibility; the application variant, not this flag,
+        # decides whether data leaks. Evidence never assumes it.
         self.shared_key = shared_key
         self._events: list[dict[str, Any]] = []
 
@@ -187,12 +201,7 @@ class _PostgresProvider:
         return psycopg.connect(self.dsn, autocommit=True, connect_timeout=5)
 
     def cleanup(self) -> None:
-        with self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute("DELETE FROM mizan_v1_cache_artifacts WHERE namespace = %s", (self.namespace,))
-                cursor.execute("DELETE FROM mizan_v1_cache_events WHERE namespace = %s", (self.namespace,))
-                cursor.execute("DELETE FROM mizan_v1_queue_messages WHERE namespace = %s", (self.namespace,))
-                cursor.execute("DELETE FROM mizan_v1_queue_events WHERE namespace = %s", (self.namespace,))
+        # No application-owned rows may ever be deleted by Mīzān.
         self._events = []
 
     def events(self) -> list[dict[str, Any]]:
@@ -200,190 +209,89 @@ class _PostgresProvider:
 
     @staticmethod
     def install(dsn: str) -> None:
-        """Create the disposable artifact tables. Safe to call repeatedly."""
-        import psycopg
+        """Deprecated compatibility hook; the application owns its tables."""
+        return None
 
-        with psycopg.connect(dsn, autocommit=True, connect_timeout=5) as connection:
+    def _event(self, request_id: str, operation: str, artifact_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS mizan_v1_cache_artifacts (
-                        namespace TEXT NOT NULL, cache_key TEXT NOT NULL,
-                        artifact_id TEXT NOT NULL, producer TEXT NOT NULL,
-                        scope TEXT NOT NULL, digest TEXT NOT NULL, payload TEXT NOT NULL,
-                        created_at REAL NOT NULL, PRIMARY KEY (namespace, cache_key))
-                    """
+                    """SELECT request_id, operation, principal, artifact_id, scope,
+                              digest, granted, occurred_at
+                       FROM l7_events
+                       WHERE request_id = %s AND operation = ANY(%s) AND artifact_id = %s
+                       ORDER BY id DESC LIMIT 1""",
+                    (request_id, list(self.operations), artifact_id),
                 )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS mizan_v1_cache_events (
-                        namespace TEXT NOT NULL, artifact_id TEXT, consumer TEXT,
-                        event TEXT, detail TEXT, occurred_at REAL NOT NULL)
-                    """
-                )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS mizan_v1_queue_messages (
-                        namespace TEXT NOT NULL, message_id TEXT NOT NULL,
-                        producer TEXT NOT NULL, intended_consumer TEXT NOT NULL,
-                        scope TEXT NOT NULL, payload TEXT NOT NULL,
-                        consumed_by TEXT, consumed_at REAL,
-                        PRIMARY KEY (namespace, message_id))
-                    """
-                )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS mizan_v1_queue_events (
-                        namespace TEXT NOT NULL, message_id TEXT, consumer TEXT,
-                        event TEXT, detail TEXT, occurred_at REAL NOT NULL)
-                    """
-                )
+                row = cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "request_id": row[0],
+            "operation": row[1],
+            "principal": row[2],
+            "artifact_id": row[3],
+            "scope": row[4],
+            "digest": row[5],
+            "granted": bool(row[6]),
+            "occurred_at": row[7],
+            "source": "application_http_operation",
+        }
+
+    def write(self, artifact: Artifact) -> None:
+        event = self._event(artifact.request_id, "", artifact.artifact_id)
+        if event is None:
+            raise LookupError("no application write event for the producer request")
+        if event["principal"] != artifact.producer or event["digest"] != artifact.digest():
+            raise ValueError("application write event does not match the producer artifact")
+        self._events.append(event)
+
+    def observe(self, artifact_id: str, consumer: str, *, request_id: str = "") -> Observation:
+        event = self._event(request_id, "", artifact_id)
+        if event is None:
+            return Observation(
+                artifact_id=artifact_id,
+                consumer=consumer,
+                observable=False,
+                payload=None,
+                request_id=request_id,
+                details={"missing_event": True, "source": "application_http_operation"},
+            )
+        self._events.append(event)
+        mismatch = event["principal"] != consumer
+        return Observation(
+            artifact_id=artifact_id,
+            consumer=consumer,
+            observable=bool(event["granted"]) and not mismatch,
+            payload=event["digest"] if event["granted"] and not mismatch else None,
+            request_id=request_id,
+            details={
+                "principal": event["principal"],
+                "scope": event["scope"],
+                "digest": event["digest"],
+                "granted": event["granted"],
+                "operation": event["operation"],
+                "occurred_at": event["occurred_at"],
+                "source": "application_http_operation",
+                "identity_mismatch": mismatch,
+            },
+        )
 
 
 class PostgresCacheProvider(_PostgresProvider):
-    """A PostgreSQL-backed cache artifact provider."""
+    """Evidence adapter for application-performed cache operations."""
 
     category = PathCategory.CACHE
-    name = "postgres-cache-v1"
-
-    def write(self, artifact: Artifact) -> None:
-        # A vulnerable provider keys only by artifact id (tenant scope omitted);
-        # a secure provider includes the tenant scope in the cache key.
-        cache_key = artifact.artifact_id if self.shared_key else f"{artifact.scope}:{artifact.artifact_id}"
-        with self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """INSERT INTO mizan_v1_cache_artifacts
-                       (namespace, cache_key, artifact_id, producer, scope, digest, payload, created_at)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-                       ON CONFLICT (namespace, cache_key) DO UPDATE SET payload = EXCLUDED.payload""",
-                    (
-                        self.namespace,
-                        cache_key,
-                        artifact.artifact_id,
-                        artifact.producer,
-                        artifact.scope,
-                        artifact.digest(),
-                        artifact.payload,
-                        artifact.created_at,
-                    ),
-                )
-        self._events.append(
-            {
-                "event": "write",
-                "artifact_id": artifact.artifact_id,
-                "producer": artifact.producer,
-                "scope": artifact.scope,
-                "key": cache_key,
-            }
-        )
-
-    def observe(self, artifact_id: str, consumer: str, *, request_id: str = "") -> Observation:
-        # The artifact id is supplied by the engine, never by the consumer.
-        candidates = [artifact_id, f"*:{artifact_id}"] if not self.shared_key else [artifact_id]
-        with self._connect() as connection:
-            with connection.cursor() as cursor:
-                row = None
-                for key in candidates:
-                    cursor.execute(
-                        """SELECT artifact_id, payload, producer, scope FROM mizan_v1_cache_artifacts
-                           WHERE namespace = %s AND (cache_key = %s OR cache_key = %s)""",
-                        (self.namespace, key, artifact_id),
-                    )
-                    row = cursor.fetchone()
-                    if row is not None:
-                        break
-        observable = row is not None
-        self._events.append(
-            {
-                "event": "observe",
-                "artifact_id": artifact_id,
-                "consumer": consumer,
-                "observable": observable,
-                "request_id": request_id,
-            }
-        )
-        return Observation(
-            artifact_id=artifact_id,
-            consumer=consumer,
-            observable=observable,
-            payload=str(row[1]) if row else None,
-            request_id=request_id,
-            details={"producer": row[2] if row else None, "scope": row[3] if row else None, "cache_key_used": True},
-        )
+    name = "postgres-cache-app-v1"
+    operations = ("cache_write", "cache_read")
 
 
 class PostgresQueueProvider(_PostgresProvider):
-    """A PostgreSQL-backed queue/message provider."""
+    """Evidence adapter for application-performed queue operations."""
 
     category = PathCategory.QUEUE
-    name = "postgres-queue-v1"
-
-    def write(self, artifact: Artifact) -> None:
-        with self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """INSERT INTO mizan_v1_queue_messages
-                       (namespace, message_id, producer, intended_consumer, scope, payload)
-                       VALUES (%s,%s,%s,%s,%s,%s)
-                       ON CONFLICT (namespace, message_id) DO UPDATE SET
-                           producer = EXCLUDED.producer, payload = EXCLUDED.payload""",
-                    (
-                        self.namespace,
-                        artifact.artifact_id,
-                        artifact.producer,
-                        artifact.scope,
-                        artifact.scope,
-                        artifact.payload,
-                    ),
-                )
-        self._events.append(
-            {
-                "event": "publish",
-                "message_id": artifact.artifact_id,
-                "producer": artifact.producer,
-                "intended_consumer": artifact.scope,
-            }
-        )
-
-    def observe(self, artifact_id: str, consumer: str, *, request_id: str = "") -> Observation:
-        with self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """SELECT message_id, producer, intended_consumer, payload, consumed_by
-                       FROM mizan_v1_queue_messages WHERE namespace = %s AND message_id = %s""",
-                    (self.namespace, artifact_id),
-                )
-                row = cursor.fetchone()
-                observable = bool(row and (self.shared_key or str(row[2]) == consumer))
-                payload = str(row[3]) if row and observable else None
-                if row and observable:
-                    cursor.execute(
-                        """UPDATE mizan_v1_queue_messages SET consumed_by = %s, consumed_at = %s
-                           WHERE namespace = %s AND message_id = %s""",
-                        (consumer, time.time(), self.namespace, artifact_id),
-                    )
-        self._events.append(
-            {
-                "event": "consume",
-                "message_id": artifact_id,
-                "consumer": consumer,
-                "observable": observable,
-                "request_id": request_id,
-            }
-        )
-        return Observation(
-            artifact_id=artifact_id,
-            consumer=consumer,
-            observable=observable,
-            payload=payload,
-            request_id=request_id,
-            details={
-                "producer": row[1] if row else None,
-                "intended_consumer": row[2] if row else None,
-                "already_consumed_by": row[4] if row else None,
-            },
-        )
+    name = "postgres-queue-app-v1"
+    operations = ("queue_publish", "queue_consume")
 
 
 def evaluate(
@@ -448,6 +356,42 @@ def evaluate(
             f"provider failure: {type(exc).__name__}",
             limitations=[str(exc)],
         )
+    if observation.details.get("missing_event"):
+        return _evidence(
+            provider.category,
+            provider.name,
+            getattr(provider, "namespace", ""),
+            artifact.to_dict(),
+            observation.to_dict(),
+            policy.to_dict(),
+            EvidenceState.INCONCLUSIVE,
+            "no application event for the consumer request",
+            events=provider.events(),
+        )
+    if observation.details.get("identity_mismatch"):
+        return _evidence(
+            provider.category,
+            provider.name,
+            getattr(provider, "namespace", ""),
+            artifact.to_dict(),
+            observation.to_dict(),
+            policy.to_dict(),
+            EvidenceState.INCONCLUSIVE,
+            "application event identity does not match the consumer",
+            events=provider.events(),
+        )
+    if observation.observable and observation.payload != artifact.digest():
+        return _evidence(
+            provider.category,
+            provider.name,
+            getattr(provider, "namespace", ""),
+            artifact.to_dict(),
+            observation.to_dict(),
+            policy.to_dict(),
+            EvidenceState.INCONCLUSIVE,
+            "observed content digest does not match the producer artifact",
+            events=provider.events(),
+        )
     authorized = policy.authorizes(consumer)
     if observation.observable:
         state = EvidenceState.AUTHORIZED_SHARING if authorized else EvidenceState.CONFIRMED_DISCLOSURE
@@ -499,34 +443,65 @@ def provider_from_evidence(data: dict[str, Any], dsn: str) -> ConfidentialityEvi
     return None
 
 
-def replay_l7(evidence: dict[str, Any], dsn: str) -> tuple[bool, str]:
-    """Replay a producer-to-consumer sequence from a proof bundle.
+def replay_l7(evidence: dict[str, Any], target: str, *, dsn: str = "") -> tuple[bool, str]:
+    """Replay the recorded producer/consumer HTTP sequence against a target.
 
-    Returns ``(still_vulnerable, reason)``. Missing evidence fails closed: it
-    never produces a confirmed result.
+    The provider tables are only read as corroborating evidence; the result is
+    recomputed from the actual HTTP responses. Missing steps, missing tokens or
+    missing provenance fail closed.
     """
-    provider = provider_from_evidence(evidence, dsn)
-    if provider is None:
-        return False, "unsupported provider"
-    artifact_data = evidence.get("artifact") or {}
-    observation = evidence.get("observation") or {}
+    import requests
+
+    from mizan.tokens import MissingToken, TokenResolver, resolve_headers
+
+    steps = evidence.get("steps") or []
+    if len(steps) < 3:
+        return False, "insufficient_http_steps"
     policy = policy_from_dict(evidence.get("policy") or {})
-    if not artifact_data.get("artifact_id") or not artifact_data.get("producer") or not observation.get("consumer"):
-        return False, "insufficient provenance"
     if policy is None:
-        return False, "insufficient policy"
-    artifact = Artifact(
-        artifact_id=str(artifact_data["artifact_id"]),
-        producer=str(artifact_data["producer"]),
-        scope=str(artifact_data.get("scope", "")),
-        payload=str(artifact_data.get("payload_digest", "mizan-replay-marker")),
-        request_id="mizan-l7-replay",
-    )
+        return False, "insufficient_policy"
+    integrity = evidence.get("payload_integrity") or {}
+    expected = str(integrity.get("expected_digest") or "")
+    if not expected:
+        return False, "insufficient_provenance"
+    consumer = str((evidence.get("observation") or {}).get("consumer") or "")
+    if not consumer:
+        return False, "insufficient_consumer_identity"
+    resolver = TokenResolver.from_env()
+    responses: list[Any] = []
     try:
-        result = evaluate(provider, artifact, str(observation["consumer"]), policy)
-    finally:
-        provider.cleanup()
-    return result.state is EvidenceState.CONFIRMED_DISCLOSURE, result.state.value
+        for step in steps:
+            headers = resolve_headers(step.get("headers") or {}, resolver)
+            url = str(step.get("url") or "")
+            from urllib.parse import urlsplit
+
+            parsed = urlsplit(url)
+            full_url = target.rstrip("/") + (parsed.path or "/") if parsed.scheme else target.rstrip("/") + url
+            method = str(step.get("method") or "GET").upper()
+            kwargs: dict[str, Any] = {"headers": headers, "timeout": 15}
+            if step.get("body") is not None:
+                kwargs["json"] = step["body"]
+            responses.append(requests.request(method, full_url, **kwargs))
+    except MissingToken:
+        return False, "missing_consumer_token"
+    except Exception as exc:
+        return False, f"replay_failed:{type(exc).__name__}"
+
+    owner_response, consumer_response = responses[1], responses[2]
+    owner_ok = 200 <= owner_response.status_code < 300
+    consumer_ok = 200 <= consumer_response.status_code < 300
+    if not owner_ok:
+        return False, "authorized_read_failed"
+    for response in (owner_response, consumer_response):
+        if not (200 <= response.status_code < 300):
+            continue
+        try:
+            if str((response.json() or {}).get("digest", "")) != expected:
+                return False, "payload_mismatch"
+        except Exception:
+            return False, "payload_unverifiable"
+    still_vulnerable = consumer_ok and not policy.authorizes(consumer)
+    return still_vulnerable, ("confirmed_disclosure" if still_vulnerable else "blocked")
 
 
 def serialize_evidence(evidence: ProviderEvidence) -> str:

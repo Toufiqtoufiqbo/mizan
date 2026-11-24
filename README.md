@@ -660,9 +660,11 @@ Law capability matrix (honest reporting; missing evidence is never clean):
 | L7 queue | SUPPORTED | SUPPORTED | PostgreSQL-backed queue evidence provider |
 | L7 logs / metrics | UNSUPPORTED | UNSUPPORTED | deferred from v1 |
 
-`mizan replay` replays L7 findings from proof evidence using `MIZAN_L7_DSN`;
-generated L7 regressions verify the same provider invariant. See
-`PHASE_IX_L7_PROVIDER_ARCHITECTURE.md` and `MIZAN_V1_SCOPE.md`.
+`mizan replay` re-executes the recorded producer/consumer HTTP sequence against
+the target and recomputes the result; generated L7 regressions verify the same
+application flow. Evidence comes from operations the application performed, not
+from Mīzān-created artifacts. See `PHASE_IX_L7_PROVIDER_ARCHITECTURE.md` and
+`MIZAN_V1_SCOPE.md`.
 
 `SUPPORTED` for PostgreSQL L4/L6 means a declared invariant is exercised and its
 violation is confirmed from persisted database evidence (see
