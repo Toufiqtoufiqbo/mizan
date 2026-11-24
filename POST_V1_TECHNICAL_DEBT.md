@@ -16,6 +16,13 @@ benchmark + full suite; do not mask with retries.
 POST-only race probe. PUT/PATCH/DELETE race support is not implemented and is
 documented as unsupported rather than claimed.
 
+## P1 — L7 fixture backend scope
+
+L7 cache/queue detection is verified through real HTTP operations of an
+independent fixture application whose storage is PostgreSQL. This is not a
+general Redis/RabbitMQ integration; a production application would need an
+equivalent trusted event source.
+
 ## P2 — L7 additional categories
 
 Logs, metrics and background-job providers are deferred from v1.

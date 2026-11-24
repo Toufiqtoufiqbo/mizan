@@ -29,9 +29,12 @@ benchmark are green; CI verification is recorded below.
   attributed persisted-state evidence (`tests/test_sqlite_l4.py`).
 - Generic/SQLite L6 collection bounds and single-use capabilities with
   persisted row-count/consumption evidence (`tests/test_sqlite_l6.py`).
-- L7 cache and queue providers backed by PostgreSQL tables, typed evidence,
-  confidentiality policy, per-category coverage states, replay and regression
-  (`src/mizan/confidentiality.py`, `tests/test_confidentiality.py`).
+- L7 cache and queue providers observing **application-performed** HTTP
+  operations, typed evidence, confidentiality policy, per-category coverage
+  states and replay/regression
+  (`src/mizan/confidentiality.py`, `tests/fixtures/external_apps/l7_store/app.py`,
+  `tests/test_l7_application_backed.py`). Synthetic artifacts were removed;
+  see `L7_APPLICATION_BACKED_REMEDIATION_REPORT.md`.
 - CLI/JSON L7 per-category reporting; README quickstart and capability matrix.
 
 ## 4. Capability matrix
@@ -50,34 +53,34 @@ See `MIZAN_V1_CAPABILITY_MATRIX.md`.
 
 ## 6. Proof, replay and regression
 
-L7 bundles carry category, provider and config, artifact digest, producer,
-consumer, policy, observation, events and explicit outcome. `mizan replay`
-reconstructs the provider from `MIZAN_L7_DSN` and replays the sequence in a
-fresh namespace; the vulnerable setup is still reproducible and a secure
-setup is blocked. Generated L7 regressions call the same typed helper and fail
-if the artifact is still observable without authorization. Missing evidence
-produces an `unsupported` skip.
+L7 bundles carry category, provider, artifact digest, producer, consumer,
+policy, application events, the three recorded HTTP steps and explicit outcome.
+`mizan replay` re-executes those HTTP steps against the target and reclassifies
+from the responses: vulnerable `confirmed_disclosure`, secure `blocked`.
+Generated L7 regressions use the same function. The authorized owner read is a
+gate — a secure mode that blocks everyone is inconclusive. Missing steps,
+digest mismatch or identity mismatch never produce a confirmed finding.
 
 ## 7. Benchmarks
 
 | Law/category | Variant | Findings | Executed probes | Duration |
 |---|---|---|---|---|
-| L4 | `l4_vulnerable` | 1 | 1 | 3.5887 s |
-| L6 | `l6_vulnerable` | 3 | 1 | 4.4537 s |
-| L7 cache | vulnerable | 1 | 1 | 0.0869 s |
-| L7 cache | secure | 0 | 1 | 0.0795 s |
-| L7 queue | vulnerable | 1 | 1 | 0.0779 s |
-| L7 queue | secure | 0 | 1 | 0.0778 s |
+| L4 | `l4_vulnerable` | 1 | 1 | 3.2444 s |
+| L6 | `l6_vulnerable` | 3 | 1 | 4.2477 s |
+| L7 cache | vulnerable | 1 | 1 | HTTP fixture probe, `confirmed_disclosure` |
+| L7 cache | secure | 0 | 1 | HTTP fixture probe, `blocked` |
+| L7 queue | vulnerable | 1 | 1 | HTTP fixture probe, `confirmed_disclosure` |
+| L7 queue | secure | 0 | 1 | HTTP fixture probe, `blocked` |
 
 Zero `failures`, zero benchmark/provider problems. Secure fixtures produce no
 confirmed finding. No speedup claim is made.
 
 ## 8. Tests and environment
 
-- 809 tests collected; executed in four disjoint batches (harness restarts
-  prevent an uninterrupted ~18-minute run): 69 passed (29–30 s), 309 passed
-  (415 s), 300 passed + 3 skipped (497 s), 128 passed (354 s).
-- **Total: 806 passed, 3 skipped, 0 failed, 1 warning** (pre-existing
+- 811 tests collected; executed in four disjoint batches (harness restarts
+  prevent an uninterrupted run): 71 passed (31 s), 309 passed (381 s),
+  300 passed + 3 skipped (452 s), 128 passed (361 s).
+- **Total: 808 passed, 3 skipped, 0 failed, 1 warning** (pre-existing
   Starlette/httpx deprecation). Skips are POSIX-only signal tests on Windows.
 - OS: Windows 10/11; Python 3.11.9; PostgreSQL via `pgserver`.
 - `ruff check .`: clean; `ruff format --check .`: 186 files formatted.
