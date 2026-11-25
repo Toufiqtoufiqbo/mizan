@@ -119,14 +119,31 @@ cache and queue vulnerable `confirmed_disclosure` (1 finding each) and secure
 
 ## 14. CI
 
-The CI run for the final HEAD is recorded in PR #15. Mandatory jobs are A, B,
-B2, C, D, E, F, G, H and S; the external-target job may remain skipped by
-design. Run ID and job conclusions are filled in after the run completes.
+Run **#298**, id `45715971527`, on the fix commit `ed523c5`:
+https://github.com/Toufiqtoufiqbo/mizan/actions/runs/45715971527
+
+| Job | Result |
+| --- | --- |
+| A — static & unit | success |
+| B — PostgreSQL | success |
+| B2 — PostgreSQL lifecycle & destructive cleanup | success |
+| C — security regression | success |
+| D — benchmark | success |
+| E — Mīzān scans Mīzān | success |
+| F — independent application | success |
+| G — cross-framework gate | success |
+| G — external target (opt-in) | skipped (by design) |
+| H — Redis event source | success |
+| S — status summary | success |
+
+All mandatory jobs passed. The external-target job is optional and skipped as
+designed. A documentation-only commit after this run carries the recorded
+result; its own CI run is recorded in PR #15.
 
 ## 15. Exact tested HEAD
 
-The commit that carries these fixes on `feat/v2-real-event-sources`; its exact
-SHA is recorded in PR #15.
+Fix commit: `ed523c5648924b176b38b51674e6cbe75f8ec9ba`
+(the commit with all code and test changes, verified by CI #298).
 
 ## 16. Remaining limitations
 
@@ -139,5 +156,9 @@ SHA is recorded in PR #15.
 
 ## Verdict
 
-**PARTIAL** until the CI run on the exact HEAD completes with all mandatory
-jobs successful; the final verdict is updated in PR #15 after that run.
+**PASS** — all acceptance conditions above were executed: no database-wide
+deletion command, namespace-scoped cleanup, unrelated and parallel-session data
+survive, missing ownership metadata fails closed, Redis is a standalone extra,
+queue semantics are stated honestly, stream observation is bounded and
+read-only, the full corpus and benchmark pass, ruff is clean, and every mandatory
+CI job succeeded on the fix commit. remaining limitations are listed in §16.
