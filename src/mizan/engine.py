@@ -103,6 +103,8 @@ class Mizan:
         attributor: Any | None = None,
         relationship_contract: Any | None = None,
         request_budget: int | None = None,
+        confidentiality_providers: list[Any] | None = None,
+        confidentiality_policies: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self.target = target
         self.policy = policy or Policy()
@@ -122,6 +124,11 @@ class Mizan:
         #: Phase V.1: trusted, explicit semantic declarations. Without one,
         #: structural evidence is never promoted to confirmed semantics.
         self.relationship_contract = relationship_contract
+        #: L7 path-confidentiality providers and their trusted policies. None
+        #: means the category is unsupported, not silently "clean".
+        self.confidentiality_providers = list(confidentiality_providers or [])
+        self.confidentiality_policies = dict(confidentiality_policies or {})
+        self.l7_evidence: list[dict[str, Any]] = []
         self.traffic: TrafficLog = TrafficLog(self.traffic_path)
         self.ledger: Ledger = Ledger(self.ledger_path)
         self.observed = AccessMatrix()
@@ -337,6 +344,7 @@ class Mizan:
         self.probe_candidates = sum(candidates.values())
         self.probes_executed = 0
         self.executed_by_law = {}
+        self.l7_evidence = []
         self.inconclusive_checks = []
         self.outcomes = []
         self._outcome_index = {}
@@ -350,6 +358,7 @@ class Mizan:
             if groups is not None and name not in groups:
                 continue
             issued_before = self.requests
+            l7_before = len(self.l7_evidence)
             try:
                 violations.extend(probe())
             except RequestBudgetExhausted:
@@ -357,12 +366,17 @@ class Mizan:
                 # so, because a truncated scan is not a complete one.
                 self.budget_exhausted = True
                 break
-            if self.requests > issued_before:
+            if name == "L7" and len(self.l7_evidence) > l7_before:
+                # L7 evidence is provider-backed, not HTTP-request-backed. A
+                # real provider observation is still a real probe execution.
+                self.probes_executed += 1
+                self.executed_by_law["L7"] = self.executed_by_law.get("L7", 0) + 1
+            elif self.requests > issued_before:
                 self.probes_executed += 1
                 # ``T`` is the data-level view, not a standalone law probe. L6
                 # is only inferred through the L5 race heuristic and is never
                 # claimed as an independently executed law.
-                if name in {"L1", "L2", "L3", "L4", "L5", "L6"}:
+                if name in {"L1", "L2", "L3", "L4", "L5", "L6", "L7"}:
                     self.executed_by_law[name] = self.executed_by_law.get(name, 0) + 1
         return _dedupe(violations)
 
@@ -751,7 +765,9 @@ class Mizan:
             records = [item for item in self.outcomes if item.get("law") == law]
             eligible = self.eligible_by_law.get(law, 0)
             executed = self.executed_by_law.get(law, 0)
-            declared_law = law in {"L4", "L6"} and self._law_policy_enabled
+            declared_law = (law in {"L4", "L6"} and self._law_policy_enabled) or (
+                law == "L7" and bool(self.confidentiality_providers)
+            )
             if (
                 not eligible
                 and not records
@@ -770,7 +786,7 @@ class Mizan:
                 attempted=len(records),
                 executed=executed,
                 skipped=law == "L6" and not self._law_policy_enabled,
-                supported=law != "L7" and (law != "L6" or self._law_policy_enabled),
+                supported=law != "L6" or self._law_policy_enabled,
             )
             for item in records:
                 value = item.get("outcome")
@@ -783,6 +799,30 @@ class Mizan:
                 elif value == AuthorizationOutcome.INCONCLUSIVE.value:
                     counter.inconclusive += 1
             laws[law] = counter
+        l7_categories: dict[str, str] = {}
+        for category in ("cache", "queue", "logs", "metrics"):
+            if category not in {"cache", "queue"}:
+                l7_categories[category] = "unsupported"
+                continue
+            states = [item.get("state", "") for item in self.l7_evidence if item.get("category") == category]
+            if states:
+                l7_categories[category] = (
+                    "confirmed_disclosure"
+                    if "confirmed_disclosure" in states
+                    else (
+                        "inconclusive"
+                        if any(
+                            state in {"inconclusive", "provider_unavailable", "missing_policy", "missing_provenance"}
+                            for state in states
+                        )
+                        else "blocked_or_authorized"
+                    )
+                )
+            else:
+                configured = any(
+                    str(getattr(provider, "category", "")) == category for provider in self.confidentiality_providers
+                )
+                l7_categories[category] = "supported_not_exercised" if configured else "unsupported"
         return ScanCoverage(
             resources_discovered=len(resources),
             resources_owned=len(usable),
@@ -803,6 +843,7 @@ class Mizan:
             ),
             resource_row_mapping_ambiguous=sum(1 for _, reason in reasons if "mapping" in reason.lower()),
             sharing_semantics_ambiguous=sum(1 for key, _ in reasons if key.startswith("sharing:")),
+            l7_categories=l7_categories,
             laws=laws,
         )
 
@@ -835,6 +876,8 @@ class Mizan:
         ]
         if self._law_policy_enabled:
             groups.append(("L6", self._probe_cardinality))
+        if self.confidentiality_providers:
+            groups.append(("L7", self._probe_confidentiality))
         groups.append(("T", self._probe_data_view))
         return groups
 
@@ -1380,6 +1423,227 @@ class Mizan:
         if column:
             return sum(1 for row in rows if str(row.get(column, "")) == principal_id)
         return len(rows) if invariant.scope == "global" else 0
+
+    def _probe_confidentiality(self) -> list[Violation]:
+        """L7: replay real application HTTP operations and verify their evidence."""
+        import hashlib
+        import uuid
+
+        from mizan.confidentiality import Artifact, EvidenceState, evaluate, policy_from_dict
+
+        violations: list[Violation] = []
+        self.l7_evidence = []
+        principals = [
+            principal
+            for principal in self.target.principals
+            if principal.token and principal.id and self._is_testable(principal)
+        ]
+        for provider in self.confidentiality_providers:
+            category = str(getattr(provider, "category", ""))
+            for name, data in sorted(self.confidentiality_policies.items()):
+                if str(data.get("category", category)) != category:
+                    continue
+                policy = policy_from_dict(data)
+                producer_path = data.get("producer_path")
+                consumer_template = data.get("consumer_path_template")
+                consumer_method = str(data.get("consumer_method", "GET")).upper()
+                if policy is None:
+                    self._inconclusive("L7", name, "no trusted confidentiality policy", action="observe")
+                    continue
+                if not producer_path or not consumer_template:
+                    self._inconclusive(
+                        "L7", name, "no application HTTP path declared for this category", action="observe"
+                    )
+                    continue
+                # The producer must be an authorized reader and the consumer must
+                # not be. The order of ``target.principals`` must never decide
+                # who plays which role, so both groups are sorted by identity.
+                authorized = sorted(
+                    (principal for principal in principals if policy.authorizes(principal.id)),
+                    key=lambda principal: principal.id,
+                )
+                unauthorized = sorted(
+                    (principal for principal in principals if not policy.authorizes(principal.id)),
+                    key=lambda principal: principal.id,
+                )
+                if not authorized:
+                    self._inconclusive(
+                        "L7",
+                        name,
+                        "no authorized producer identity for this policy "
+                        f"(authorized_readers: {sorted(policy.authorized_readers)})",
+                        action="observe",
+                    )
+                    continue
+                if not unauthorized:
+                    self._inconclusive(
+                        "L7",
+                        name,
+                        "no unauthorized consumer identity for this policy "
+                        "(every available identity is authorized to read)",
+                        action="observe",
+                    )
+                    continue
+                producer, consumer = authorized[0], unauthorized[0]
+                if producer.id == consumer.id:
+                    self._inconclusive(
+                        "L7", name, "the producer and consumer identities are not distinct", action="observe"
+                    )
+                    continue
+                artifact_id = f"mizan-{category}-{name}-{producer.id}"
+                content = f"mizan-v1-{category}-{name}-{producer.id}"
+                expected_digest = hashlib.sha256(content.encode()).hexdigest()
+                body = {
+                    "artifact_id": artifact_id,
+                    "message_id": artifact_id,
+                    "content": content,
+                    "scope": policy.scope,
+                    "intended_consumer": producer.id,
+                }
+                steps: list[Step] = []
+
+                producer_request = f"l7-produce-{uuid.uuid4().hex}"
+                produced = self._request(
+                    self.target.session_for(producer),
+                    "POST",
+                    self._url(str(producer_path)),
+                    json=body,
+                    headers={"X-Mizan-Request-Id": producer_request},
+                    timeout=self.target.timeout,
+                )
+                steps.append(
+                    Step(
+                        method="POST",
+                        url=self._url(str(producer_path)),
+                        headers=mask_authorization({"Authorization": f"Bearer {producer.token}"}, producer.id),
+                        body=body,
+                        status=produced.status_code,
+                        note=f"request_id={producer_request}; producer {producer.id} wrote the artifact",
+                    )
+                )
+                if not (200 <= produced.status_code < 300):
+                    self._inconclusive(
+                        "L7",
+                        artifact_id,
+                        f"application producer request failed: {produced.status_code}",
+                        action="observe",
+                    )
+                    continue
+
+                consumer_url = self._url(str(consumer_template).replace("{id}", artifact_id))
+                owner_request = f"l7-owner-{uuid.uuid4().hex}"
+                owner_response = self._request(
+                    self.target.session_for(producer),
+                    consumer_method,
+                    consumer_url,
+                    headers={"X-Mizan-Request-Id": owner_request},
+                    timeout=self.target.timeout,
+                )
+                steps.append(
+                    Step(
+                        method=consumer_method,
+                        url=consumer_url,
+                        headers=mask_authorization({"Authorization": f"Bearer {producer.token}"}, producer.id),
+                        status=owner_response.status_code,
+                        note=f"request_id={owner_request}; authorized owner {producer.id} read",
+                    )
+                )
+                owner_payload = _json(owner_response)
+                owner_ok = (
+                    200 <= owner_response.status_code < 300
+                    and str((owner_payload or {}).get("digest", "")) == expected_digest
+                )
+                if not owner_ok:
+                    # A secure mode that blocks everyone is not a fix.
+                    self._inconclusive(
+                        "L7", artifact_id, "the authorized producer could not read its own artifact", action="observe"
+                    )
+                    continue
+
+                other_request = f"l7-other-{uuid.uuid4().hex}"
+                other_response = self._request(
+                    self.target.session_for(consumer),
+                    consumer_method,
+                    consumer_url,
+                    headers={"X-Mizan-Request-Id": other_request},
+                    timeout=self.target.timeout,
+                )
+                steps.append(
+                    Step(
+                        method=consumer_method,
+                        url=consumer_url,
+                        headers=mask_authorization({"Authorization": f"Bearer {consumer.token}"}, consumer.id),
+                        status=other_response.status_code,
+                        note=f"request_id={other_request}; consumer {consumer.id} read attempt",
+                    )
+                )
+                other_payload = _json(other_response)
+                content_match = (
+                    200 <= other_response.status_code < 300
+                    and str((other_payload or {}).get("digest", "")) == expected_digest
+                )
+
+                artifact = Artifact(
+                    artifact_id=artifact_id,
+                    producer=producer.id,
+                    scope=policy.scope,
+                    payload=content,
+                    request_id=producer_request,
+                )
+                evidence = evaluate(provider, artifact, consumer.id, policy, request_id=other_request)
+                payload = evidence.to_dict()
+                payload["steps"] = [step.to_dict() for step in steps]
+                payload["payload_integrity"] = {
+                    "expected_digest": expected_digest,
+                    "producer_response_digest": str((_json(produced) or {}).get("digest", "")),
+                    "owner_response_digest": str((owner_payload or {}).get("digest", "")),
+                    "consumer_response_digest": str((other_payload or {}).get("digest", "")),
+                    "owner_can_read": owner_ok,
+                    "consumer_content_matches": content_match,
+                    "source": "application HTTP response",
+                }
+                self.l7_evidence.append(payload)
+                key = f"{category}:{artifact_id}"
+                if evidence.state in {
+                    EvidenceState.INCONCLUSIVE,
+                    EvidenceState.PROVIDER_UNAVAILABLE,
+                    EvidenceState.MISSING_PROVENANCE,
+                    EvidenceState.MISSING_POLICY,
+                }:
+                    outcome = AuthorizationOutcome.INCONCLUSIVE
+                elif (
+                    evidence.state is EvidenceState.CONFIRMED_DISCLOSURE
+                    and content_match
+                    and not policy.authorizes(consumer.id)
+                ):
+                    outcome = AuthorizationOutcome.VIOLATION
+                else:
+                    outcome = AuthorizationOutcome.DECIDED
+                self._outcome("L7", "observe", key, consumer.id, outcome)
+                if outcome is not AuthorizationOutcome.VIOLATION:
+                    if outcome is AuthorizationOutcome.INCONCLUSIVE:
+                        self._inconclusive("L7", key, evidence.outcome, action="observe", principal=consumer.id)
+                    continue
+                violations.append(
+                    Violation(
+                        law="L7",
+                        title=f"{consumer.id} observed {producer.id}'s private {category} artifact",
+                        detail=(
+                            f"The application wrote `{artifact_id}` for `{producer.id}` and an unauthorized "
+                            f"consumer `{consumer.id}` read the same content over HTTP."
+                        ),
+                        severity="high",
+                        principal=consumer.id,
+                        resource=artifact_id,
+                        action="observe",
+                        law_category=category,
+                        evidence=payload,
+                        steps=steps,
+                    )
+                )
+        return violations
+
+        return violations
 
     def _probe_cardinality(self) -> list[Violation]:
         """L6: verify an explicitly declared cardinality invariant from state."""
@@ -1969,6 +2233,9 @@ class Mizan:
             raise RequestBudgetExhausted(f"the scan reached its budget of {self.request_budget} requests")
         self.requests += 1
         headers = dict(session.headers)
+        custom_headers = kwargs.pop("headers", None)
+        if isinstance(custom_headers, dict):
+            headers.update(custom_headers)
         correlation_header = getattr(self.attributor, "request_header", "")
         if before is not None and correlation_header:
             headers[correlation_header] = request_id

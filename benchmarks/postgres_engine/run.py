@@ -358,6 +358,84 @@ def _run_law_once(dsn: str, law: str, variant: str) -> dict[str, Any]:
             failures.append(f"cleanup failed: {exc}")
 
 
+def _run_l7_once(dsn: str, category: str, *, shared_key: bool) -> dict[str, Any]:
+    """Measure one L7 category against the fixture application over HTTP."""
+    import importlib.util
+    import threading
+    import uuid
+
+    from werkzeug.serving import make_server
+
+    from mizan.core import Principal
+    from mizan.engine import Mizan, Target
+
+    fixture = ROOT / "tests" / "fixtures" / "external_apps" / "l7_store" / "app.py"
+    spec = importlib.util.spec_from_file_location("pgstore_l7_bench", fixture)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    variant = "vulnerable" if shared_key else "secure"
+    os.environ["MIZAN_PG_DSN"] = dsn
+    tokens = {"alice": "twin-alice", "bob": "twin-bob"}
+    os.environ["MIZAN_TOKEN_ALICE"] = tokens["alice"]
+    os.environ["MIZAN_TOKEN_BOB"] = tokens["bob"]
+    server = make_server("127.0.0.1", 0, module.create_app(variant, dsn=dsn))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    policy = {
+        "category": category,
+        "resource": "items" if category == "cache" else "messages",
+        "scope": "tenant-a",
+        "classification": "private",
+        "authorized_readers": ["alice"],
+        "source": "trusted_contract",
+        "confidence": "confirmed",
+        "producer_path": "/artifacts" if category == "cache" else "/messages",
+        "consumer_path_template": "/artifacts/{id}" if category == "cache" else "/messages/{id}/consume",
+        "consumer_method": "GET" if category == "cache" else "POST",
+    }
+    if category == "cache":
+        from mizan.confidentiality import PostgresCacheProvider
+
+        provider = PostgresCacheProvider(dsn, namespace=f"bench-{uuid.uuid4().hex}")
+    else:
+        from mizan.confidentiality import PostgresQueueProvider
+
+        provider = PostgresQueueProvider(dsn, namespace=f"bench-{uuid.uuid4().hex}")
+    engine = Mizan(
+        Target(
+            base_url=f"http://127.0.0.1:{server.server_port}",
+            principals=[Principal(id=name, token=token, roles=("user",)) for name, token in tokens.items()],
+        ),
+        confidentiality_providers=[provider],
+        confidentiality_policies={category: policy},
+    )
+    started = time.perf_counter()
+    try:
+        violations = engine.attack(groups=["L7"])
+    finally:
+        provider.cleanup()
+        server.shutdown()
+        thread.join(timeout=5)
+    duration = time.perf_counter() - started
+    evidence = violations[0].evidence if violations else (engine.l7_evidence[0] if engine.l7_evidence else {})
+    return {
+        "backend": "postgres",
+        "law": "L7",
+        "category": category,
+        "provider": provider.name,
+        "variant": variant,
+        "artifact": evidence.get("artifact"),
+        "observation": evidence.get("observation"),
+        "findings": len(violations),
+        "state": evidence.get("state"),
+        "executed_probes": engine.probes_executed,
+        "duration_seconds": round(duration, 4),
+        "provider_operations": len(evidence.get("events", [])),
+        "cleanup": "completed",
+        "failures": [],
+    }
+
+
 def main() -> None:
     from mizan.ownership import RelationshipContract
 
@@ -384,6 +462,15 @@ def main() -> None:
         _run_law_once(dsn, "L4", "l4_vulnerable"),
         _run_law_once(dsn, "L6", "l6_vulnerable"),
     ]
+    l7_runs = [
+        _run_l7_once(dsn, "cache", shared_key=True),
+        _run_l7_once(dsn, "cache", shared_key=False),
+        _run_l7_once(dsn, "queue", shared_key=True),
+        _run_l7_once(dsn, "queue", shared_key=False),
+    ]
+    l7_problems = [
+        f"L7 {item['category']}/{item['variant']}: zero executions" for item in l7_runs if item["executed_probes"] == 0
+    ]
     law_problems = [f"{item['law']}: {problem}" for item in law_runs for problem in item["failures"]]
     results = {
         "benchmark_version": BENCHMARK_VERSION,
@@ -405,6 +492,8 @@ def main() -> None:
         "workload": result["workload"],
         "laws": law_runs,
         "law_benchmark_problems": law_problems,
+        "l7": l7_runs,
+        "l7_benchmark_problems": l7_problems,
         "comparison": {
             "mode": "replicated worker isolation and normalized finding equivalence",
             "speedup_claim": None,
@@ -427,7 +516,7 @@ def main() -> None:
     (Path(__file__).resolve().parent / "results.json").write_text(text, encoding="utf-8")
     print(text)
     server.cleanup()
-    problems = check_results(results) + law_problems
+    problems = check_results(results) + law_problems + l7_problems
     if problems:
         raise SystemExit("benchmark validation failed: " + "; ".join(problems))
 

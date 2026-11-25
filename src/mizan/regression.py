@@ -210,6 +210,11 @@ def build_attack(violation: Violation) -> Attack | None:
         # alone. Without an explicit state endpoint in the proof, refuse.
         supported = False
         reason = "the proof does not provide a verifiable cardinality state endpoint"
+    if violation.law == "L7":
+        required = ("provider", "artifact", "observation", "policy", "provider_config")
+        supported = all(key in evidence for key in required)
+        if not supported:
+            reason = "the proof does not carry complete L7 provider and provenance evidence"
 
     return Attack(
         law=violation.law,
@@ -311,6 +316,12 @@ def attack_succeeds(attack: Attack, token: str, target: str) -> bool:
     if not attack.supported:
         return False
 
+    if attack.law == "L7":
+        from mizan.confidentiality import replay_l7
+
+        still_vulnerable, _state = replay_l7(attack.evidence, target)
+        return still_vulnerable
+
     responses = _replay_requests(attack, token, target)
     response = responses[-1] if responses else None
     if response is None:
@@ -403,6 +414,16 @@ def _assertion_body(attack: Attack) -> str:
             assert not _contains(body, SENTINEL), EXPECTATION
     # An unreadable state endpoint cannot prove the invariant either way; it
     # is not silently interpreted as a fix or as a breach."""
+    if attack.law == "L7":
+        return """    from mizan.confidentiality import replay_l7, replay_outcome_is_inconclusive
+
+    still_observable, state = replay_l7(EVIDENCE, TARGET)
+    # An inconclusive replay proves nothing: a broken producer write must not
+    # be reported as a fixed application.
+    assert not replay_outcome_is_inconclusive(state), (
+        "the L7 replay could not decide the question: " + state
+    )
+    assert not still_observable, (EXPECTATION, state)"""
     if attack.law == "L5":
         return """    def call() -> int:
         return requests.post(URL, headers=HEADERS, timeout=15).status_code
@@ -463,6 +484,7 @@ URL = TARGET + {_py(attack.path)}
 HEADERS = {{"Authorization": f"Bearer {{TOKEN}}"}}
 STEPS = {_py(attack.steps)}
 EVIDENCE = {_py(attack.evidence)}
+LAW = {_py(violation.law)}
 EXPECTATION = {_py(attack.expectation)}
 SUPPORTED = {_py(attack.supported)}
 UNSUPPORTED_REASON = {_py(attack.unsupported_reason)}
@@ -506,6 +528,10 @@ def _contains(payload, value) -> bool:
 
 def _replay() -> list:
     """Replay the full recorded sequence, preserving order and identity."""
+    if LAW == "L7":
+        # L7 replays through the typed provider in the assertion below, not
+        # through HTTP steps (provider events are not URLs).
+        return []
     responses = []
     for step in STEPS:
         principal = step.get("principal")

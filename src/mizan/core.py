@@ -405,6 +405,9 @@ class ScanCoverage:
     sharing_semantics_ambiguous: int = 0
     """Associations whose permission semantics are unproven."""
 
+    #: Per-category L7 states: cache/queue/logs/metrics. A category is never
+    #: implied by another category or by provider availability alone.
+    l7_categories: dict[str, str] = field(default_factory=dict)
     laws: dict[str, LawCoverage] = field(default_factory=dict)
     """Per-law coverage, keyed by law (``L2``, ``L3``).
 
@@ -494,6 +497,7 @@ class ScanCoverage:
             "sharing_semantics_ambiguous": self.sharing_semantics_ambiguous,
             "laws": {law: coverage.to_dict() for law, coverage in sorted(self.laws.items())},
             "executed_laws": self.executed_laws,
+            "l7_categories": dict(sorted(self.l7_categories.items())),
             "resolved_checks": self.resolved_checks,
             "unresolved_checks": self.unresolved_checks,
             "pending_checks": self.pending_checks,
@@ -573,6 +577,8 @@ class Violation:
     action: str | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
     steps: list[Step] = field(default_factory=list)
+    #: L7 sub-category (cache/queue/logs/metrics). Empty for other laws.
+    law_category: str = ""
 
     @property
     def law_name(self) -> str:
@@ -591,6 +597,7 @@ class Violation:
             "action": self.action,
             "evidence": self.evidence,
             "steps": [step.to_dict() for step in self.steps],
+            "law_category": self.law_category,
         }
 
 

@@ -3,15 +3,15 @@
   "comparison": {
     "mode": "replicated worker isolation and normalized finding equivalence",
     "parallel_durations_seconds": [
-      29.7706,
-      44.8653
+      20.192,
+      32.3037
     ],
-    "serial_duration_seconds": 17.1838,
+    "serial_duration_seconds": 13.0459,
     "speedup_claim": null
   },
   "environment": {
-    "cluster": "7711009630309361428",
-    "git_sha": "29c0ec19a56487e5fef65b26a4616d2b3fd2300a",
+    "cluster": "7711760213155452240",
+    "git_sha": "61a921a12cab35501f834567fa2f79f35040c97b",
     "platform": "Windows-10-10.0.19045-SP0",
     "psycopg": "3.3.9",
     "python": "3.11.9"
@@ -26,20 +26,195 @@
     "spec_sha256": "1834ea05cea898bd66f14009cbf07ad86a0a111c7f9b1c4dc3fec0956bbafadd",
     "variant": "both"
   },
+  "l7": [
+    {
+      "artifact": {
+        "artifact_id": "mizan-cache-cache-alice",
+        "created_at": 1795534227.5463755,
+        "payload_digest": "7a24e311a9b46a06b1f0b755da0f19a1a405333741d83bc2a164bc9dc541f77c",
+        "producer": "alice",
+        "request_id": "l7-produce-45e79f7cbc2b4e6d9fde0178fffa66b7",
+        "scope": "tenant-a"
+      },
+      "backend": "postgres",
+      "category": "cache",
+      "cleanup": "completed",
+      "duration_seconds": 0.603,
+      "executed_probes": 1,
+      "failures": [],
+      "findings": 1,
+      "law": "L7",
+      "observation": {
+        "artifact_id": "mizan-cache-cache-alice",
+        "consumer": "bob",
+        "details": {
+          "digest": "7a24e311a9b46a06b1f0b755da0f19a1a405333741d83bc2a164bc9dc541f77c",
+          "granted": true,
+          "identity_mismatch": false,
+          "occurred_at": 1795534200.0,
+          "operation": "cache_read",
+          "principal": "bob",
+          "scope": "tenant-a",
+          "source": "application_http_operation"
+        },
+        "granted": true,
+        "observable": true,
+        "occurred_at": 1795534227.6002312,
+        "payload_digest": "7a24e311a9b46a06b1f0b755da0f19a1a405333741d83bc2a164bc9dc541f77c",
+        "principal": "bob",
+        "request_id": "l7-other-544d65e42a07462990dcd4c5286478fa",
+        "source": "application_http_operation"
+      },
+      "provider": "postgres-cache-app-v1",
+      "provider_operations": 2,
+      "state": "confirmed_disclosure",
+      "variant": "vulnerable"
+    },
+    {
+      "artifact": {
+        "artifact_id": "mizan-cache-cache-alice",
+        "created_at": 1795534228.2236555,
+        "payload_digest": "7a24e311a9b46a06b1f0b755da0f19a1a405333741d83bc2a164bc9dc541f77c",
+        "producer": "alice",
+        "request_id": "l7-produce-5e67f316f51b4a878c0c2372437b3d34",
+        "scope": "tenant-a"
+      },
+      "backend": "postgres",
+      "category": "cache",
+      "cleanup": "completed",
+      "duration_seconds": 0.6438,
+      "executed_probes": 1,
+      "failures": [],
+      "findings": 0,
+      "law": "L7",
+      "observation": {
+        "artifact_id": "mizan-cache-cache-alice",
+        "consumer": "bob",
+        "details": {
+          "digest": "7a24e311a9b46a06b1f0b755da0f19a1a405333741d83bc2a164bc9dc541f77c",
+          "granted": false,
+          "identity_mismatch": false,
+          "occurred_at": 1795534200.0,
+          "operation": "cache_read",
+          "principal": "bob",
+          "scope": "tenant-a",
+          "source": "application_http_operation"
+        },
+        "granted": false,
+        "observable": false,
+        "occurred_at": 1795534228.2753472,
+        "payload_digest": "7a24e311a9b46a06b1f0b755da0f19a1a405333741d83bc2a164bc9dc541f77c",
+        "principal": "bob",
+        "request_id": "l7-other-ce699a8861e54f1e8f8e04fdf0671cda",
+        "source": "application_http_operation"
+      },
+      "provider": "postgres-cache-app-v1",
+      "provider_operations": 2,
+      "state": "blocked",
+      "variant": "secure"
+    },
+    {
+      "artifact": {
+        "artifact_id": "mizan-queue-queue-alice",
+        "created_at": 1795534228.8968759,
+        "payload_digest": "be650db791e0c2ba399fa75721879cb65ee1e7f57738242f622c5015a6a979c8",
+        "producer": "alice",
+        "request_id": "l7-produce-f0ff88b967664fd1862c98019701753f",
+        "scope": "tenant-a"
+      },
+      "backend": "postgres",
+      "category": "queue",
+      "cleanup": "completed",
+      "duration_seconds": 0.6045,
+      "executed_probes": 1,
+      "failures": [],
+      "findings": 1,
+      "law": "L7",
+      "observation": {
+        "artifact_id": "mizan-queue-queue-alice",
+        "consumer": "bob",
+        "details": {
+          "digest": "be650db791e0c2ba399fa75721879cb65ee1e7f57738242f622c5015a6a979c8",
+          "granted": true,
+          "identity_mismatch": false,
+          "occurred_at": 1795534200.0,
+          "operation": "queue_consume",
+          "principal": "bob",
+          "scope": "tenant-a",
+          "source": "application_http_operation"
+        },
+        "granted": true,
+        "observable": true,
+        "occurred_at": 1795534228.9427285,
+        "payload_digest": "be650db791e0c2ba399fa75721879cb65ee1e7f57738242f622c5015a6a979c8",
+        "principal": "bob",
+        "request_id": "l7-other-5ec08973433342a0bae14e107face01e",
+        "source": "application_http_operation"
+      },
+      "provider": "postgres-queue-app-v1",
+      "provider_operations": 2,
+      "state": "confirmed_disclosure",
+      "variant": "vulnerable"
+    },
+    {
+      "artifact": {
+        "artifact_id": "mizan-queue-queue-alice",
+        "created_at": 1795534229.549377,
+        "payload_digest": "be650db791e0c2ba399fa75721879cb65ee1e7f57738242f622c5015a6a979c8",
+        "producer": "alice",
+        "request_id": "l7-produce-713f5f204e54405daa167147a6af0e14",
+        "scope": "tenant-a"
+      },
+      "backend": "postgres",
+      "category": "queue",
+      "cleanup": "completed",
+      "duration_seconds": 0.6008,
+      "executed_probes": 1,
+      "failures": [],
+      "findings": 0,
+      "law": "L7",
+      "observation": {
+        "artifact_id": "mizan-queue-queue-alice",
+        "consumer": "bob",
+        "details": {
+          "digest": "be650db791e0c2ba399fa75721879cb65ee1e7f57738242f622c5015a6a979c8",
+          "granted": false,
+          "identity_mismatch": false,
+          "occurred_at": 1795534200.0,
+          "operation": "queue_consume",
+          "principal": "bob",
+          "scope": "tenant-a",
+          "source": "application_http_operation"
+        },
+        "granted": false,
+        "observable": false,
+        "occurred_at": 1795534229.5936537,
+        "payload_digest": "be650db791e0c2ba399fa75721879cb65ee1e7f57738242f622c5015a6a979c8",
+        "principal": "bob",
+        "request_id": "l7-other-96469852b7784d82806944eed77a1c64",
+        "source": "application_http_operation"
+      },
+      "provider": "postgres-queue-app-v1",
+      "provider_operations": 2,
+      "state": "blocked",
+      "variant": "secure"
+    }
+  ],
+  "l7_benchmark_problems": [],
   "law_benchmark_problems": [],
   "laws": [
     {
       "attempted_probes": 2,
       "backend": "postgres",
       "database_operations": 2,
-      "duration_seconds": 4.2871,
+      "duration_seconds": 3.2444,
       "eligible_probes": 4,
       "executed_probes": 1,
       "execution_mode": "single disposable worker",
       "failures": [],
       "findings": 1,
       "fixture": "mizan-laws.json",
-      "fixture_sha256": "456e7e2e7914654cb37a31256791e52a2c002bb885861ab8f18301aa2ac591af",
+      "fixture_sha256": "35914e7ece23e442c266ccb55cfb948891404f54782771251209424e7218fa8e",
       "inconclusive": 2,
       "law": "L4",
       "learning_requests": 10,
@@ -53,14 +228,14 @@
       "attempted_probes": 4,
       "backend": "postgres",
       "database_operations": 8,
-      "duration_seconds": 5.138,
+      "duration_seconds": 4.2477,
       "eligible_probes": 4,
       "executed_probes": 1,
       "execution_mode": "single disposable worker",
       "failures": [],
       "findings": 3,
       "fixture": "mizan-laws.json",
-      "fixture_sha256": "456e7e2e7914654cb37a31256791e52a2c002bb885861ab8f18301aa2ac591af",
+      "fixture_sha256": "35914e7ece23e442c266ccb55cfb948891404f54782771251209424e7218fa8e",
       "inconclusive": 1,
       "law": "L6",
       "learning_requests": 10,
@@ -73,7 +248,7 @@
   ],
   "parallel": [
     {
-      "duration_seconds": 29.7706,
+      "duration_seconds": 20.192,
       "equivalent_to_serial": true,
       "findings": 2,
       "normalized_findings": [
@@ -122,7 +297,7 @@
       "workers": 2
     },
     {
-      "duration_seconds": 44.8653,
+      "duration_seconds": 32.3037,
       "equivalent_to_serial": true,
       "findings": 2,
       "normalized_findings": [
@@ -186,10 +361,10 @@
     }
   ],
   "parallel_duration_seconds": [
-    29.7706,
-    44.8653
+    20.192,
+    32.3037
   ],
-  "parallel_median_seconds": 37.3179,
+  "parallel_median_seconds": 26.2478,
   "problems": [],
   "serial": {
     "coverage": {
@@ -200,6 +375,12 @@
       ],
       "identity_anchors_unresolved": 0,
       "inconclusive_checks": 1,
+      "l7_categories": {
+        "cache": "unsupported",
+        "logs": "unsupported",
+        "metrics": "unsupported",
+        "queue": "unsupported"
+      },
       "laws": {
         "L2": {
           "allowed_by_grant": 0,
@@ -254,7 +435,7 @@
       "sharing_semantics_ambiguous": 2,
       "unresolved_checks": 1
     },
-    "duration_seconds": 17.1838,
+    "duration_seconds": 13.0459,
     "findings": 2,
     "inconclusive": 1,
     "laws": [
