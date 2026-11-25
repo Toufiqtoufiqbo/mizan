@@ -1434,7 +1434,9 @@ class Mizan:
         violations: list[Violation] = []
         self.l7_evidence = []
         principals = [
-            principal for principal in self.target.principals if principal.token and self._is_testable(principal)
+            principal
+            for principal in self.target.principals
+            if principal.token and principal.id and self._is_testable(principal)
         ]
         for provider in self.confidentiality_providers:
             category = str(getattr(provider, "category", ""))
@@ -1448,15 +1450,46 @@ class Mizan:
                 if policy is None:
                     self._inconclusive("L7", name, "no trusted confidentiality policy", action="observe")
                     continue
-                if len(principals) < 2:
-                    self._inconclusive("L7", name, "no distinct consumer identity available", action="observe")
-                    continue
                 if not producer_path or not consumer_template:
                     self._inconclusive(
                         "L7", name, "no application HTTP path declared for this category", action="observe"
                     )
                     continue
-                producer, consumer = principals[0], principals[1]
+                # The producer must be an authorized reader and the consumer must
+                # not be. The order of ``target.principals`` must never decide
+                # who plays which role, so both groups are sorted by identity.
+                authorized = sorted(
+                    (principal for principal in principals if policy.authorizes(principal.id)),
+                    key=lambda principal: principal.id,
+                )
+                unauthorized = sorted(
+                    (principal for principal in principals if not policy.authorizes(principal.id)),
+                    key=lambda principal: principal.id,
+                )
+                if not authorized:
+                    self._inconclusive(
+                        "L7",
+                        name,
+                        "no authorized producer identity for this policy "
+                        f"(authorized_readers: {sorted(policy.authorized_readers)})",
+                        action="observe",
+                    )
+                    continue
+                if not unauthorized:
+                    self._inconclusive(
+                        "L7",
+                        name,
+                        "no unauthorized consumer identity for this policy "
+                        "(every available identity is authorized to read)",
+                        action="observe",
+                    )
+                    continue
+                producer, consumer = authorized[0], unauthorized[0]
+                if producer.id == consumer.id:
+                    self._inconclusive(
+                        "L7", name, "the producer and consumer identities are not distinct", action="observe"
+                    )
+                    continue
                 artifact_id = f"mizan-{category}-{name}-{producer.id}"
                 content = f"mizan-v1-{category}-{name}-{producer.id}"
                 expected_digest = hashlib.sha256(content.encode()).hexdigest()

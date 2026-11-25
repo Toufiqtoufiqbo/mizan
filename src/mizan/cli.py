@@ -557,10 +557,10 @@ def replay(bundles: str, target: str, token: str | None) -> None:
         if not steps:
             continue
         if payload.get("law") == "L7":
-            from mizan.confidentiality import replay_l7
+            from mizan.confidentiality import replay_l7, replay_outcome_is_inconclusive
 
             still_works, reason = replay_l7(payload.get("evidence") or {}, target)
-            if reason.startswith("missing_consumer_token") or reason.startswith("replay_failed"):
+            if replay_outcome_is_inconclusive(reason):
                 click.echo(f"  ! L7 replay could not run: {reason}")
                 unreachable += 1
                 continue

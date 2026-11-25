@@ -443,12 +443,77 @@ def provider_from_evidence(data: dict[str, Any], dsn: str) -> ConfidentialityEvi
     return None
 
 
+#: Replay outcomes that do not decide the question. They are operational
+#: failures or unverifiable evidence - never a proof that the application is
+#: safe. The CLI reports them as "could not run", not as "fixed".
+INCONCLUSIVE_REPLAY_PREFIXES: tuple[str, ...] = (
+    "insufficient_",
+    "missing_",
+    "replay_failed",
+    "producer_",
+    "authorized_read_",
+    "consumer_read_",
+    "payload_unverifiable",
+)
+
+
+def replay_outcome_is_inconclusive(state: str) -> bool:
+    """Whether a replay outcome means "could not decide" rather than "decided"."""
+    return str(state).startswith(INCONCLUSIVE_REPLAY_PREFIXES)
+
+
+def _producer_write_failure(response: Any, expected_id: str, expected_digest: str) -> str:
+    """Why a producer write cannot be trusted as evidence of a fresh write.
+
+    An empty string means the write succeeded and returned the artifact the
+    evidence expects. Anything else is a reason to stop: without a verified
+    write, a later read may describe an older record that happens to carry
+    the same id.
+    """
+    if not (200 <= response.status_code < 300):
+        return f"producer_write_failed:{response.status_code}"
+    try:
+        body = response.json()
+    except Exception:
+        return "producer_response_invalid_json"
+    if not isinstance(body, dict):
+        return "producer_response_invalid_json"
+    returned_id = str(body.get("artifact_id") or body.get("message_id") or body.get("id") or "")
+    if not returned_id:
+        return "producer_artifact_id_missing"
+    if returned_id != expected_id:
+        return "producer_artifact_id_mismatch"
+    returned_digest = str(body.get("digest") or "")
+    if not returned_digest:
+        return "producer_digest_missing"
+    if returned_digest != expected_digest:
+        return "producer_digest_mismatch"
+    return ""
+
+
+def _read_digest(response: Any) -> tuple[str, str]:
+    """The digest a read response carries, or why it cannot be trusted."""
+    try:
+        body = response.json()
+    except Exception:
+        return "", "unverifiable"
+    if not isinstance(body, dict):
+        return "", "unverifiable"
+    digest = str(body.get("digest") or "")
+    if not digest:
+        return "", "digest_missing"
+    return digest, ""
+
+
 def replay_l7(evidence: dict[str, Any], target: str, *, dsn: str = "") -> tuple[bool, str]:
     """Replay the recorded producer/consumer HTTP sequence against a target.
 
     The provider tables are only read as corroborating evidence; the result is
-    recomputed from the actual HTTP responses. Missing steps, missing tokens or
-    missing provenance fail closed.
+    recomputed from the actual HTTP responses. The sequence runs in order and
+    stops at the first step that cannot be trusted: a producer write that
+    failed is never replaced by an older record with the same id, and the
+    reads are not even attempted. Missing steps, missing tokens or missing
+    provenance fail closed.
     """
     import requests
 
@@ -467,40 +532,70 @@ def replay_l7(evidence: dict[str, Any], target: str, *, dsn: str = "") -> tuple[
     consumer = str((evidence.get("observation") or {}).get("consumer") or "")
     if not consumer:
         return False, "insufficient_consumer_identity"
+    expected_id = str((evidence.get("artifact") or {}).get("artifact_id") or "")
+    if not expected_id:
+        return False, "insufficient_artifact_identity"
+
     resolver = TokenResolver.from_env()
-    responses: list[Any] = []
-    try:
-        for step in steps:
-            headers = resolve_headers(step.get("headers") or {}, resolver)
-            url = str(step.get("url") or "")
-            from urllib.parse import urlsplit
 
-            parsed = urlsplit(url)
-            full_url = target.rstrip("/") + (parsed.path or "/") if parsed.scheme else target.rstrip("/") + url
-            method = str(step.get("method") or "GET").upper()
-            kwargs: dict[str, Any] = {"headers": headers, "timeout": 15}
-            if step.get("body") is not None:
-                kwargs["json"] = step["body"]
-            responses.append(requests.request(method, full_url, **kwargs))
-    except MissingToken:
-        return False, "missing_consumer_token"
-    except Exception as exc:
-        return False, f"replay_failed:{type(exc).__name__}"
+    def _send(step: dict[str, Any]) -> Any:
+        from urllib.parse import urlsplit
 
-    owner_response, consumer_response = responses[1], responses[2]
-    owner_ok = 200 <= owner_response.status_code < 300
-    consumer_ok = 200 <= consumer_response.status_code < 300
-    if not owner_ok:
-        return False, "authorized_read_failed"
-    for response in (owner_response, consumer_response):
-        if not (200 <= response.status_code < 300):
-            continue
+        headers = resolve_headers(step.get("headers") or {}, resolver)
+        url = str(step.get("url") or "")
+        parsed = urlsplit(url)
+        full_url = target.rstrip("/") + (parsed.path or "/") if parsed.scheme else target.rstrip("/") + url
+        method = str(step.get("method") or "GET").upper()
+        kwargs: dict[str, Any] = {"headers": headers, "timeout": 15}
+        if step.get("body") is not None:
+            kwargs["json"] = step["body"]
+        return requests.request(method, full_url, **kwargs)
+
+    def _send_or_fail(step: dict[str, Any]) -> tuple[Any | None, str]:
         try:
-            if str((response.json() or {}).get("digest", "")) != expected:
-                return False, "payload_mismatch"
-        except Exception:
-            return False, "payload_unverifiable"
-    still_vulnerable = consumer_ok and not policy.authorizes(consumer)
+            return _send(step), ""
+        except MissingToken:
+            return None, "missing_consumer_token"
+        except Exception as exc:
+            return None, f"replay_failed:{type(exc).__name__}"
+
+    # Step 1 - the producer write. Until it succeeds there is no evidence at
+    # all: an older record with the same id must never be read as a fresh
+    # write, so the replay stops here instead of asking for the data.
+    produced, failure = _send_or_fail(steps[0])
+    if failure:
+        return False, failure
+    failure = _producer_write_failure(produced, expected_id, expected)
+    if failure:
+        return False, failure
+
+    # Step 2 - the authorized owner read. Blocking the owner is not a fix, so
+    # a failed or unverifiable owner read never means "the application is safe".
+    owner_response, failure = _send_or_fail(steps[1])
+    if failure:
+        return False, failure
+    if not (200 <= owner_response.status_code < 300):
+        return False, "authorized_read_failed"
+    owner_digest, failure = _read_digest(owner_response)
+    if failure:
+        return False, f"authorized_read_{failure}"
+    if owner_digest != expected:
+        return False, "authorized_read_digest_mismatch"
+
+    # Step 3 - the unauthorized consumer read. Only a successful read of the
+    # producer's exact content is a disclosure; 403 (or any other refusal)
+    # is a block, and different content is not the recorded disclosure.
+    consumer_response, failure = _send_or_fail(steps[2])
+    if failure:
+        return False, failure
+    if not (200 <= consumer_response.status_code < 300):
+        return False, "blocked"
+    consumer_digest, failure = _read_digest(consumer_response)
+    if failure:
+        return False, f"consumer_read_{failure}"
+    if consumer_digest != expected:
+        return False, "payload_mismatch"
+    still_vulnerable = not policy.authorizes(consumer)
     return still_vulnerable, ("confirmed_disclosure" if still_vulnerable else "blocked")
 
 

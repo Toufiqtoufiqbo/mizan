@@ -415,9 +415,14 @@ def _assertion_body(attack: Attack) -> str:
     # An unreadable state endpoint cannot prove the invariant either way; it
     # is not silently interpreted as a fix or as a breach."""
     if attack.law == "L7":
-        return """    from mizan.confidentiality import replay_l7
+        return """    from mizan.confidentiality import replay_l7, replay_outcome_is_inconclusive
 
     still_observable, state = replay_l7(EVIDENCE, TARGET)
+    # An inconclusive replay proves nothing: a broken producer write must not
+    # be reported as a fixed application.
+    assert not replay_outcome_is_inconclusive(state), (
+        "the L7 replay could not decide the question: " + state
+    )
     assert not still_observable, (EXPECTATION, state)"""
     if attack.law == "L5":
         return """    def call() -> int:
