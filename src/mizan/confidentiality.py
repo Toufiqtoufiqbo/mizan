@@ -177,12 +177,12 @@ class ConfidentialityEvidenceProvider(Protocol):
     def cleanup(self) -> None: ...
 
 
-class _PostgresProvider:
-    """Read-only observer of application-owned L7 event tables.
+class _EventObserver:
+    """Fail-closed logic shared by providers that only read application events.
 
-    The fixture application writes its own cache/queue artifacts and records an
-    event for every HTTP-triggered operation. Mīzān reads those events; it never
-    manufactures them. ``namespace`` is only an evidence label, not a store.
+    ``write`` and ``observe`` never create or mutate application data. They only
+    look up the event the application itself recorded for the inbound request
+    id, and they refuse to classify anything whose identity or digest differs.
     """
 
     operations: tuple[str, ...] = ()
@@ -195,51 +195,18 @@ class _PostgresProvider:
         self.shared_key = shared_key
         self._events: list[dict[str, Any]] = []
 
-    def _connect(self) -> Any:
-        import psycopg
-
-        return psycopg.connect(self.dsn, autocommit=True, connect_timeout=5)
-
     def cleanup(self) -> None:
-        # No application-owned rows may ever be deleted by Mīzān.
+        # No application-owned rows or stream entries may ever be deleted here.
         self._events = []
 
     def events(self) -> list[dict[str, Any]]:
         return [dict(item) for item in self._events]
 
-    @staticmethod
-    def install(dsn: str) -> None:
-        """Deprecated compatibility hook; the application owns its tables."""
-        return None
-
-    def _event(self, request_id: str, operation: str, artifact_id: str) -> dict[str, Any] | None:
-        with self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """SELECT request_id, operation, principal, artifact_id, scope,
-                              digest, granted, occurred_at
-                       FROM l7_events
-                       WHERE request_id = %s AND operation = ANY(%s) AND artifact_id = %s
-                       ORDER BY id DESC LIMIT 1""",
-                    (request_id, list(self.operations), artifact_id),
-                )
-                row = cursor.fetchone()
-        if row is None:
-            return None
-        return {
-            "request_id": row[0],
-            "operation": row[1],
-            "principal": row[2],
-            "artifact_id": row[3],
-            "scope": row[4],
-            "digest": row[5],
-            "granted": bool(row[6]),
-            "occurred_at": row[7],
-            "source": "application_http_operation",
-        }
+    def _event(self, request_id: str, artifact_id: str) -> dict[str, Any] | None:
+        raise NotImplementedError
 
     def write(self, artifact: Artifact) -> None:
-        event = self._event(artifact.request_id, "", artifact.artifact_id)
+        event = self._event(artifact.request_id, artifact.artifact_id)
         if event is None:
             raise LookupError("no application write event for the producer request")
         if event["principal"] != artifact.producer or event["digest"] != artifact.digest():
@@ -247,7 +214,7 @@ class _PostgresProvider:
         self._events.append(event)
 
     def observe(self, artifact_id: str, consumer: str, *, request_id: str = "") -> Observation:
-        event = self._event(request_id, "", artifact_id)
+        event = self._event(request_id, artifact_id)
         if event is None:
             return Observation(
                 artifact_id=artifact_id,
@@ -278,6 +245,102 @@ class _PostgresProvider:
         )
 
 
+class _PostgresProvider(_EventObserver):
+    """Read-only observer of application-owned L7 event tables.
+
+    The fixture application writes its own cache/queue artifacts and records an
+    event for every HTTP-triggered operation. Mīzān reads those events; it never
+    manufactures them. ``namespace`` is only an evidence label, not a store.
+    """
+
+    def _connect(self) -> Any:
+        import psycopg
+
+        return psycopg.connect(self.dsn, autocommit=True, connect_timeout=5)
+
+    @staticmethod
+    def install(dsn: str) -> None:
+        """Deprecated compatibility hook; the application owns its tables."""
+        return None
+
+    def _event(self, request_id: str, artifact_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """SELECT request_id, operation, principal, artifact_id, scope,
+                              digest, granted, occurred_at
+                       FROM l7_events
+                       WHERE request_id = %s AND operation = ANY(%s) AND artifact_id = %s
+                       ORDER BY id DESC LIMIT 1""",
+                    (request_id, list(self.operations), artifact_id),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "request_id": row[0],
+            "operation": row[1],
+            "principal": row[2],
+            "artifact_id": row[3],
+            "scope": row[4],
+            "digest": row[5],
+            "granted": bool(row[6]),
+            "occurred_at": row[7],
+            "source": "application_http_operation",
+        }
+
+
+class _RedisProvider(_EventObserver):
+    """Read-only observer of application-owned L7 events in a Redis stream.
+
+    The Redis application writes the artifact (``SET`` / ``LPUSH``) and records
+    its own operation with ``XADD``. The provider only issues ``XRANGE``; it
+    cannot write content, append events or delete stream entries.
+    """
+
+    stream = "mizan:l7:events"
+
+    def _client(self) -> Any:
+        import redis
+
+        return redis.Redis.from_url(self.dsn, decode_responses=True, socket_connect_timeout=5)
+
+    @staticmethod
+    def install(dsn: str) -> None:
+        """The application owns the stream; there is nothing to install."""
+        return None
+
+    def _event(self, request_id: str, artifact_id: str) -> dict[str, Any] | None:
+        client = self._client()
+        found: dict[str, str] | None = None
+        for _entry_id, fields in client.xrange(self.stream):
+            values = {str(key): str(value) for key, value in fields.items()}
+            if (
+                values.get("request_id") == request_id
+                and values.get("artifact_id") == artifact_id
+                and values.get("operation") in self.operations
+            ):
+                found = values
+        if found is None:
+            return None
+        try:
+            granted = str(found.get("granted", "")).lower() in {"1", "true", "yes"}
+            occurred_at = float(found.get("occurred_at", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+        return {
+            "request_id": found.get("request_id", ""),
+            "operation": found.get("operation", ""),
+            "principal": found.get("principal", ""),
+            "artifact_id": found.get("artifact_id", ""),
+            "scope": found.get("scope", ""),
+            "digest": found.get("digest", ""),
+            "granted": granted,
+            "occurred_at": occurred_at,
+            "source": "application_http_operation",
+        }
+
+
 class PostgresCacheProvider(_PostgresProvider):
     """Evidence adapter for application-performed cache operations."""
 
@@ -291,6 +354,22 @@ class PostgresQueueProvider(_PostgresProvider):
 
     category = PathCategory.QUEUE
     name = "postgres-queue-app-v1"
+    operations = ("queue_publish", "queue_consume")
+
+
+class RedisCacheProvider(_RedisProvider):
+    """Evidence adapter for cache operations performed against real Redis."""
+
+    category = PathCategory.CACHE
+    name = "redis-cache-app-v1"
+    operations = ("cache_write", "cache_read")
+
+
+class RedisQueueProvider(_RedisProvider):
+    """Evidence adapter for queue operations performed against real Redis."""
+
+    category = PathCategory.QUEUE
+    name = "redis-queue-app-v1"
     operations = ("queue_publish", "queue_consume")
 
 
@@ -440,6 +519,10 @@ def provider_from_evidence(data: dict[str, Any], dsn: str) -> ConfidentialityEvi
         return PostgresCacheProvider(dsn, namespace=namespace, shared_key=shared_key)
     if name == PostgresQueueProvider.name:
         return PostgresQueueProvider(dsn, namespace=namespace, shared_key=shared_key)
+    if name == RedisCacheProvider.name:
+        return RedisCacheProvider(dsn, namespace=namespace, shared_key=shared_key)
+    if name == RedisQueueProvider.name:
+        return RedisQueueProvider(dsn, namespace=namespace, shared_key=shared_key)
     return None
 
 

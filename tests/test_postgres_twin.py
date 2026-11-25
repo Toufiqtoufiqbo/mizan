@@ -1335,7 +1335,7 @@ def test_session_created_during_preflight_blocks_every_drop(source, monkeypatch)
 
 
 @pytest.mark.postgres_integration
-def test_session_that_disappears_during_preflight_allows_cleanup(source) -> None:
+def test_session_that_disappears_during_preflight_allows_cleanup(source, monkeypatch) -> None:
     import psycopg
 
     instance, dsn = source
@@ -1346,20 +1346,47 @@ def test_session_that_disappears_during_preflight_allows_cleanup(source) -> None
     names = [baseline.name, w0, w1]
     holder: list[Any] = []
     connected = threading.Event()
+    close_session = threading.Event()
+    observed = threading.Event()
+    errors: list[str] = []
+    original_wait = twin_module._wait_for_no_sessions
+
+    def wait_then_close(*args, **kwargs):
+        """Close the backend only after preflight has really seen it."""
+        if args and args[1] == w0 and not observed.is_set():
+            # An immediate check must still find the session; otherwise the
+            # test would pass without exercising the disappearing-session race.
+            if not original_wait(*args, timeout=0):
+                errors.append("preflight did not observe the vanishing session")
+                observed.set()
+                close_session.set()
+                return original_wait(*args, **kwargs)
+            observed.set()
+            close_session.set()
+        return original_wait(*args, **kwargs)
+
+    monkeypatch.setattr(twin_module, "_wait_for_no_sessions", wait_then_close)
 
     def connect_then_close() -> None:
-        holder.append(
-            psycopg.connect(database_dsn(instance.dsn, w0, application_name="vanishing-client"), connect_timeout=5)
-        )
-        connected.set()
-        time.sleep(0.2)
-        holder[0].close()
+        try:
+            holder.append(
+                psycopg.connect(database_dsn(instance.dsn, w0, application_name="vanishing-client"), connect_timeout=5)
+            )
+            connected.set()
+            if not close_session.wait(timeout=30):
+                errors.append("preflight never reached the vanishing session")
+                return
+            holder[0].close()
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
 
     thread = threading.Thread(target=connect_then_close)
     try:
         thread.start()
         assert connected.wait(timeout=10)
         cleaned = cleanup_run(DSN_ENV, workspace, instance.run_id)
+        assert observed.is_set(), "preflight never checked the vanishing session"
+        assert not errors, errors
         assert set(cleaned) == set(names)
         assert not any(_database_exists(dsn, name) for name in names)
     finally:
