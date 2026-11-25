@@ -1,78 +1,96 @@
-# v2 — real Redis application event source (P1 slice)
+# v2 — real Redis application event source
 
-Branch: `feat/v2-real-event-sources` (stacked on `feat/product-completion-v1`,
-HEAD `9c38e6a6acc2327768df234657fe7cdb7ec502dc`). No change to `main` and no
-merge of PR #14.
+Base: `main` at merge commit `8aef41886d442b3361df91be5b79fdaa5553d240`
+(PR #14 was merged). PR #15 is open and **not** merged; its branch is
+`feat/v2-real-event-sources`.
 
-This phase addresses the first P1 gap: the v1 L7 evidence came from an
-application whose real backend was PostgreSQL. The verified integration now
-includes a **real Redis server** with the application performing the cache and
-queue operations itself.
+This phase adds a second real backend for L7 evidence: a Redis server whose
+application performs the operations itself. It does not redesign L7, add new
+categories, or claim production readiness.
 
-## 1. What changed
+## 1. Redis support as it stands
 
-| Area | Change |
-| --- | --- |
-| `src/mizan/confidentiality.py` | Extracted `_EventObserver` (the shared fail-closed logic) and added `_RedisProvider`, `RedisCacheProvider`, `RedisQueueProvider`; extended `provider_from_evidence` |
-| `tests/fixtures/external_apps/l7_redis/app.py` (new) | Flask application performing `SET`/`GET` (cache) and `LPUSH`/`LINDEX` (queue) against a real Redis server, recording its own events with `XADD` |
-| `tests/test_l7_redis_source.py` (new) | 8 integration tests against a real Redis server |
-| `tests/test_postgres_twin.py` | Deterministic vanishing-session preflight test (flake remediation) |
-| `pyproject.toml` | `redis>=5.0` dev dependency, `redis_integration` marker |
-| `.github/workflows/mizan.yml` | Stage H with a real `redis:7-alpine` service; stages A and S updated |
+- **PostgreSQL support**: unchanged v1 path (`.[postgres]` dev dependency),
+  application-owned `l7_events` table, observers `PostgresCacheProvider` /
+  `PostgresQueueProvider`.
+- **Redis support**: separate optional extra `pip install -e '.[redis]'`. The
+  base install does not pull in a Redis client, and installing Redis does not
+  require the `dev` group. `RedisCacheProvider` / `RedisQueueProvider` observe
+  application-owned events in a Redis stream.
+- No RabbitMQ, Kafka, logs or metrics support is claimed.
 
-## 2. Trust model
+## 2. Application-owned evidence
 
-The application, not Mīzān, owns the data and the audit trail:
+The fixture application (`tests/fixtures/external_apps/l7_redis/app.py`)
+performs:
 
-1. `POST /artifacts` writes the content with Redis `SET` and stores the owner,
-   then appends a `cache_write` event to the `mizan:l7:events` stream with the
-   inbound `X-Mizan-Request-Id`, principal, artifact id, scope, digest and
-   grant decision.
-2. `GET /artifacts/<id>` reads with `GET` and appends a `cache_read` event.
-3. `POST /messages` / `POST /messages/<id>/consume` use Redis list operations
-   and append `queue_publish` / `queue_consume` events.
+- cache: `SET` content + owner, `GET` on read;
+- queue: `RPUSH` + `LRANGE`, which is a **visibility / indirect read**, not a
+  destructive message consumption;
+- event recording: `XADD` into the namespaced stream, with the inbound
+  `X-Mizan-Request-Id`, principal, artifact id, scope, digest and grant result.
 
-`RedisCacheProvider` and `RedisQueueProvider` issue **only `XRANGE`**. They
-never write content, append events or delete keys. `write()` and `observe()`
-still fail closed on a missing event, identity mismatch or digest mismatch.
-The test `test_redis_provider_is_read_only` asserts the stream length and all
-`mizan:l7:*` keys are unchanged after provider use and `cleanup()`.
+Mīzān only reads the stream with bounded `XREVRANGE`. It never appends events,
+writes content, deletes keys or deletes stream entries.
 
-## 3. Flake remediation
+## 3. Stream observation limit
 
-`test_session_that_disappears_during_preflight_allows_cleanup` used a fixed
-`time.sleep(0.2)` while the preflight drain window is 1.0 s, so the session was
-usually gone before preflight ever saw it — the test passed without exercising
-the race it was named for. It now synchronises on the preflight hook:
+`_RedisProvider._event()` reads at most the newest **512** stream entries
+(`XREVRANGE … COUNT 512`) and correlates on request id + artifact id. Older
+events are not visible and fail closed as `missing_event` / inconclusive; they
+are never treated as a secure result. This is a deliberate limitation of the
+observer, not a new event-store architecture.
 
-- the client keeps its connection open until preflight has observed the backend;
-- an immediate `_wait_for_no_sessions(..., timeout=0)` must still find it;
-- only then is the connection closed, and the real drain must complete.
+## 4. Safe, namespace-scoped cleanup
 
-The 14 reproduction runs before the change (6 isolated, 8 during a concurrent
-benchmark) all passed, so there was no failing run to debug; the fix removes
-the timing dependence rather than masking a speculative failure. The second
-reported test (`..._are_idempotent`) could not be reproduced in any of those
-runs, so it was deliberately left unchanged.
+Every key is prefixed by a per-session namespace
+`mizan:test:<uuid>-<pid>:l7`, injected via `MIZAN_REDIS_NAMESPACE`. Keys are:
 
-## 4. Results
+```text
+mizan:test:<run_id>:l7:artifact:<id>
+mizan:test:<run_id>:l7:owner:<id>
+mizan:test:<run_id>:l7:queue:<id>
+mizan:test:<run_id>:l7:consumer:<id>
+mizan:test:<run_id>:l7:events
+```
 
-- `tests/test_l7_redis_source.py`: **8 passed** against a real Redis server
-  (Redis 5.0.14 locally, Redis 7 in CI).
-- Focused regression batch: **122 passed**, 1 pre-existing warning (L7 contract,
-  application-backed tests, replay/regression, L4/L6, law states, packaging,
-  CLI, control-plane audit).
-- `ruff check .` and `ruff format --check .`: clean (193 files).
-- CI: a new mandatory stage **H — Redis event source** runs the integration
-  suite with a real Redis service and fails if any test is skipped.
+Cleanup uses `SCAN MATCH <namespace>:*` and deletes only matching keys. There
+is no database-wide deletion command in the fixture, the tests or the
+provider. Tests assert that an unrelated key survives cleanup and that two
+namespaces cannot delete each other's data.
 
-## 5. Remaining scope
+## 5. Ownership fails closed
 
-- RabbitMQ, logs and metrics are **not** implemented in this slice.
-- The Redis fixture proves cache and queue confidentiality for one application
-  flow; distributed consumers and retry races remain outside scope.
-- Stage H uses a container service; local runs need `MIZAN_TEST_REDIS_DSN` or a
-  `redis-server` binary via `MIZAN_REDIS_SERVER`.
+The previous `owner = get(...) or principal` fallback is gone. When ownership
+metadata is absent, the secure variant returns 403 for every caller and
+records `granted=false`; the caller is never promoted to owner and no
+`confirmed_disclosure` can be produced. Only the deliberately vulnerable
+variant ignores authorization, and that is documented as fixture weakness.
+Content and ownership are written together in one atomic Redis pipeline, so
+content without an owner is never a valid artifact.
 
-Verdict for this slice: **PASS** — a real Redis backend now produces
-application-owned evidence, and the preflight race test is deterministic.
+## 6. Verification
+
+- `tests/test_l7_redis_source.py`: 14 passed (real Redis 5 locally, Redis 7 in
+  the CI service).
+- `tests/test_confidentiality.py`: 4 passed.
+- `tests/test_postgres_twin.py`: 97 passed, 3 skipped (POSIX-only signal tests).
+- Full corpus: 842 collected; executed in four disjoint batches: 128 passed,
+  283 passed, 300 passed + 3 skipped, 128 passed → **839 passed, 3 skipped,
+  0 failed** on the clean runs. One earlier PostgreSQL-heavy batch showed 6
+  transient failures under load; the named tests passed individually and a
+  rerun of the same batch passed 300/3. This known flake is documented in
+  `PR15_REDIS_SAFETY_REPORT.md`, not hidden or removed.
+- `ruff check .` / `ruff format --check .`: clean (194 files).
+- Benchmark: L4 1 finding, L6 3 findings, L7 cache/queue vulnerable
+  `confirmed_disclosure` / secure `blocked`, zero problems.
+- CI: stage **H — Redis event source** runs with a real Redis service; A, B,
+  B2, C, D, E, F, G and S remain mandatory.
+
+## 7. Limitations
+
+- Queue tests prove visibility/read confidentiality, not destructive
+  consumption or retry semantics.
+- Only the newest 512 stream events are observable.
+- Redis tests require a real server; they are skipped locally when none is
+  configured, but stage H fails if any integration test skips in CI.

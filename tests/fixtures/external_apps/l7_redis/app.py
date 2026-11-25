@@ -1,12 +1,16 @@
 """Independent L7 fixture application backed by a real Redis server.
 
-The application performs the cache and queue operations itself (``SET``/``GET``
-and ``LPUSH``/``LINDEX``) and records its own operations in a Redis stream with
-the inbound ``X-Mizan-Request-Id``. Mīzān only reads that stream with XRANGE;
-it never writes content or events.
+The application performs the queue-visibility and cache operations itself
+(``LPUSH``/``LRANGE`` and ``SET``/``GET``) and records its own operations in a
+Redis stream with the inbound ``X-Mizan-Request-Id``. Mīzān only reads that
+stream with XRANGE; it never writes content or events.
+
+Every key is prefixed by the test-owned namespace from
+``MIZAN_REDIS_NAMESPACE``. There is no database-wide deletion anywhere here.
 
 Two variants: ``vulnerable`` lets Bob read Alice's data, ``secure`` does not
-while Alice still can.
+while Alice still can. Missing ownership metadata never grants access in the
+secure variant.
 """
 
 from __future__ import annotations
@@ -20,15 +24,19 @@ import redis
 from flask import Flask, jsonify, request
 
 TOKENS = {"alice": "twin-alice", "bob": "twin-bob"}
-EVENT_STREAM = "mizan:l7:events"
 
 
-def create_app(variant: str = "secure", *, dsn: str | None = None) -> Flask:
+def create_app(variant: str = "secure", *, dsn: str | None = None, namespace: str | None = None) -> Flask:
     if variant not in {"vulnerable", "secure"}:
         raise ValueError(f"unknown L7 Redis variant {variant!r}")
     app = Flask(__name__)
     app.config["VARIANT"] = variant
     app.config["DSN"] = dsn or os.environ.get("MIZAN_TEST_REDIS_DSN") or ""
+    prefix = namespace or os.environ.get("MIZAN_REDIS_NAMESPACE") or "mizan:l7"
+    app.config["PREFIX"] = prefix
+
+    def key(part: str) -> str:
+        return f"{prefix}:{part}"
 
     def client() -> Any:
         return redis.Redis.from_url(app.config["DSN"], decode_responses=True, socket_connect_timeout=5)
@@ -51,7 +59,7 @@ def create_app(variant: str = "secure", *, dsn: str | None = None) -> Flask:
         granted: bool,
     ) -> None:
         connection.xadd(
-            EVENT_STREAM,
+            key("events"),
             {
                 "request_id": request_id,
                 "operation": operation,
@@ -80,8 +88,12 @@ def create_app(variant: str = "secure", *, dsn: str | None = None) -> Flask:
         scope = str(body.get("scope", "tenant-a"))
         digest = hashlib.sha256(content.encode()).hexdigest()
         connection = client()
-        connection.set(f"mizan:l7:artifact:{artifact_id}", content)
-        connection.set(f"mizan:l7:owner:{artifact_id}", principal)
+        # Content and ownership are written together: content without an owner
+        # is never a valid artifact.
+        pipeline = connection.pipeline(transaction=True)
+        pipeline.set(key(f"artifact:{artifact_id}"), content)
+        pipeline.set(key(f"owner:{artifact_id}"), principal)
+        pipeline.execute()
         record(
             connection,
             request.headers.get("X-Mizan-Request-Id", ""),
@@ -100,13 +112,14 @@ def create_app(variant: str = "secure", *, dsn: str | None = None) -> Flask:
         if principal is None:
             return jsonify({"error": "unauthorized"}), 401
         connection = client()
-        key = f"mizan:l7:artifact:{artifact_id}"
-        stored = connection.get(key)
+        stored = connection.get(key(f"artifact:{artifact_id}"))
         if stored is None:
             return jsonify({"error": "not found"}), 404
         content = str(stored)
-        owner = connection.get(f"mizan:l7:owner:{artifact_id}") or principal
-        granted = principal == str(owner) or variant == "vulnerable"
+        owner = connection.get(key(f"owner:{artifact_id}"))
+        # Fail closed: never promote the caller to owner when metadata is gone.
+        # Only the deliberately vulnerable variant ignores authorization.
+        granted = variant == "vulnerable" or (owner is not None and principal == str(owner))
         digest = hashlib.sha256(content.encode()).hexdigest()
         record(
             connection,
@@ -137,8 +150,11 @@ def create_app(variant: str = "secure", *, dsn: str | None = None) -> Flask:
             return jsonify({"error": "invalid"}), 400
         digest = hashlib.sha256(content.encode()).hexdigest()
         connection = client()
-        connection.rpush(f"mizan:l7:queue:{message_id}", content)
-        connection.set(f"mizan:l7:consumer:{message_id}", intended)
+        pipeline = connection.pipeline(transaction=True)
+        # LPUSH + LRANGE is a queue *visibility* read, not a destructive pop.
+        pipeline.rpush(key(f"queue:{message_id}"), content)
+        pipeline.set(key(f"consumer:{message_id}"), intended)
+        pipeline.execute()
         record(
             connection,
             request.headers.get("X-Mizan-Request-Id", ""),
@@ -157,13 +173,12 @@ def create_app(variant: str = "secure", *, dsn: str | None = None) -> Flask:
         if principal is None:
             return jsonify({"error": "unauthorized"}), 401
         connection = client()
-        key = f"mizan:l7:queue:{message_id}"
-        messages = connection.lrange(key, 0, 0)
+        messages = connection.lrange(key(f"queue:{message_id}"), 0, 0)
         if not messages:
             return jsonify({"error": "not found"}), 404
         content = str(messages[0])
-        intended = connection.get(f"mizan:l7:consumer:{message_id}")
-        granted = principal == str(intended) or variant == "vulnerable"
+        intended = connection.get(key(f"consumer:{message_id}"))
+        granted = variant == "vulnerable" or (intended is not None and principal == str(intended))
         digest = hashlib.sha256(content.encode()).hexdigest()
         record(
             connection,

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -293,12 +294,20 @@ class _PostgresProvider(_EventObserver):
 class _RedisProvider(_EventObserver):
     """Read-only observer of application-owned L7 events in a Redis stream.
 
-    The Redis application writes the artifact (``SET`` / ``LPUSH``) and records
-    its own operation with ``XADD``. The provider only issues ``XRANGE``; it
-    cannot write content, append events or delete stream entries.
+    The Redis application writes the artifact (``SET`` / ``RPUSH``) and records
+    its own operation with ``XADD``. The provider only issues bounded
+    ``XREVRANGE`` reads: it cannot write content, append events or delete any
+    stream entry. Only the newest ``max_entries`` events are observable; older
+    ones fail closed as missing evidence rather than being guessed at.
     """
 
+    max_entries = 512
     stream = "mizan:l7:events"
+
+    def __init__(self, dsn: str, namespace: str, *, shared_key: bool = False, stream: str | None = None) -> None:
+        super().__init__(dsn, namespace, shared_key=shared_key)
+        prefix = os.environ.get("MIZAN_REDIS_NAMESPACE", "")
+        self.stream = stream or (f"{prefix}:events" if prefix else "mizan:l7:events")
 
     def _client(self) -> Any:
         import redis
@@ -312,33 +321,31 @@ class _RedisProvider(_EventObserver):
 
     def _event(self, request_id: str, artifact_id: str) -> dict[str, Any] | None:
         client = self._client()
-        found: dict[str, str] | None = None
-        for _entry_id, fields in client.xrange(self.stream):
+        # Bounded, newest-first read: never an unbounded scan of the stream.
+        for _entry_id, fields in client.xrevrange(self.stream, count=self.max_entries):
             values = {str(key): str(value) for key, value in fields.items()}
             if (
                 values.get("request_id") == request_id
                 and values.get("artifact_id") == artifact_id
                 and values.get("operation") in self.operations
             ):
-                found = values
-        if found is None:
-            return None
-        try:
-            granted = str(found.get("granted", "")).lower() in {"1", "true", "yes"}
-            occurred_at = float(found.get("occurred_at", 0) or 0)
-        except (TypeError, ValueError):
-            return None
-        return {
-            "request_id": found.get("request_id", ""),
-            "operation": found.get("operation", ""),
-            "principal": found.get("principal", ""),
-            "artifact_id": found.get("artifact_id", ""),
-            "scope": found.get("scope", ""),
-            "digest": found.get("digest", ""),
-            "granted": granted,
-            "occurred_at": occurred_at,
-            "source": "application_http_operation",
-        }
+                try:
+                    granted = str(values.get("granted", "")).lower() in {"1", "true", "yes"}
+                    occurred_at = float(values.get("occurred_at", 0) or 0)
+                except (TypeError, ValueError):
+                    return None
+                return {
+                    "request_id": values.get("request_id", ""),
+                    "operation": values.get("operation", ""),
+                    "principal": values.get("principal", ""),
+                    "artifact_id": values.get("artifact_id", ""),
+                    "scope": values.get("scope", ""),
+                    "digest": values.get("digest", ""),
+                    "granted": granted,
+                    "occurred_at": occurred_at,
+                    "source": "application_http_operation",
+                }
+        return None
 
 
 class PostgresCacheProvider(_PostgresProvider):

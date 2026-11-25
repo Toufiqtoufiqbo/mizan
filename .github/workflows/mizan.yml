@@ -472,7 +472,10 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install
+      - name: Install the standalone Redis extra
+        run: pip install -e ".[redis]"
+
+      - name: Install dev tools
         run: pip install -e ".[dev]"
 
       - name: Redis-backed L7 integration
