@@ -12,8 +12,8 @@ Statuses: `supported` (implemented and verified by vulnerable+secure tests),
 | L5 (POST races) | supported | partial | POST-only race probe; deterministic barrier |
 | L6 (collection bounds) | supported | supported | declared bound + persisted row counts (`tests/test_sqlite_l6.py`) |
 | L6 (single-use) | supported | supported | declared single-use + persisted consumption |
-| L7 cache | supported | supported | application-backed HTTP probe + application events (PostgreSQL-backed fixture only) |
-| L7 queue | supported | supported | application-backed HTTP probe + application events (PostgreSQL-backed fixture only) |
+| L7 cache | supported | supported | application-backed HTTP probe + application events (PostgreSQL fixture, and Redis fixture via `.[redis]`) |
+| L7 queue | supported | supported | application-backed HTTP probe + application events (PostgreSQL fixture, and Redis fixture via `.[redis]`; queue visibility/read semantics) |
 | L7 logs | unsupported | unsupported | no provider |
 | L7 metrics | unsupported | unsupported | no provider |
 | L7 background jobs | unsupported | unsupported | deferred from v1 |

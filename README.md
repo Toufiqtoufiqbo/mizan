@@ -35,6 +35,18 @@ pip install -e '.[postgres]'
 Missing driver produces an actionable error naming that command rather than a
 bare `ImportError`.
 
+Redis support is a separate optional extra; PostgreSQL and Redis do not imply
+each other:
+
+```bash
+pip install -e '.[redis]'
+```
+
+The Redis L7 fixture uses a real Redis server reachable through
+`MIZAN_TEST_REDIS_DSN`. Its keys live under a per-test-session namespace
+(`MIZAN_REDIS_NAMESPACE`), and cleanup deletes only that namespace. See
+`V2_REAL_EVENT_SOURCE_REPORT.md` for the verified scope and limitations.
+
 ## v1 quickstart
 
 ```bash
