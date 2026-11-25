@@ -50,7 +50,7 @@ Candidate principals are the target identities that have a token, a non-empty
 id and are testable. They are partitioned by the trusted policy:
 
 ```python
-authorized   = sorted((p for p in principals if     policy.authorizes(p.id)), key=lambda p: p.id)
+authorized = sorted((p for p in principals if policy.authorizes(p.id)), key=lambda p: p.id)
 unauthorized = sorted((p for p in principals if not policy.authorizes(p.id)), key=lambda p: p.id)
 ```
 
@@ -165,10 +165,11 @@ executed as five disjoint batches; every collected test is accounted for.
 ## 8. Final SHA and CI
 
 - Baseline HEAD: `00c07fc1ce311b55414336a71946249deafc4ddf`.
-- Final SHA: the single commit that introduces this report on
-  `feat/product-completion-v1`. The one-commit rule means the commit cannot
-  embed its own hash (it would change it), so the exact SHA and the CI run id /
-  conclusion are recorded in the PR #14 metadata for this HEAD.
+- Final SHA: the HEAD of `feat/product-completion-v1` that carries this report.
+  `a196d226e672db417f98882feb2bd98d3be4c589` introduces the fix; a follow-up
+  formatting commit carries this ruff-formatted report (the report cannot embed
+  its own hash without changing it). The exact HEAD SHA and the CI run id /
+  conclusion are recorded in the PR #14 metadata.
 - CI: the workflow run triggered by that HEAD; job-by-job conclusions are
   recorded in PR #14.
 
