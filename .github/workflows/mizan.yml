@@ -1,4 +1,4 @@
-# Mīzān CI - four mandatory stages and one optional job.
+# Mīzān CI - ten mandatory stages and one optional job.
 #
 # A: static + unit        - ruff, formatting, the unit suite
 # B: PostgreSQL           - a disposable database, the real round trip.
@@ -11,12 +11,17 @@
 # C: security regression  - the regression tests and the proof replay. This is
 #                          the gate: an attack that works fails the build.
 # D: benchmark            - the labelled corpus, reported not asserted.
+# E: Mīzān scans Mīzān    - self-scan isolation, accurate counts, fail-closed gate.
+# F: independent application - standalone Flask target, clean + vulnerable variants.
+# G: cross-framework gate - mandatory cross-framework regression gate.
+# H: Redis event source   - real Redis service; standalone `.[redis]` extra;
+#                          no skipped Redis tests allowed in this stage.
 # S: status summary       - PASSED / FAILED / SKIPPED / NOT CONFIGURED /
 #                          NOT EXECUTED for every stage, without inventing a
 #                          pass for a job that did not run.
 #
-# External-target testing is opt-in (see the last job): ordinary CI never
-# attacks anything it does not own.
+# Optional job: G - external target (opt-in); ordinary CI never attacks
+# anything it does not own.
 
 name: mizan
 
