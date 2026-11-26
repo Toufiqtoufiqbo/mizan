@@ -24,6 +24,11 @@ does not cover global quotas or `maxItems` input bounds; L5 is POST-only.
 L7 `supported` here means: a real HTTP operation executed by the fixture
 application, evidence recorded by the application, and both authorized and
 unauthorized consumers verified. It does **not** mean a mock/synthetic artifact
-was accepted (none is), nor that Redis/RabbitMQ, logs or metrics are supported.
-The verified fixture uses PostgreSQL as its real backend; this is the stated
-limitation of the v1 provider integration.
+was accepted (none is). **RabbitMQ, logs, metrics and background jobs are not
+supported.** L7 cache and queue are verified against real PostgreSQL fixtures
+and a real Redis fixture (`pip install .[redis]`, CI stage H); Redis support is
+not a claim of RabbitMQ or other queues. Queue `supported` means queue
+*visibility / read* confidentiality, not destructive consumption. Only the
+newest 512 Redis stream events are observable; older events fail closed. See
+`MIZAN_V1_SCOPE.md`, `V2_REAL_EVENT_SOURCE_REPORT.md`,
+`POST_V1_TECHNICAL_DEBT.md`.

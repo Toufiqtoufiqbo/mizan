@@ -1,7 +1,10 @@
 # Mīzān v1 — frozen product scope
 
-Baseline: `06aa2815dcb5935d84481455fef62062ea588567` (merged main; CI #291
-success on this exact SHA after rerun of the single transient A-job failure).
+Baseline: merged `main`. Frozen v1 scope unchanged by PR #14
+(`8aef41886d442b3361df91be5b79fdaa5553d240`, PR #14 merge) and by PR #15
+Redis L7 verification (merge `665b5e8caea4c41fce83846a97a24d1dae3dcd70`).
+CI must succeed on merged main; a known transient PostgreSQL flake under load
+is tracked in `POST_V1_TECHNICAL_DEBT.md`, not hidden or retried away.
 
 ## In scope
 
@@ -13,7 +16,7 @@ success on this exact SHA after rerun of the single transient A-job failure).
 | L4 | Field-based authority creation / mass assignment, on both backends |
 | L5 | Atomicity / TOCTOU on supported methods (POST) |
 | L6 | Per-principal collection bounds and single-use capabilities, on both backends |
-| L7 | Cache and queue path confidentiality via real application HTTP operations (PostgreSQL-backed fixture only) |
+| L7 | Cache and queue path confidentiality via real application HTTP operations (real PostgreSQL and real Redis backends; cache and queue only) |
 
 Providers and backends must report capability per category, not as a single
 umbrella claim.

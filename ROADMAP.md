@@ -77,6 +77,8 @@
       database state, independent of L5 execution accounting (Phase VIII)
 - [x] **v1 law scope closed**: generic/SQLite L4 and L6 reach verified parity;
       L7 cache and queue providers are implemented with real PostgreSQL state
+      and a real Redis backend (`.[redis]`, PR #15; queue visibility/read
+      semantics; `POST_V1_TECHNICAL_DEBT.md`)
 - [ ] **Full L7 coverage**: logs, metrics and background jobs remain deferred
       (see `MIZAN_V1_SCOPE.md`)
 - [ ] **Multi-stack independent PostgreSQL validation**: only one independent
@@ -102,7 +104,8 @@
       default credential, strict request models, a full ownership boundary,
       target validation (scheme, host, port, credentials in the URL)
 - [x] **SARIF 2.1.0 export** with stable rule identifiers and a validator
-- [x] **Six CI stages**, every mandatory stage failing when its suite is skipped
+- [x] **Ten CI stages (A, B, B2, C, D, E, F, G, H, S)**, every mandatory stage
+      failing when its suite is skipped; optional external-target job may skip
 - [x] **Native Windows measurements** (`reports/MIZAN_0.2.2_WINDOWS_PERFORMANCE.md`)
 
 Testing somebody else's application found six real defects in the engine, among
@@ -138,7 +141,9 @@ them a false positive on every successful request.
       parties can add cases
 ## Later (v0.3 - the rest of the laws)
 
-- [ ] **L7** - path confidentiality (cache, queue, logs, metrics)
+- [ ] **L7 logs & metrics** - path confidentiality for logs and metrics
+      (cache and queue are already supported in v1; logs/metrics/background
+      jobs remain deferred, see `MIZAN_V1_SCOPE.md`)
 - [ ] **L6** - full cardinality coverage (single-use tokens, bounded counters)
 - [ ] **Process mining** - derive the state machine from event logs and report
       workflow violations (shipping before payment, approving twice, ...)

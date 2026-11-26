@@ -9,7 +9,9 @@ clean sequential batch. Post-merge CI #291 initially failed an unrelated
 adversarial-store case and succeeded on rerun; no safety check was weakened.
 Impact: possible resource contention under parallel load; ownership and
 destructive-drop safeguards were not changed. Reproduce with concurrent
-benchmark + full suite; do not mask with retries.
+benchmark + full suite; do not mask with retries. PR #15 also documented 6
+transient failures in a PostgreSQL-heavy batch under load that passed on a
+clean rerun (see `PR15_REDIS_SAFETY_REPORT.md` §11).
 
 ## P1 — L5 PostgreSQL scope
 
@@ -18,10 +20,15 @@ documented as unsupported rather than claimed.
 
 ## P1 — L7 fixture backend scope
 
-L7 cache/queue detection is verified through real HTTP operations of an
-independent fixture application whose storage is PostgreSQL. This is not a
-general Redis/RabbitMQ integration; a production application would need an
-equivalent trusted event source.
+L7 cache/queue detection is verified through real HTTP operations of
+independent fixture applications whose storage is PostgreSQL or Redis
+(`RedisCacheProvider` / `RedisQueueProvider`, `pip install .[redis]`, CI stage
+H; PR #15). It is not a general RabbitMQ/Kafka integration; a production
+application needs an equivalent trusted event source. Queue support means queue
+*visibility / read* confidentiality, not destructive consumption. Only the
+newest 512 Redis stream events are observable; older events fail closed. Redis
+test cleanup is namespace-scoped (`SCAN MATCH <namespace>:*`); no database-wide
+deletion command is used, and missing ownership metadata fails closed (403).
 
 ## P2 — L7 additional categories
 
