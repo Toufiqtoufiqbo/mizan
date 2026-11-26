@@ -1,8 +1,10 @@
 # v2 — real Redis application event source
 
 Base: `main` at merge commit `8aef41886d442b3361df91be5b79fdaa5553d240`
-(PR #14 was merged). PR #15 is open and **not** merged; its branch is
-`feat/v2-real-event-sources`.
+(PR #14 was merged). PR #15 was merged into `main` on
+`2026-11-25T23:57:44Z` as merge commit
+`665b5e8caea4c41fce83846a97a24d1dae3dcd70`; its head was
+`feat/v2-real-event-sources` at `423504396784ebeebcfcbcf87729b30d20522417`.
 
 This phase adds a second real backend for L7 evidence: a Redis server whose
 application performs the operations itself. It does not redesign L7, add new

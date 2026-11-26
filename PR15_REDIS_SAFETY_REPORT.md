@@ -1,7 +1,10 @@
 # PR #15 — Redis safety fix report
 
 Base: `main` at merge commit `8aef41886d442b3361df91be5b79fdaa5553d240`
-(PR #14 merged). PR #15 remains open and unmerged.
+(PR #14 merged). PR #15 was merged into `main` by `Toufiqtoufiqbo` on
+`2026-11-25T23:57:44Z` as merge commit
+`665b5e8caea4c41fce83846a97a24d1dae3dcd70`; it is now `closed / merged`.
+The verified head was `423504396784ebeebcfcbcf87729b30d20522417`.
 
 ## 1. Original problem
 
@@ -144,6 +147,9 @@ result; its own CI run is recorded in PR #15.
 
 Fix commit: `ed523c5648924b176b38b51674e6cbe75f8ec9ba`
 (the commit with all code and test changes, verified by CI #298).
+Final verified head: `423504396784ebeebcfcbcf87729b30d20522417` (CI #299).
+Merged into `main` as `665b5e8caea4c41fce83846a97a24d1dae3dcd70`; only those
+three SHAs were involved — no history rewrite.
 
 ## 16. Remaining limitations
 
